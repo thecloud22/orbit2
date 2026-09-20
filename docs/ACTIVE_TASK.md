@@ -32,6 +32,10 @@ are closed and recorded in `docs/decisions.md`.
 | 13 | A judged step | Shape fixed, not built in slice 1. One answer from a declared list, against pinned policy |
 | 14 | Step kinds and values | Ten kinds, five value types, and how a step names a value |
 
+Amended since: evidence on disk now and S3 later with **redaction deferred** — safe only because
+capture starts after sign-in; a registered credential held **encrypted in the store**, written out
+of band, decrypted only in the worker; provider and model chosen in an **environment file**.
+
 ## What slice 1 will knowingly not satisfy
 
 Carried from day one so that none of it is discovered at the end. Each is a decision, not an
@@ -57,6 +61,7 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | The application slice 1 runs against | **Karthik** | To be provided. Legacy, server-rendered, WebSEAL-fronted. |
 | One accessibility snapshot of a real WebSEAL page | **Karthik** | Determines whether the locator ladder in Decision 11 needs a rung below structural anchors. Cheap to get, expensive to discover late. |
 | The locator's stored shape | Claude | One typed column on `step`, and the only hole left in Decision 14. To be settled from **measurement** against `apps/legacy-portal`, not from argument. |
+| The schema and its migrations | Claude | **In progress.** Zod at the boundaries, the database owning the invariants. Drizzle over raw SQL so the grants and triggers stay visible. |
 | The closed set of typed errors | Claude | §13's matrix, stored on every failed run for good. Never enumerated. |
 | The closed set of event kinds | Claude | §10's structured events — the record a run is reconstructed from. Never enumerated. |
 
@@ -83,6 +88,7 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | 2026-09-20 | Decisions 9–12 recorded: TypeScript/Node, React with headless primitives, *model maps Orbit verifies*, exact resolution. |
 | 2026-09-20 | Engineering instructions moved to `docs/engineering/`; all documentation now under `docs/`. |
 | 2026-09-20 | Interface designed as 23 screens on a canvas, in the customer palette. Home drawn in both states, day one and in use. |
+| 2026-09-20 | Amendments: redaction deferred with a sign-in interlock; S3 named as the eventual store; a registered credential held encrypted and written out of band; provider and model moved to configuration. |
 | 2026-09-20 | Decision 14 recorded: ten step kinds, five value types, how a step names a value, the authority flag, `for each` semantics, and calculation deferred. |
 | 2026-09-20 | Practice portals moved to `apps/`; ADR references from another project removed; repo made a pnpm workspace with a strict shared tsconfig. |
 | 2026-09-20 | Decision 13 recorded (a judged step). Amendments: Decision 5 takes a set of applications; Decision 4 adds the authoring reasoning record and rules out video; Decision 8 fixes `us-east-1`, United States only; Decision 10 makes tokens swappable at run time; Decision 11 records the recording route and its three cautions. |

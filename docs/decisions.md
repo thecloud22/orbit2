@@ -74,6 +74,9 @@ a later change to a constraint is recognised as reopening a decision rather than
 | Resolution is exact. Ambiguity is a refusal, not a tie to be broken. | [Decision 12](#decision-12--resolution-at-the-publish-gate-is-exact). |
 | The deployment is United States only. | [Decision 8](#decision-8--where-this-runs) — `us-east-1`. |
 | Customers may ask for their own branding. | [Decision 10](#decision-10--frontend-stack-and-design-system) item 1 — tokens resolved per workspace at run time. |
+| The provider and the model are changed in an environment file, including within Bedrock. | [Decision 7](#decision-7--which-model-and-where-it-runs) item 1. |
+| Evidence on disk now, S3 in production. Redaction later. | [Decision 4](#decision-4--evidence-storage) items 13 and 14. |
+| A registered credential is held by the deployment, encrypted, written out of band. | [Decision 5](#decision-5--what-a-registered-application-is) item 5. |
 | A step will eventually need a model to judge something. | [Decision 13](#decision-13--a-judged-step-and-what-holds-it), whose shape is fixed now and built later. |
 
 Three of these confirmed a conclusion the requirements had already reached, which is worth saying
@@ -663,6 +666,21 @@ And, more importantly, the capture path:
     they answer no question the reasoning record does not answer better; and a few minutes of
     frames per session, kept as evidence, would dominate storage and make §12's retention regime
     urgent for no gain.
+13. **Redaction is deferred past slice 1, and one rule makes that safe.** §12's requirement stands
+    and slice 1 does not meet it; it is carried in
+    [What slice 1 will not satisfy](#what-slice-1-will-not-satisfy) with the rest. Deferring it
+    would ordinarily be reckless — capture everything, store a credential, and the evidence holds
+    the password. The interlock is almost free: **Orbit signs in before capture starts.** No
+    screenshot, no page snapshot, no trace of the sign-in. In slice 1 the only secret in play is
+    the application's own credential, and it never appears on a captured screen, so there is
+    nothing to redact and the deferral costs nothing instead of costing everything. The same rule
+    governs an authoring session ([Decision 11](#decision-11--how-a-workflow-is-authored)).
+
+    The deferral ends the moment a workflow enters a secret into a page that is then captured. That
+    is the trigger, not a date.
+14. **The store is local disk now and S3 in production**, behind the interface at the top of this
+    decision. The digest is the address, so the driver changes and the metadata, the verification
+    and the evidence records do not.
 
 ### How this is tested
 
@@ -775,8 +793,26 @@ With the consequences that follow:
    the immutable artefact, so it cannot drift from what was approved.
 5. **The credential is referenced by name in both the revision and the copy, never by value.** §2:
    "Users select a credential *by name*; the value is resolved only at the moment it is used." This
-   is also what makes §8's rotation requirement possible — rotation changes a value the product
-   never held, so no version and no workflow is edited.
+   is also what makes §8's rotation requirement possible — rotation replaces a value nothing in the
+   registry, the version or the workflow refers to, so none of them is edited.
+
+   **Where the value lives.** §8 says it "is supplied to the deployment separately and is never
+   entered, stored or displayed through the product". The operative clause is *through the
+   product*, and it permits the deployment to hold the value somewhere — which it must, or nothing
+   could sign in. Slice 1 holds it **encrypted in the transactional store**, under four conditions
+   that keep §8 and §2 true:
+
+   - **Written out of band.** A command-line tool or an administrative channel, never a form. The
+     registration screen has no password field, which was the point of it.
+   - **The key is not in the store.** An environment variable locally, a managed key service in
+     production. A database backup on its own decrypts nothing.
+   - **No interface returns it**, in any form, to any role — including an administrator (§2). It is
+     decrypted in the worker at the moment of use and nowhere else.
+   - **Never logged, never in evidence**, and rotation writes a new value without reading the old.
+
+   **A run-time secret is different and stays unstorable.** §2: "required afresh on every run, is
+   never stored". That is the line between Orbit holding a service account of its own and Orbit
+   holding other people's passwords, and it does not move.
 6. **There is no environment concept in slice 1.** A registered application has one set of hosts.
    No practice list, no live list, no promotion, no `environment` field on a run. This is a scope
    decision, taken to get one complete loop working end to end, and it is not a reinterpretation
@@ -1009,9 +1045,22 @@ later, and it is cheap only because Decision 6 was taken first.
 **OpenAI directly for local development; routed through Amazon Bedrock in production, later.**
 With four constraints that make the swap a configuration change rather than a migration:
 
-1. **One `ModelProvider` interface**, with the provider named in configuration and never in the
-   code that calls it. Local is OpenAI; production is Bedrock
-   ([Decision 8](#decision-8--where-this-runs)).
+1. **One `ModelProvider` interface**, with the provider and the model named in **configuration**
+   and never in the code that calls it:
+
+   ```
+   ORBIT_MODEL_PROVIDER = openai | bedrock
+   ORBIT_MODEL          = the model, named as that provider names it
+   ORBIT_MODEL_REGION   = bedrock only
+   ```
+
+   Resolved once at start-up and validated against a known list, so a typo fails on boot rather
+   than in the middle of an authoring session. Changing provider, or changing model within
+   Bedrock, is then a line in an environment file rather than a deployment.
+
+   **The record stores the model that answered, not the configuration that selected it.** §12 wants
+   what a model was shown and what it returned; an authoring record read six months later must
+   still name the model that produced it, whatever the environment now holds.
 2. **Structured output, validated before anything is kept.** `docs/engineering/engineering-instructions.md` rule 7: "A model
    proposes; it never writes. Output is validated before anything is kept." The validating schema
    belongs to Orbit, not to a provider's structured-output feature, so the same validation holds
@@ -1907,6 +1956,7 @@ outstanding from the first day, not discovered at the end of it.
 | §2's "every access to an artefact is itself recorded" | There is no actor to record it against | §2 |
 | §12's environment separation — practice and live distinct, promotion by an approved act, the environment recorded on each run | [Decision 5](#decision-5--what-a-registered-application-is) item 6 removes the concept for slice 1 | §12 |
 | §10's test run "executes against the practice copy" | There is no practice copy; a test run is marked as such and runs against the one registered application | §10 |
+| §12's redaction before storing | [Decision 4](#decision-4--evidence-storage) item 13 defers it, safe only because capture starts after sign-in | §12 |
 
 The first three of these are listed together because they resolve together, but not for identical
 reasons, and the difference matters when they are scheduled. The first and third are **blocked**
