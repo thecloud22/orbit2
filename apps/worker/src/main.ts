@@ -8,6 +8,7 @@
 import { Pool } from 'pg';
 import { step as stepSchema, type Step } from '@orbit/contract';
 import { execute } from './execute.ts';
+import { reconcile } from './reconcile.ts';
 
 const pool = new Pool({
   connectionString: process.env['ORBIT_DATABASE_URL']
@@ -73,6 +74,19 @@ async function runOne(runId: string) {
 
 const once = process.argv.includes('--once');
 console.log(`orbit worker ${worker}${once ? ' (one run, then stop)' : ''}`);
+
+// At start-up, and then on a timer. A restart is not the only interruption: a
+// worker that crashes or is partitioned announces nothing, so stranded runs
+// are found by a dead lease rather than by an event anybody sent.
+async function sweep() {
+  for (const r of await reconcile(pool, { worker })) {
+    console.log(`  reconciled ${r.reference}: ${r.resolution} — ${r.why}`);
+  }
+}
+await sweep();
+const sweeping = setInterval(() => { void sweep(); }, 30_000);
+sweeping.unref();
+
 for (;;) {
   const runId = await claimOne();
   if (runId) await runOne(runId);
