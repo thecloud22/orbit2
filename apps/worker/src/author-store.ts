@@ -31,8 +31,8 @@ export async function authorAndStore(db: PoolClient, opts: {
   await db.query('BEGIN');
   try {
     const { rows: [workflow] } = await db.query<{ id: string }>(
-      `INSERT INTO workflow (name, procedure) VALUES ($1, $2) RETURNING id`,
-      [opts.name, opts.procedure]);
+      `INSERT INTO workflow (name, procedure, declared_inputs) VALUES ($1, $2, $3) RETURNING id`,
+      [opts.name, opts.procedure, JSON.stringify(draft.declaredInputs)]);
     const workflowId = workflow!.id;
 
     // Steps carry stable ids so that references survive the reordering §6

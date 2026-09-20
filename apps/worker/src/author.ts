@@ -73,6 +73,9 @@ export interface AuthoredDraft {
   turns: Turn[];
   /** What it could not work out, which blocks confirmation until answered. */
   questions: string[];
+  /** Derived from the steps rather than proposed: an input is a value an
+   *  `enter` step takes from outside, and nothing else can be one. */
+  declaredInputs: Array<{ name: string; label: string; type: 'text'; required: true }>;
 }
 
 const INSTRUCTION = [
@@ -241,7 +244,25 @@ export async function authorFromProcedure(opts: {
     await browser.close();
   }
 
-  return { steps, turns, questions };
+  // Every path has to reach an ending (§4), and the session has none: the
+  // model proposed the work, not the conclusion. Orbit adds the ending and
+  // asks what it is called, rather than inventing a name for a business
+  // conclusion — which is exactly the kind of plausible interpretation the
+  // product refuses to publish.
+  if (!steps.some((s) => s.kind === 'end')) {
+    steps.push({
+      id: crypto.randomUUID(), kind: 'end',
+      summary: 'Finish — this conclusion has no name yet',
+      outcome: 'unnamed', publishes: [],
+    });
+    questions.push('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.');
+  }
+
+  const declaredInputs = [...new Set(
+    steps.flatMap((s) => (s.kind === 'enter' && s.value.from === 'input' ? [s.value.value] : [])),
+  )].map((name) => ({ name, label: name, type: 'text' as const, required: true as const }));
+
+  return { steps, turns, questions, declaredInputs };
 }
 
 /** A proposal becomes a step, with Orbit's binding rather than the model's. */
