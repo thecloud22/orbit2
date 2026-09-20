@@ -15,6 +15,13 @@
 import { object, name, z } from './zod.ts';
 
 export const blocker = z.discriminatedUnion('kind', [
+  /** Nobody has attested that this is the procedure. §4's status table is
+   *  unambiguous — a draft "cannot be published until confirmed" — and with
+   *  attribution deferred (Decision 1) confirmation is the only human act in
+   *  the whole chain. Publishing without it would mean nothing anywhere says
+   *  a person looked at this before it was allowed to touch a real system. */
+  object({ kind: z.literal('notConfirmed') }),
+
   /** A step exists but has not been configured. §6: an inserted step is
    *  incomplete until configured, and blocks publication until it is. */
   object({ kind: z.literal('stepIncomplete'), step: z.number().int().positive(),
@@ -84,6 +91,8 @@ export type Publication = z.infer<typeof publication>;
 /** Said in the author's terms. The interface shows this, not the discriminant. */
 export function describeBlocker(b: Blocker): string {
   switch (b.kind) {
+    case 'notConfirmed':
+      return 'Nobody has confirmed that this is the procedure, so there is nothing to publish yet.';
     case 'stepIncomplete':
       return `Step ${b.step} is not finished: ${b.missing.join(', ')}.`;
     case 'valueNotProduced':

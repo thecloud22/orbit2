@@ -58,6 +58,11 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
 
   const blockers: Blocker[] = [];
 
+  // §4: "Cannot be published until confirmed." Confirmation is the act that
+  // fixes the workflow as the thing somebody attested to, and publication
+  // mints a version of exactly that.
+  if (!workflow.confirmed_at) blockers.push({ kind: 'notConfirmed' });
+
   // An outstanding question, assumption, exception or unacknowledged risk
   // blocks confirmation, and therefore publication (§4, criterion 3).
   for (const note of notes) {

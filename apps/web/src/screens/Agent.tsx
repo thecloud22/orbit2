@@ -16,6 +16,14 @@ interface Turn { turn: number; model: string; answered: { why: string } | null; 
   shown: { elements: number }; tokens_in: number; tokens_out: number }
 
 const summary = (d: Record<string, unknown>) => String(d['summary'] ?? '');
+
+/** Decision 14's ten. Offered in the order a procedure tends to use them. */
+const KINDS = ['open', 'enter', 'activate', 'read', 'collect', 'check', 'branch', 'forEach', 'handOff', 'end'] as const;
+
+const quiet: React.CSSProperties = {
+  font: 'inherit', fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--ink-2)',
+  background: 'transparent', border: 0, cursor: 'pointer', padding: '2px 5px', borderRadius: 3,
+};
 const strategy = (d: Record<string, unknown>) => {
   for (const k of ['region', 'into', 'control', 'table']) {
     const t = d[k] as { binding?: { strategy?: string } } | undefined;
@@ -36,6 +44,8 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const [refresh, setRefresh] = useState(0);
   const draft = useFetch<Draft>(`/api/workflows/${id}?r=${refresh}`, id);
   const [refused, setRefused] = useState<string[] | null>(null);
+  const [editRefusal, setEditRefusal] = useState<string | null>(null);
+  const [adding, setAdding] = useState({ kind: 'read' as string, after: 0 });
   const [showWhy, setShowWhy] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -58,6 +68,26 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
     if (value.blockers?.length) setRefused(value.blockers);
     else if (value.unproved?.length) setRefused(value.unproved.map((u) => `"${u}" has not been proved by a run yet.`));
     else setRefresh((n) => n + 1);
+  };
+
+  /**
+   * §6's editing, which is a separate conversation from the stage actions
+   * above: a refused edit is about the change you just tried, so it is shown
+   * against the steps rather than at the top of the page, and it clears the
+   * moment you try something else.
+   *
+   * Editing stops once a version is live. A live agent is running against
+   * real applications on a published version, and quietly rewriting the steps
+   * under it would break the one thing Orbit claims — that you can say what
+   * the agent did. Changing a live agent means publishing again.
+   */
+  const editable = !live;
+  const edit = async (verb: string, body: unknown) => {
+    setBusy(true); setEditRefusal(null);
+    const result = await send(`/api/workflows/${id}/${verb}`, body);
+    setBusy(false);
+    if (result.ok) setRefresh((n) => n + 1);
+    else setEditRefusal(result.why);
   };
 
   return (
@@ -115,9 +145,59 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
               {strategy(s.declares) && <span style={{ fontSize: 11.5, color: 'var(--ink-2)',
                 fontFamily: 'var(--mono)' }}>by {strategy(s.declares)}</span>}
               {!s.complete && <Chip state="attention">not finished</Chip>}
+              {editable && (
+                <span style={{ display: 'flex', gap: 1, flexShrink: 0 }}>
+                  <button type="button" style={quiet} disabled={i === 0 || busy}
+                    title={`Move step ${s.position} earlier`}
+                    onClick={() => edit('move-step', { stepId: s.id, to: s.position - 1 })}>↑</button>
+                  <button type="button" style={quiet} disabled={i === steps.length - 1 || busy}
+                    title={`Move step ${s.position} later`}
+                    onClick={() => edit('move-step', { stepId: s.id, to: s.position + 1 })}>↓</button>
+                  <button type="button" style={quiet} disabled={busy}
+                    title={`Remove step ${s.position}`}
+                    onClick={() => edit('delete-step', { stepId: s.id })}>remove</button>
+                </span>
+              )}
             </div>
           ))}
         </div>
+
+        {editable && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingTop: 13, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>Add a</span>
+            <select value={adding.kind} disabled={busy} aria-label="Kind of step to add"
+              onChange={(e) => setAdding((a) => ({ ...a, kind: e.target.value }))}
+              style={{ font: 'inherit', fontSize: 13, fontFamily: 'var(--mono)', padding: '5px 7px',
+                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--paper)' }}>
+              {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>step after</span>
+            <select value={adding.after} disabled={busy} aria-label="Where to add the step"
+              onChange={(e) => setAdding((a) => ({ ...a, after: Number(e.target.value) }))}
+              style={{ font: 'inherit', fontSize: 13, padding: '5px 7px',
+                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--paper)' }}>
+              <option value={0}>the beginning</option>
+              {steps.map((s) => <option key={s.id} value={s.position}>step {s.position} · {s.kind}</option>)}
+            </select>
+            <Action kind="ghost" disabled={busy}
+              onClick={() => edit('insert-step', { kind: adding.kind, after: adding.after })}>Add step</Action>
+            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+              It arrives unfinished, and blocks publication until you configure it.
+            </span>
+          </div>
+        )}
+
+        {editRefusal && (
+          <div style={{ paddingTop: 14 }}>
+            <Refusal title="That change was not made" blockers={[editRefusal]} />
+          </div>
+        )}
+
+        {editable && workflow.confirmed_at && (
+          <p style={{ fontSize: 12.5, color: 'var(--ink-2)', margin: '13px 0 0' }}>
+            This agent is confirmed. Changing a step returns it to draft, and it must be confirmed again.
+          </p>
+        )}
       </Section>
 
       {showWhy && (

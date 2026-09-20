@@ -77,3 +77,15 @@ test('an outstanding question stops publication, and says what it is', async () 
   const { rows } = await db.query(`SELECT count(*)::int AS n FROM workflow_version WHERE workflow_id = $1`, [workflowId]);
   assert.equal(rows[0]!.n, 2, 'a refused publication mints nothing');
 });
+
+test('an unconfirmed workflow cannot be published, because nobody has attested to it', async () => {
+  // §4's status table: "Cannot be published until confirmed." With attribution
+  // deferred, confirmation is the only human act on the record — publishing
+  // past it would mean nothing anywhere says a person looked at this.
+  await db.query(`UPDATE workflow SET confirmed_at = NULL WHERE id = $1`, [workflowId]);
+
+  const result = await mintVersion(db as never, workflowId);
+  assert.equal(result.outcome, 'refused');
+  assert.ok(result.outcome === 'refused' && result.blockers.some((b) => b.kind === 'notConfirmed'),
+    `refused for want of confirmation: ${JSON.stringify(result)}`);
+});
