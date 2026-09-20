@@ -1058,6 +1058,12 @@ With four constraints that make the swap a configuration change rather than a mi
    than in the middle of an authoring session. Changing provider, or changing model within
    Bedrock, is then a line in an environment file rather than a deployment.
 
+   **Slice 1 uses `gpt-4.1-nano`, and only that.** A larger model is a cost decision that belongs
+   to whoever pays for it, so the model is never chosen in code and never substituted to get
+   something working. Where nano genuinely cannot hold a task — structured output it will not
+   produce, a page it cannot map — that is reported with the evidence of what failed, and a larger
+   one is asked for rather than assumed.
+
    **The record stores the model that answered, not the configuration that selected it.** §12 wants
    what a model was shown and what it returned; an authoring record read six months later must
    still name the model that produced it, whatever the environment now holds.
