@@ -3,6 +3,8 @@ import { serveArtefact } from './artefacts.ts';
 import { listRuns, readRun, readRunSteps } from './runs.ts';
 import { listWorkflows, readWorkflow } from './workflows.ts';
 import { testCases } from './activate.ts';
+import { actions, readBody } from './actions.ts';
+import { readAdmin, readAudit } from './admin.ts';
 import { pool } from './db.ts';
 
 const port = Number(process.env['ORBIT_PORT'] ?? 4000);
@@ -18,6 +20,26 @@ createServer(async (req, res) => {
   try {
     if (url.pathname === '/api/runs') return json(res, 200, await listRuns());
 
+    if (req.method === 'POST') {
+      const [, , kind, id, verb] = url.pathname.split('/');
+      const body = await readBody(req);
+      const route = `${kind}/${verb}`;
+      if (kind === 'workflows' && id) {
+        if (verb === 'confirm') { const r = await actions.confirm(id, body); return json(res, r.status, r.body); }
+        if (verb === 'publish') { const r = await actions.publish(id); return json(res, r.status, r.body); }
+        if (verb === 'pause')   { const r = await actions.pause(id, body); return json(res, r.status, r.body); }
+        if (verb === 'resume')  { const r = await actions.resume(id); return json(res, r.status, r.body); }
+      }
+      if (kind === 'versions' && id) {
+        if (verb === 'tests')    { const r = await actions.queueTests(id); return json(res, r.status, r.body); }
+        if (verb === 'activate') { const r = await actions.activate(id); return json(res, r.status, r.body); }
+        if (verb === 'runs')     { const r = await actions.startRun(id, body); return json(res, r.status, r.body); }
+      }
+      return json(res, 404, { kind: 'noSuchAction', route });
+    }
+
+    if (url.pathname === '/api/admin') return json(res, 200, await readAdmin());
+    if (url.pathname === '/api/audit') return json(res, 200, await readAudit());
     if (url.pathname === '/api/workflows') return json(res, 200, await listWorkflows());
 
     const workflow = /^\/api\/workflows\/([0-9a-f-]{36})$/.exec(url.pathname);
