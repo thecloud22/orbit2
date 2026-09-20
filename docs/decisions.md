@@ -1698,13 +1698,27 @@ Named here so that an omission is not mistaken for a decision.
 - **Environments, and promotion between them** (§12) — removed from slice 1 by Decision 5 item 6,
   returning with roles. Until then the host allowlist is the only boundary, and Decision 6's
   amendment says what that costs.
-- **The closed set of step kinds.** Decision 5 item 9 fixes that step kinds are surface-neutral and
-  names a working set — `open`, `enter`, `activate`, `read`, `collect`, `check`, `branch`,
-  `hand off`, `end`, with `judge` held back by
-  [Decision 13](#decision-13--a-judged-step-and-what-holds-it). That set has been drawn and
-  reviewed but **never ratified as a decision**, and almost everything else depends on it: the
-  schema, the editor, the executor, the run page and the acceptance tests. It should be the next
-  decision written.
+- **The closed set of step kinds.** Decision 5 item 9 fixes that step kinds are surface-neutral.
+  The working set is now ten — `open`, `enter`, `activate`, `read`, `collect`, `check`, `branch`,
+  `for each`, `hand off`, `end` — with `judge` held back by
+  [Decision 13](#decision-13--a-judged-step-and-what-holds-it). Reviewed and accepted in the
+  interface, but **never ratified as a decision**, and almost everything depends on it: the schema,
+  the editor, the executor, the run page and the acceptance tests. It should be the next decision
+  written, and it carries three things that are not yet settled:
+  - **`for each` must declare a ceiling**, fixed at publication. A run that reaches it halts rather
+    than carrying on. Repetition is where a closed set of steps turns into a programming language,
+    and without a bound "what could this have done" has no answer that does not depend on what
+    happened to be on the page that morning.
+  - **`activate` must declare whether pressing the control changes a system of record.** §7
+    requires that, without granted authority, "a step that would change something is compiled into
+    a hand-off to a person" — and Orbit cannot obey that rule while it cannot tell Search from
+    Submit. This is a missing field, not a missing kind, and the rule is unimplementable without it.
+  - **`derive` is proposed and undecided.** A procedure that works out a difference cannot be
+    expressed by reading values off a screen. The wrong answer is an expression field, which is
+    rule 13 gone; the right one is a closed list of operations — difference, sum, count, today's
+    date, days between — and nothing else. Worth deciding deliberately rather than under pressure.
+- **The closed set of value types**, which is as closed as the step kinds and belongs in the same
+  decision. Drawn as claim reference, text, money, date and whole number; never settled.
 - **The frontend stack, and the design system behind it.** Nothing has been chosen. It is a real
   decision, not a detail: `docs/engineering/engineering-instructions.md`'s "Interface standards" sets the bar, and most of
   that bar is specified behaviour from §3, §4 and §10 rather than taste — one derived status shown

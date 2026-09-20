@@ -28,3 +28,7 @@ pnpm-debug.log*
 # Evidence store — run artefacts are never source
 /var/
 /evidence/
+
+# Playwright
+test-results/
+playwright-report/
