@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { serveArtefact } from './artefacts.ts';
 import { listRuns, readRun, readRunSteps } from './runs.ts';
+import { listWorkflows, readWorkflow } from './workflows.ts';
 
 const port = Number(process.env['ORBIT_PORT'] ?? 4000);
 
@@ -14,6 +15,16 @@ createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${port}`);
   try {
     if (url.pathname === '/api/runs') return json(res, 200, await listRuns());
+
+    if (url.pathname === '/api/workflows') return json(res, 200, await listWorkflows());
+
+    const workflow = /^\/api\/workflows\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (workflow) {
+      const found = await readWorkflow(workflow[1]!);
+      return found
+        ? json(res, 200, found)
+        : json(res, 404, { kind: 'nothingMatching', reference: workflow[1] });
+    }
 
     const artefact = /^\/api\/artefacts\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (artefact) {
