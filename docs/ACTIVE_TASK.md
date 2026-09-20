@@ -43,6 +43,7 @@ acceptance criterion 7. Not one binding reads a `data-testid`.
 | 12 | Resolution | Exact. Ambiguity is a refusal |
 | 13 | A judged step | Shape fixed, not built in slice 1. One answer from a declared list, against pinned policy |
 | 14 | Step kinds and values | Ten kinds, five value types, and how a step names a value |
+| 15 | The locator | Seven rungs ordered by how often each is **wrong**, measured against `demo/legacy-portal` |
 
 Amended since: evidence on disk now and S3 later with **redaction deferred** — safe only because
 capture starts after sign-in; a registered credential held **encrypted in the store**, written out
@@ -73,7 +74,8 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | The application slice 1 runs against | **Karthik** | To be provided. Legacy, server-rendered, WebSEAL-fronted. |
 | One accessibility snapshot of a real WebSEAL page | **Karthik** | Determines whether the locator ladder in Decision 11 needs a rung below structural anchors. Cheap to get, expensive to discover late. |
 | The locator's stored shape | Claude | One typed column on `step`, and the only hole left in Decision 14. To be settled from **measurement** against `apps/legacy-portal`, not from argument. |
-| Authoring | Claude | Nothing yet. Needs a model key in `.env`; execution needs none, and has none. |
+| The surface interface | Claude | **A debt.** Decision 2 asks that execution sit behind an interface so a second surface is a new file rather than a rewrite. `execute.ts` imports Chromium directly, so the ten step kinds are surface-neutral by assertion rather than by construction. |
+| The terminal path | Claude | Not built. `demo/terminal-portal` warns how: drive a real emulator, never decode the datastream, or a misreading on Orbit's side is cancelled by the same misreading in the fixture. |
 | The locator ladder, from measurement | Claude | **In progress.** Being measured against `demo/legacy-portal` — which strategies resolve to exactly one thing, and which shapes nothing reaches. |
 
 ## Open, not blocking
