@@ -12,6 +12,7 @@ const took = (events: RunEventView[], attemptId: string): number | undefined => 
 
 export function RunPage({ reference }: { reference: string }) {
   const [state, setState] = useState<Loaded>({ kind: 'empty', of: { kind: 'notLoadedYet' } });
+  useEffect(() => { setState({ kind: 'empty', of: { kind: 'notLoadedYet' } }); }, [reference]);
 
   useEffect(() => {
     let live = true;
@@ -31,22 +32,7 @@ export function RunPage({ reference }: { reference: string }) {
   }, [reference]);
 
   return (
-    <div style={{ minHeight: '100vh' }}>
-      <nav style={{ height: 54, background: 'var(--nav)', display: 'flex', alignItems: 'center',
-        gap: 26, padding: '0 36px', color: 'var(--page)' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <svg width="21" height="21" viewBox="0 0 22 22" fill="none" aria-hidden>
-            <ellipse cx="11" cy="11" rx="9.3" ry="5.1" transform="rotate(-30 11 11)" stroke="var(--page)" strokeWidth="1.5" />
-            <circle cx="2.95" cy="15.65" r="2.45" fill="var(--primary)" />
-          </svg>
-          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.24em' }}>ORBIT</span>
-        </span>
-        {['Home', 'Agents', 'Runs', 'Admin', 'Audit'].map((item) => (
-          <span key={item} style={{ fontSize: 13.5, color: item === 'Runs' ? 'var(--page)' : '#8E8E88',
-            fontWeight: item === 'Runs' ? 600 : 400,
-            boxShadow: item === 'Runs' ? 'inset 0 -2px 0 var(--primary)' : undefined, paddingBottom: 4 }}>{item}</span>
-        ))}
-      </nav>
+    <div>
 
       <main style={{ maxWidth: 1280, margin: '0 auto', padding: '26px 36px 60px' }}>
         {state.kind === 'empty' ? (
@@ -212,27 +198,8 @@ function StepDetail({ attempt, step, events, artefacts }: {
       {artefacts.length > 0 && (
         <div style={{ paddingTop: 18 }}>
           <h3 style={{ margin: '0 0 11px', fontSize: 14, fontWeight: 700 }}>What it saw at this step</h3>
-          <div style={{ display: 'flex', gap: 14 }}>
-            {artefacts.map((a) => (
-              <div key={a.id} style={{ width: 176, border: '1px solid var(--rule)', borderRadius: 5,
-                background: 'var(--panel)', overflow: 'hidden' }}>
-                <div style={{ height: 92, background: 'var(--panel-2)', borderBottom: '1px solid var(--rule)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <rect x="2.5" y="4.5" width="19" height="15" rx="1.5" stroke="var(--ink-2)" strokeWidth="1.3" />
-                    <circle cx="8.3" cy="9.7" r="1.7" stroke="var(--ink-2)" strokeWidth="1.3" />
-                    <path d="M3 17l5.2-4.6 4 3.4 3.4-2.8L21 17" stroke="var(--ink-2)" strokeWidth="1.3" strokeLinejoin="round" />
-                  </svg>
-                </div>
-                <div style={{ padding: '9px 11px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Screenshot</span>
-                  <span style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>
-                    {Math.round((a.bytes ?? 0) / 1000)} KB</span>
-                  <span style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>
-                    {String(a.digest).replace('sha256:', '').slice(0, 8)}</span>
-                </div>
-              </div>
-            ))}
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            {artefacts.map((a) => <Evidence key={a.id} artefact={a} />)}
           </div>
         </div>
       )}
@@ -250,6 +217,53 @@ function ran(startedAt: string | null, endedAt: string | null): string {
   const started = new Date(startedAt).toLocaleString('en-US');
   if (!endedAt) return `${started}, still running`;
   return `${started}, took ${((+new Date(endedAt) - +new Date(startedAt)) / 1000).toFixed(1)} seconds`;
+}
+
+/**
+ * The screenshot itself, not a description of one.
+ *
+ * The API re-hashes the bytes before serving them, so what is on screen is
+ * provably what was captured and a file that changed on disk is refused
+ * rather than shown (§12). A withheld artefact renders as withheld with its
+ * reason — never as a broken image — because it is a record, not an absence.
+ */
+function Evidence({ artefact }: { artefact: ArtefactView }) {
+  const [failed, setFailed] = useState(false);
+  if (artefact.withheld) {
+    return (
+      <div style={{ width: 232, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)',
+        borderRadius: 5, padding: '12px 14px' }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--attention-ink)', marginBottom: 5 }}>Withheld</div>
+        <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.45 }}>{artefact.withheld_why}</div>
+      </div>
+    );
+  }
+  const short = (artefact.digest ?? '').replace('sha256:', '').slice(0, 10);
+  return (
+    <figure style={{ margin: 0, width: 232, border: '1px solid var(--rule)', borderRadius: 5,
+      background: 'var(--panel)', overflow: 'hidden' }}>
+      <a href={`/api/artefacts/${artefact.id}`} target="_blank" rel="noreferrer" style={{ display: 'block', lineHeight: 0 }}>
+        {failed ? (
+          <div style={{ height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--failed-wash)', color: 'var(--failed-ink)', fontSize: 12, padding: 14,
+            textAlign: 'center', lineHeight: 1.45 }}>
+            This did not match the digest recorded when it was captured, so it is not being shown.
+          </div>
+        ) : (
+          <img src={`/api/artefacts/${artefact.id}`} alt="The screen at this step"
+            onError={() => setFailed(true)}
+            style={{ width: '100%', height: 150, objectFit: 'cover', objectPosition: 'top',
+              background: 'var(--panel-2)', display: 'block' }} />
+        )}
+      </a>
+      <figcaption style={{ padding: '9px 11px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>Screenshot</span>
+        <span style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>
+          {Math.round((artefact.bytes ?? 0) / 1000)} KB &ensp; {short}
+        </span>
+      </figcaption>
+    </figure>
+  );
 }
 
 const formatTook = (ms: number | undefined) => (ms === undefined || ms === 0 ? '' : `${(ms / 1000).toFixed(1)}s`);

@@ -25,9 +25,6 @@ pnpm-debug.log*
 .vscode/
 .idea/
 
-# Evidence store — run artefacts are never source
-/var/
-/evidence/
 
 # Playwright
 test-results/
@@ -35,3 +32,6 @@ playwright-report/
 
 # Workspace installs
 node_modules/
+
+# Anything a run wrote. Evidence is a product feature, not source.
+/data/

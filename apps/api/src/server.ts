@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { serveArtefact } from './artefacts.ts';
 import { listRuns, readRun, readRunSteps } from './runs.ts';
 
 const port = Number(process.env['ORBIT_PORT'] ?? 4000);
@@ -13,6 +14,15 @@ createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${port}`);
   try {
     if (url.pathname === '/api/runs') return json(res, 200, await listRuns());
+
+    const artefact = /^\/api\/artefacts\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (artefact) {
+      const served = await serveArtefact(artefact[1]!);
+      if (!served.ok) return json(res, served.kind === 'notFound' ? 404 : 409, served);
+      res.writeHead(200, { 'content-type': served.mediaType, 'cache-control': 'no-store',
+        'access-control-allow-origin': '*' });
+      return res.end(served.bytes);
+    }
 
     const match = /^\/api\/runs\/([A-Za-z0-9-]+)$/.exec(url.pathname);
     if (match) {

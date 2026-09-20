@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-const root = process.env['ORBIT_EVIDENCE_DIR'] ?? './var/evidence';
+const root = process.env['ORBIT_EVIDENCE_DIR'] ?? './data/evidence';
 
 export interface Captured { digest: string; bytes: number; mediaType: string }
 
