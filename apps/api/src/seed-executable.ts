@@ -79,13 +79,16 @@ const wf = await client.query<{ id: string }>(
      now()) RETURNING id`);
 
 const version = await client.query<{ id: string }>(
-  `INSERT INTO workflow_version (workflow_id, version, body, digest, outcomes, declared_inputs, applications, activated_at)
-   VALUES ($1, 1, $2, $3, $4, $5, $6, now()) RETURNING id`,
+  `INSERT INTO workflow_version (workflow_id, version, body, digest, outcomes, declared_inputs, applications)
+   VALUES ($1, 1, $2, $3, $4, $5, $6) RETURNING id`,
   [wf.rows[0]!.id, JSON.stringify({ steps: steps.map((x) => step.parse(x)) }),
    'sha256:' + crypto.randomUUID().replaceAll('-', '').slice(0, 12),
    JSON.stringify([{ name: 'fileFound', label: 'File found' }, { name: 'noSuchFile', label: 'No such file' }]),
    JSON.stringify([{ name: 'loanNumber', label: 'Loan number', type: 'text', required: true }]),
    JSON.stringify([{ name: 'underwriting', revision: 1, addresses: [{ host: 'localhost:4101', pathPrefix: '/' }] }])]);
+
+await client.query(`UPDATE workflow SET live_version_id = $1 WHERE id = $2`,
+  [version.rows[0]!.id, wf.rows[0]!.id]);
 
 for (const [reference, loanNumber] of [['R-1001', 'ML-26-04471'], ['R-1002', 'ML-26-99999']]) {
   await client.query(

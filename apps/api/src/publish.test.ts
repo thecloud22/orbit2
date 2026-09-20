@@ -85,3 +85,15 @@ test('a workflow with nothing wrong has nothing to report', () => {
   const steps: Step[] = [read(0, 'status'), end(1, 'done', ['status'])];
   assert.deepEqual(checkForPublication(steps, declared(['done'])), []);
 });
+
+test('a step nothing can reach is refused, because it would never run', () => {
+  // The reorder that provoked this: an ending dragged to the front leaves
+  // every step behind it stranded, and the structural checks stayed quiet
+  // because an unreachable step is on no path that could run out.
+  const blockers = checkForPublication(
+    [end(0, 'done'), read(1, 'status'), read(2, 'queue')], declared(['done']));
+
+  assert.deepEqual(
+    blockers.filter((b) => b.kind === 'stepUnreachable').map((b) => b.step),
+    [2, 3], 'both stranded steps named, not just the first');
+});

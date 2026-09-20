@@ -18,8 +18,26 @@ import type { Blocker, Step } from '@orbit/contract';
 
 const CAN_LIE = new Set(['text', 'structural']);
 
+/**
+ * A step in a draft is allowed to be half-written.
+ *
+ * §6: an inserted step is incomplete until it is configured, and blocks
+ * publication until it is. That means the checker has to *carry* an unparsable
+ * step rather than choke on one — an editor that cannot read a draft
+ * containing the step you just inserted is an editor that cannot insert a
+ * step.
+ *
+ * An incomplete step is structurally inert: it produces nothing, uses nothing,
+ * and passes control to the next step. It contributes exactly one blocker,
+ * which is that it is not finished.
+ */
+export type DraftStep = Step | { id: string; kind: string; incomplete: true; missing: string[] };
+
+const unfinished = (s: DraftStep): s is Extract<DraftStep, { incomplete: true }> => 'incomplete' in s;
+
 /** Where a step can go next, given the graph rather than the order. */
-function successors(step: Step, index: number, byId: Map<string, number>): number[] {
+function successors(step: DraftStep, index: number, byId: Map<string, number>): number[] {
+  if (unfinished(step)) return index + 1 < byId.size ? [index + 1] : [];
   if (step.kind === 'end') return [];
   if (step.kind === 'branch') {
     return [byId.get(step.ifTrue), byId.get(step.ifFalse)]
@@ -29,7 +47,8 @@ function successors(step: Step, index: number, byId: Map<string, number>): numbe
 }
 
 /** What a step produces, if anything. */
-function produces(step: Step): string[] {
+function produces(step: DraftStep): string[] {
+  if (unfinished(step)) return [];
   if (step.kind === 'read') return [step.produces.name];
   if (step.kind === 'collect') return [step.into];
   if (step.kind === 'handOff') return step.handsBack.map((v) => v.name);
@@ -46,7 +65,8 @@ function comparisonUses(c: Comparison): string[] {
   return 'right' in c ? [...from(c.left), ...from(c.right)] : from(c.left);
 }
 
-function uses(step: Step): string[] {
+function uses(step: DraftStep): string[] {
+  if (unfinished(step)) return [];
   switch (step.kind) {
     case 'enter': return step.value.from === 'step' ? [step.value.value] : [];
     // `check` and `branch` each carry a comparison under their own name, and
@@ -62,7 +82,7 @@ function uses(step: Step): string[] {
 }
 
 export function checkForPublication(
-  steps: Step[],
+  steps: DraftStep[],
   declared: { inputs: string[]; outcomes: string[]; examples: Record<string, unknown> },
 ): Blocker[] {
   const blockers: Blocker[] = [];
@@ -102,6 +122,15 @@ export function checkForPublication(
   }
 
   for (const [index, step] of steps.entries()) {
+    // Reported alongside whatever else is wrong with the step, not instead of
+    // it — a person fixing three things wants to know there are three.
+    if (!reachable.has(index)) blockers.push({ kind: 'stepUnreachable', step: at(index) });
+
+    if (unfinished(step)) {
+      blockers.push({ kind: 'stepIncomplete', step: at(index), missing: step.missing });
+      continue;
+    }
+
     // ── a path that runs out ───────────────────────────────────────────────
     if (step.kind !== 'end' && step.kind !== 'handOff'
         && successors(step, index, byId).length === 0 && reachable.has(index)) {
@@ -130,7 +159,7 @@ export function checkForPublication(
   }
 
   // ── a declared conclusion nothing can reach ──────────────────────────────
-  const reached = new Set(steps.filter((s, i) => s.kind === 'end' && reachable.has(i))
+  const reached = new Set(steps.filter((s, i) => !unfinished(s) && s.kind === 'end' && reachable.has(i))
     .map((s) => (s as Extract<Step, { kind: 'end' }>).outcome));
   for (const outcome of declared.outcomes) {
     if (!reached.has(outcome)) blockers.push({ kind: 'outcomeUnreachable', outcome });

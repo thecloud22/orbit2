@@ -58,8 +58,8 @@ const workflowId = wf.rows[0]!.id;
 
 const body = { steps: steps.map((s) => step.parse(s)) };
 const version = await client.query<{ id: string }>(
-  `INSERT INTO workflow_version (workflow_id, version, body, digest, outcomes, declared_inputs, applications, activated_at)
-   VALUES ($1, 3, $2, 'sha256:4c9a17e0b3d5', $3, $4, $5, now()) RETURNING id`,
+  `INSERT INTO workflow_version (workflow_id, version, body, digest, outcomes, declared_inputs, applications)
+   VALUES ($1, 3, $2, 'sha256:4c9a17e0b3d5', $3, $4, $5) RETURNING id`,
   [workflowId, JSON.stringify(body),
    JSON.stringify([
      { name: 'ticketFound', label: 'Ticket found' },
@@ -69,9 +69,13 @@ const version = await client.query<{ id: string }>(
    JSON.stringify([{ name: 'serviceDesk', revision: 7, addresses: [{ host: 'localhost:4101', pathPrefix: '/' }] }])]);
 const versionId = version.rows[0]!.id;
 
+// Live is a pointer the workflow holds, so seeding an active workflow means
+// pointing it, not stamping the version.
+await client.query(`UPDATE workflow SET live_version_id = $1 WHERE id = $2`, [versionId, workflowId]);
+
 const run = await client.query<{ id: string }>(
   `INSERT INTO run (version_id, reference, status, outcome, inputs, outputs, started_at, ended_at)
-   VALUES ($1, '8F42C1', 'succeeded', 'ticketFound', $2, $3, now() - interval '12 seconds', now()) RETURNING id`,
+   VALUES ($1, '8F42C1', 'succeeded', 'ticketFound', $2, $3, now() - interval '12 seconds') RETURNING id`,
   [versionId, JSON.stringify({ reference: 'SR-4417' }),
    JSON.stringify({ status: 'Open', queue: 'Infrastructure Operations' })]);
 const runId = run.rows[0]!.id;
@@ -80,7 +84,7 @@ const durations = [1900, 400, 3800, 100, 300, 300, 0];
 for (const [i, s] of steps.entries()) {
   const attempt = await client.query<{ id: string }>(
     `INSERT INTO step_attempt (run_id, step_position, step_kind, attempt, outcome, ended_at)
-     VALUES ($1, $2, $3, 1, 'ok', now()) RETURNING id`, [runId, i + 1, s.kind]);
+     VALUES ($1, $2, $3, 1, 'ok') RETURNING id`, [runId, i + 1, s.kind]);
   const attemptId = attempt.rows[0]!.id;
   await client.query(
     `INSERT INTO run_event (run_id, attempt_id, kind, detail) VALUES

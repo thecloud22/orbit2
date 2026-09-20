@@ -12,6 +12,7 @@ import { pool } from './db.ts';
 import { activate, mayStart, pause, queueTests, resume } from './activate.ts';
 import { confirm, type Confirmation } from './confirm.ts';
 import { mintVersion } from './mint.ts';
+import { deleteStep, editStep, insertStep, moveStep } from './edit.ts';
 import { describeBlocker } from '@orbit/contract';
 
 export async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -62,6 +63,32 @@ export const actions = {
   async resume(workflowId: string) {
     await inTransaction((db) => resume(db, workflowId));
     return { status: 200, body: { paused: false } };
+  },
+
+  async editStep(workflowId: string, body: unknown) {
+    const { stepId, declares } = body as { stepId: string; declares: Record<string, unknown> };
+    const result = await inTransaction((db) => editStep(db, workflowId, stepId, declares));
+    // A refusal is not an error. It is the editor doing what §6 asks, and the
+    // caller gets the reason rather than a status code to interpret.
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async moveStep(workflowId: string, body: unknown) {
+    const { stepId, to } = body as { stepId: string; to: number };
+    const result = await inTransaction((db) => moveStep(db, workflowId, stepId, to));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async deleteStep(workflowId: string, body: unknown) {
+    const { stepId } = body as { stepId: string };
+    const result = await inTransaction((db) => deleteStep(db, workflowId, stepId));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async insertStep(workflowId: string, body: unknown) {
+    const { kind, after } = body as { kind: never; after: number };
+    const result = await inTransaction((db) => insertStep(db, workflowId, kind, after));
+    return result.ok ? { status: 201, body: result } : { status: 409, body: { why: result.because } };
   },
 
   /**

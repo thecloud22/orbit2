@@ -28,6 +28,13 @@ export const blocker = z.discriminatedUnion('kind', [
             *  different fix from "produced nowhere at all". */
            producedSomewhere: z.boolean() }),
 
+  /** A step no path can reach. The sibling of outcomeUnreachable, and the
+   *  more serious one: §10's claim is that you can say what the agent did and
+   *  be sure it could not have done anything else. A step carried into a
+   *  published version that nothing can reach makes the second half of that
+   *  sentence harder to say, and is usually a reorder that went wrong. */
+  object({ kind: z.literal('stepUnreachable'), step: z.number().int().positive() }),
+
   /** A path that runs out without reaching an ending. */
   object({ kind: z.literal('pathReachesNoEnding'), step: z.number().int().positive(),
            fromBranch: z.number().int().positive().optional() }),
@@ -83,6 +90,8 @@ export function describeBlocker(b: Blocker): string {
       return b.producedSomewhere
         ? `Step ${b.step} uses "${b.value}", which is not produced on every path that reaches it.`
         : `Step ${b.step} uses "${b.value}", which no step produces.`;
+    case 'stepUnreachable':
+      return `Nothing can reach step ${b.step}, so it would never run.`;
     case 'pathReachesNoEnding':
       return `The path from step ${b.fromBranch ?? b.step} runs out without reaching a conclusion.`;
     case 'outcomeNotDeclared':

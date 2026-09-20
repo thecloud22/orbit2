@@ -9,7 +9,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { checkForPublication } from './publish.ts';
+import { checkForPublication, type DraftStep } from './publish.ts';
 import { type Blocker, type Publication, step as stepSchema, type Step } from '@orbit/contract';
 
 /**
@@ -45,8 +45,16 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
             coalesce(w.examples, '{}'::jsonb) AS examples
        FROM workflow w WHERE w.id = $1`, [workflowId]);
 
-  // Validated coming out of the store, because persistence is a boundary.
-  const steps: Step[] = stepRows.map((r) => stepSchema.parse({ id: r.id, kind: r.kind, ...r.declares }));
+  // Validated coming out of the store, because persistence is a boundary — but
+  // a half-written step is a refusal to publish, not a crash. §6: it blocks
+  // publication until it is configured, and "blocks" means it is reported.
+  const steps: DraftStep[] = stepRows.map((r) => {
+    const parsed = stepSchema.safeParse({ id: r.id, kind: r.kind, ...r.declares });
+    return parsed.success
+      ? parsed.data
+      : { id: r.id, kind: r.kind, incomplete: true as const,
+          missing: [...new Set(parsed.error.issues.map((i) => String(i.path[0] ?? 'its configuration')))] };
+  });
 
   const blockers: Blocker[] = [];
 

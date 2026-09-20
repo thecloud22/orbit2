@@ -29,6 +29,10 @@ createServer(async (req, res) => {
         if (verb === 'publish') { const r = await actions.publish(id); return json(res, r.status, r.body); }
         if (verb === 'pause')   { const r = await actions.pause(id, body); return json(res, r.status, r.body); }
         if (verb === 'resume')  { const r = await actions.resume(id); return json(res, r.status, r.body); }
+        if (verb === 'edit-step')   { const r = await actions.editStep(id, body); return json(res, r.status, r.body); }
+        if (verb === 'move-step')   { const r = await actions.moveStep(id, body); return json(res, r.status, r.body); }
+        if (verb === 'delete-step') { const r = await actions.deleteStep(id, body); return json(res, r.status, r.body); }
+        if (verb === 'insert-step') { const r = await actions.insertStep(id, body); return json(res, r.status, r.body); }
       }
       if (kind === 'versions' && id) {
         if (verb === 'tests')    { const r = await actions.queueTests(id); return json(res, r.status, r.body); }
