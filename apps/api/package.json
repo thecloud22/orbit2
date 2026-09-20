@@ -1,0 +1,13 @@
+{
+  "name": "@orbit/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "migrate": "node --experimental-strip-types src/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/*.test.ts"
+  },
+  "dependencies": { "@orbit/contract": "file:../../packages/contract", "pg": "^8.13.0" },
+  "devDependencies": { "@types/node": "^22", "@types/pg": "^8.11.0", "typescript": "^5.9.0" }
+}
