@@ -18,7 +18,7 @@ sentences. Where a capability would make either less true, Orbit refuses the cap
 - `docs/slice-1-brief.md` — what is being built now, what is deliberately excluded, and the
   acceptance criteria for it.
 - `docs/ACTIVE_TASK.md` — the authoritative record of what has actually shipped. Keep this current.
-- `docs/decisions.md` — the architecture decisions, with reasoning. Fourteen are recorded and closed.
+- `docs/decisions.md` — the architecture decisions, with reasoning. Fifteen are recorded and closed.
   Read it before proposing anything structural; a change to one of these is a change to
   architecture and needs approval, not a commit.
 - `docs/decision-draft-model-driven-browser.md` — the draft that became Decision 6. It is
@@ -100,6 +100,7 @@ is right and this table is stale.
 | 10 | Frontend | React over headless accessible primitives, with design tokens resolved per workspace at run time so branding is data, not a rebuild. Five components carry the specification: `StatusChip`, `EmptyState` (four variants), `OutcomePair`, `EvidenceItem`, `RefusalNotice`. |
 | 11 | Authoring | **Model maps, Orbit verifies.** Orbit runs the loop and is the MCP client; the model has no connection to Playwright MCP and no tool that accepts an address. Snapshot refs never enter a published version. Weaker signals are corroboration, never fallback. |
 | 12 | Resolution | Exact. Exactly one match or refuse. Ambiguity is a refusal. |
+| 15 | The locator | Seven rungs ordered by how often each returns the **wrong** element, measured against `demo/legacy-portal`. `text` and `structural` are refused without corroboration, because one match can still be the wrong match. |
 | 14 | Step kinds and values | Ten kinds — `open`, `enter`, `activate`, `read`, `collect`, `check`, `branch`, `for each`, `hand off`, `end`. Five types — text, number, date, yes/no, list of rows. A step names a value; there is no syntax, so "no expressions" is true by construction. |
 | 13 | A judged step | Shape fixed, **not built in slice 1**. The model returns one of a list the workflow declared, judged against pinned policy, with a confidence floor below which it hands off. It never names a control, supplies an address or chooses an action. |
 

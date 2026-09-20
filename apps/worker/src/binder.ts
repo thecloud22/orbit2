@@ -1,84 +1,165 @@
 /**
  * Finding the control a step names, on a real page.
  *
- * Two rules, and the second is the one that matters.
+ * The ladder below is not reasoned from first principles. It was measured
+ * against `demo/legacy-portal`: 181 workflow-relevant elements across 17 page
+ * states, every strategy tried with every name an author could plausibly
+ * supply. What that measurement changed is worth stating, because it
+ * contradicted the design it replaced.
  *
- * **Exactly one, or refuse.** Zero matches is a refusal. Two matches is *also*
- * a refusal (Decision 12) — a name that fits two controls identifies neither,
- * and picking the first would be Orbit guessing on the operator's behalf.
+ * **`count() === 1` is necessary and not sufficient.** A strategy can return
+ * exactly one element and have it be the wrong element. `structural` did that
+ * 28 times out of 181 — `following-sibling::*[1]` always returns *something*,
+ * so on a two-column form it confidently hands back the `<td>` wrapping the
+ * input. A confident wrong element is worse than a refusal, and refusing was
+ * the whole point of Decision 12.
  *
- * **`data-testid` is never read.** These portals carry them for their own
- * Playwright suites. A test id changes without warning, and the applications a
- * customer actually runs do not have them — so binding to one would make the
- * binder look solved while leaving every strategy below it untested.
+ * So the rungs are ordered by **how often they are wrong**, not by how much
+ * they reach — and the two that can be wrong may not be used at all without
+ * corroboration.
+ *
+ * Measured, of 181:
+ *   roleAndName  73 unique,  0 wrong   ← never wrong anywhere in the portal
+ *   label         0 unique,  0 wrong   ← nothing here; essential on modern pages
+ *   formName      7 unique,  0 wrong
+ *   controlBeside 11 unique, 0 wrong   ← added because of this measurement
+ *   rowAndColumn 52 unique,  0 wrong   ← added; the only rung with no failure mode
+ *   text        128 unique, 10 wrong   ← widest reach, and it can lie
+ *   structural   54 unique, 28 wrong   ← last resort, and only with corroboration
+ *
+ * `data-testid` is never read. These portals carry them for their own test
+ * suites; a test id changes without warning and is absent from the
+ * applications a customer runs.
  */
 import type { Frame, Locator, Page } from 'playwright';
 
-export type Strategy = 'roleAndName' | 'label' | 'formName' | 'text' | 'structural';
+export type Strategy =
+  | 'roleAndName' | 'label' | 'formName'
+  | 'controlBeside' | 'rowAndColumn' | 'text' | 'structural';
+
+/** In the order they are tried. Safety first, reach second. */
+export const LADDER: readonly Strategy[] = [
+  'roleAndName', 'label', 'formName', 'controlBeside', 'rowAndColumn', 'text', 'structural',
+];
+
+/**
+ * Rungs that can return exactly one element and have it be the wrong one.
+ * They are refused outright unless the binding says what must also be true,
+ * because an uncorroborated guess from one of these is how a reference number
+ * ends up typed into a username field.
+ */
+const CAN_BE_CONFIDENTLY_WRONG: ReadonlySet<Strategy> = new Set(['text', 'structural']);
 
 export interface Binding {
   strategy: Strategy;
   role?: string;
+  /** The label, the heading, the form name — whatever this rung matches on. */
   name?: string;
-  /** What must still be true about whatever was found. A mismatch halts. */
-  corroborate?: { text?: string };
+  /** `rowAndColumn` only: which row, and which column heading. */
+  row?: string;
+  column?: string;
+  /** Narrows the search to the region containing this text, or to a frame. */
+  within?: { text?: string; frame?: string };
+  /** What must still be true of whatever was found. A mismatch halts. */
+  corroborate?: { text?: string; tag?: string };
 }
 
 export type Resolution =
   | { found: 'one'; locator: Locator; by: Strategy }
-  | { found: 'none'; tried: Strategy[] }
+  | { found: 'none'; by: Strategy; why?: string }
   | { found: 'many'; count: number; by: Strategy };
 
-function candidate(page: Page | Frame, binding: Binding): Locator | null {
-  switch (binding.strategy) {
+const CONTROLS = 'input, select, textarea, button, a';
+
+function scope(page: Page | Frame, binding: Binding): Page | Frame | Locator {
+  if (binding.within?.frame) {
+    const frame = (page as Page).frame?.({ name: binding.within.frame });
+    if (frame) return frame;
+  }
+  if (binding.within?.text) {
+    // The smallest region whose own text names it — enough to say *which* of
+    // two identical tables on one page is meant.
+    return page.locator(`xpath=//*[*[normalize-space()="${binding.within.text}"]]`).first();
+  }
+  return page;
+}
+
+function candidate(root: Page | Frame | Locator, b: Binding): Locator | null {
+  switch (b.strategy) {
     case 'roleAndName':
-      if (!binding.role || !binding.name) return null;
-      return page.getByRole(binding.role as Parameters<Page['getByRole']>[0], {
-        name: binding.name, exact: true,
-      });
+      return b.role && b.name
+        ? root.getByRole(b.role as Parameters<Page['getByRole']>[0], { name: b.name, exact: true })
+        : null;
     case 'label':
-      return binding.name ? page.getByLabel(binding.name, { exact: true }) : null;
+      return b.name ? root.getByLabel(b.name, { exact: true }) : null;
     case 'formName':
-      return binding.name ? page.locator(`[name="${binding.name}"]`) : null;
+      return b.name ? root.locator(`[name="${b.name}"]`) : null;
+    case 'controlBeside':
+      // The rung an old two-column form leaves you on, and the fix for
+      // `structural`'s wrong binds: the sibling must actually BE a control,
+      // so the wrapping cell can no longer be returned in its place.
+      return b.name
+        ? root.locator(`xpath=//*[normalize-space()="${b.name}"]/following-sibling::*[1]`).locator(CONTROLS)
+        : null;
+    case 'rowAndColumn':
+      // A grid cell named the way a person names one. Measured 52 unique,
+      // nothing ambiguous and nothing wrong — the only rung with no failure
+      // mode at all, which is why it sits above every rung that can lie.
+      return b.row && b.column
+        ? root.locator(
+            `xpath=//tr[td[normalize-space()="${b.row}"]]/td[` +
+            `position() = count((ancestor::table[1]//tr)[1]/*[normalize-space()="${b.column}"]` +
+            `/preceding-sibling::*) + 1]`)
+        : null;
     case 'text':
-      return binding.name ? page.getByText(binding.name, { exact: true }) : null;
+      return b.name ? root.getByText(b.name, { exact: true }) : null;
     case 'structural':
-      // The rung an old page usually leaves you: a value in a cell or a div
-      // with no attribute of any kind, named only by the label beside it.
-      // `:text-is` matches the smallest element holding exactly that text, so
-      // the label's own node is found rather than every ancestor of it.
-      return binding.name
-        ? page.locator(`:text-is("${binding.name}")`).locator('xpath=following-sibling::*[1]')
+      return b.name
+        ? root.locator(`:text-is("${b.name}")`).locator('xpath=following-sibling::*[1]')
         : null;
   }
 }
 
-/**
- * Resolves, and says honestly which of three things happened. The caller
- * cannot accidentally treat "two matched" as success, because it is not a
- * locator — it is a different shape.
- */
 export async function resolve(page: Page | Frame, binding: Binding): Promise<Resolution> {
-  const locator = candidate(page, binding);
-  if (!locator) return { found: 'none', tried: [binding.strategy] };
-  const count = await locator.count();
-  if (count === 0) return { found: 'none', tried: [binding.strategy] };
-  if (count > 1) return { found: 'many', count, by: binding.strategy };
+  const by = binding.strategy;
 
+  if (CAN_BE_CONFIDENTLY_WRONG.has(by) && !binding.corroborate) {
+    // Measured: these two return one confidently-wrong element often enough
+    // that an uncorroborated match from them is not evidence of anything.
+    return { found: 'none', by, why: 'this way of naming it can find the wrong thing, so it needs something that must also be true' };
+  }
+
+  const locator = candidate(scope(page, binding), binding);
+  if (!locator) return { found: 'none', by, why: 'the binding does not carry what this rung needs' };
+
+  const count = await locator.count();
+  if (count === 0) return { found: 'none', by };
+  if (count > 1) return { found: 'many', count, by };
+
+  if (binding.corroborate?.tag) {
+    const tag = (await locator.evaluate((el) => el.tagName.toLowerCase()).catch(() => '')) || '';
+    if (tag !== binding.corroborate.tag) return { found: 'none', by, why: `found a <${tag}>, expected a <${binding.corroborate.tag}>` };
+  }
   if (binding.corroborate?.text) {
     const text = (await locator.innerText().catch(() => '')) || '';
     if (!text.includes(binding.corroborate.text)) {
-      // It resolved, and it is not the thing that was approved. A fallback
-      // would try something else here; corroboration stops, which is the
+      // It resolved, and what it found is not what was approved. A fallback
+      // would try the next rung here; corroboration stops. That is the
       // difference between a halted run and a wrong one.
-      return { found: 'none', tried: [binding.strategy] };
+      return { found: 'none', by, why: 'what it found is not what was approved' };
     }
   }
-  return { found: 'one', locator, by: binding.strategy };
+  return { found: 'one', locator, by };
 }
 
-export function describeRefusal(label: string, resolution: Resolution): string {
-  return resolution.found === 'many'
-    ? `"${label}" matched ${resolution.count} things on the page. A name that fits more than one identifies neither.`
-    : `"${label}" matched nothing on the page.`;
+export function describeRefusal(label: string, r: Resolution): string {
+  if (r.found === 'many') {
+    return `"${label}" matched ${r.count} things on the page. A name that fits more than one identifies neither.`;
+  }
+  if (r.found === 'none') {
+    return r.why
+      ? `"${label}" could not be identified: ${r.why}.`
+      : `"${label}" matched nothing on the page.`;
+  }
+  return `"${label}" resolved.`;
 }

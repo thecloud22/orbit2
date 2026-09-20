@@ -36,7 +36,8 @@ const steps: Step[] = [
   // than a failure — which is the whole of how "no such record" is expressed.
   { id: s.look, kind: 'read', summary: 'Did it say there is no such file?',
     region: { label: 'No file matches that loan number.',
-              binding: { strategy: 'text', name: 'No file matches that loan number.' } },
+              binding: { strategy: 'text', name: 'No file matches that loan number.',
+                          corroborate: { text: 'No file matches' } } },
     produces: { name: 'notFound', label: 'Not-found notice', type: 'text', required: false } },
 
   { id: s.branch, kind: 'branch', summary: 'Did a file come back?',
@@ -46,7 +47,14 @@ const steps: Step[] = [
   // A value in a div with no attribute of any kind, named only by the label
   // beside it. The rung an old page usually leaves you on.
   { id: s.read, kind: 'read', summary: 'The note rate',
-    region: { label: 'Note rate', binding: { strategy: 'structural', name: 'Note rate' } },
+    region: { label: 'Note rate', binding: {
+      strategy: 'structural', name: 'Note rate',
+      // Measured: this rung returns one confidently-wrong element roughly a
+      // sixth of the time, because the sibling is always *something*. It is
+      // refused outright without a corroboration, so this says what the value
+      // must look like — a percentage — and a <td> wrapper would not match.
+      corroborate: { text: '%' },
+    } },
     produces: { name: 'noteRate', label: 'Note rate', type: 'text', required: true } },
 
   { id: s.found, kind: 'end', summary: 'File found', outcome: 'fileFound', publishes: ['noteRate'] },

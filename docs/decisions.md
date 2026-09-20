@@ -30,6 +30,7 @@ specification forced a choice, that is said plainly instead of being dressed up.
 | 12 | [Resolution at the publish gate is exact](#decision-12--resolution-at-the-publish-gate-is-exact) | Adopted |
 | 13 | [A judged step, and what holds it](#decision-13--a-judged-step-and-what-holds-it) | Shape adopted; **not built in slice 1** |
 | 14 | [The step kinds, the value types, and how a step names a value](#decision-14--the-step-kinds-the-value-types-and-how-a-step-names-a-value) | Adopted |
+| 15 | [The locator, from measurement](#decision-15--the-locator-from-measurement) | Adopted |
 
 ## How these were judged
 
@@ -1904,6 +1905,136 @@ Nothing in the acceptance criteria needs it, and it is the kind most likely to g
 
 ---
 
+## Decision 15 — The locator, from measurement
+
+**Status:** adopted.
+**Settles:** what is written into a published version when a step names something on a page, which
+rungs are tried in what order, and what the product cannot reach.
+
+This is the hole [Decision 14](#decision-14--the-step-kinds-the-value-types-and-how-a-step-names-a-value)
+left open, and the first decision here derived from a number rather than an argument.
+
+### The requirement
+
+> Stops when the control no longer matches what was approved, when a page does not reach the
+> expected state, when navigation fails, or when an assertion fails. Each is a distinct, named
+> failure. (§7)
+
+> **Refuse rather than guess.** Where Orbit cannot establish what was intended, it stops and says
+> what it could not establish. (§13)
+
+And [Decision 12](#decision-12--resolution-at-the-publish-gate-is-exact), which this decision found
+to be *insufficient as written*.
+
+### The options
+
+**Option A — a ladder reasoned from first principles.** What
+[Decision 11](#decision-11--how-a-workflow-is-authored) did: role and name, then a form `name`,
+then adjacent text, then a structural anchor. Plausible, and untested.
+
+**Option B — a ladder derived from measurement** against `demo/legacy-portal`, which was built
+page by page to be hard to bind to and carries no `data-testid` anywhere.
+
+### The trade-off
+
+There is not one. A is what was available before the portal existed; B is available now, and it
+contradicted A in a way that mattered. The only cost is the measurement itself, which took an hour.
+
+### What the measurement found
+
+181 workflow-relevant elements, across 17 page states, each tried with every name an author could
+plausibly supply and every plausible role. A strategy counts only when it returns **exactly one
+element and that element is the target**.
+
+| Rung | Unique | Ambiguous | **Confidently wrong** | Nothing |
+|---|---:|---:|---:|---:|
+| `roleAndName` | 73 | 25 | **0** | 83 |
+| `label` | 0 | 0 | 0 | 181 |
+| `formName` | 7 | 2 | 0 | 172 |
+| `text` | 128 | 37 | **10** | 5 |
+| `structural` | 54 | 12 | **28** | 84 |
+
+**The finding that changes the design: `count() === 1` is necessary and not sufficient.** A rung
+can return exactly one element and have it be the wrong element. `structural` did so 28 times out
+of 181, because `following-sibling::*[1]` always returns *something* — on a two-column form, the
+`<td>` wrapping the input rather than the input. Decision 12 refuses ambiguity; it says nothing
+about a confident lie, and a confident lie is worse than a refusal.
+
+All 120 orderings of the five were simulated. Reach barely moved (133–154 correct); wrong binds
+moved a great deal (7–28). **Ordering is a safety choice, not a reach choice.**
+
+### Decision
+
+#### 1. Seven rungs, ordered by how often they are wrong
+
+```
+roleAndName  →  label  →  formName  →  controlBeside  →  rowAndColumn  →  text  →  structural
+└──────────────── never returns the wrong element ─────────────────┘   └── can lie ──┘
+```
+
+`label` reached nothing on this portal and stays, because it reaches a great deal on a modern one
+and is never wrong on either. A rung that is useless here and safe everywhere costs a few
+milliseconds.
+
+#### 2. The two rungs that can lie may not be used uncorroborated
+
+`text` and `structural` are **refused outright** unless the binding says what must also be true of
+whatever is found. Not discouraged — refused, by the resolver, before it looks at the page. An
+uncorroborated match from either is not evidence of anything.
+
+This is the rule that closes the gap Decision 12 left. Exact resolution plus corroboration is what
+"the control still matches what was approved" actually requires.
+
+#### 3. Two rungs added, because the evidence asked for them
+
+- **`controlBeside`** — like `structural`, but the sibling must *be* a control (`input, select,
+  textarea, button, a`). Measured 11 unique, 0 ambiguous, 0 wrong: every field in a label-cell
+  layout. It converts most of `structural`'s 28 wrong binds into correct ones, which is why it sits
+  five rungs above it.
+- **`rowAndColumn`** — a grid cell named by its row and its column heading, the way a person names
+  one. Measured 52 unique, **0 ambiguous, 0 wrong** — the only rung with no failure mode at all.
+  It requires a binding carrying two names, which the original single-`name` shape could not hold.
+
+#### 4. A scope, so "which of the two tables" is expressible
+
+`within` narrows to the region containing a given text, or to a named frame. Without it, two
+identical grids on one page are unreachable by anything, and every element inside a frame is
+unreachable by everything.
+
+#### 5. What is stored in the version
+
+The binding is a small record, not a selector string: the rung, the names it matches on, the scope,
+and what must also be true. A selector string would be a fragment of a language, and a version
+holding one could not be reasoned about without evaluating it.
+
+### What Orbit cannot reach, and will say so
+
+16 of 181 after the two new rungs, and these are **documented limits rather than bugs**:
+
+| Shape | Why nothing reaches it |
+|---|---|
+| An input named only by `autocomplete` | No id, name, label, placeholder or title. Nothing to match on. |
+| Two controls sharing one `name` | Their visible labels differ and no rung gets from a label to its control. |
+| A heading colliding with a button's `value` | `Sign on` is both. |
+| A nav link repeated in a bar and a footer | No `href`, so no link role, and no name distinguishes them. |
+| A control made unbindable by being used | Clicking it makes a heading echo its text, so a replay finds two. |
+| One word as both a form label and a column heading | The most ordinary shape in the set. |
+
+A step naming one of these is refused **at publication**, which is the right moment: the author
+finds out while they are still authoring, rather than a run finding out in front of an operator.
+
+### How this is tested
+
+- A `text` or `structural` binding with no corroboration is refused by the resolver without the
+  page being consulted.
+- A binding whose corroboration does not hold reports nothing found, and the run halts rather than
+  acting on what it found.
+- `rowAndColumn` resolves each cell of a grid whose values repeat, and refuses where two grids on
+  one page share column headings and no `within` is given.
+- The measurement is re-runnable, and the numbers above are its output rather than an assertion.
+
+---
+
 ## What these decisions commit each other to
 
 The decisions are not independent, and it is worth stating the joins so that a later change to one
@@ -1992,14 +2123,10 @@ Named here so that an omission is not mistaken for a decision.
 - **Environments, and promotion between them** (§12) — removed from slice 1 by Decision 5 item 6,
   returning with roles. Until then the host allowlist is the only boundary, and Decision 6's
   amendment says what that costs.
-- **The locator — what actually gets written into a published version.**
-  [Decision 11](#decision-11--how-a-workflow-is-authored) fixed the *ladder* a proposal is derived
-  by; it never fixed the stored shape. This is the one remaining hole in
-  [Decision 14](#decision-14--the-step-kinds-the-value-types-and-how-a-step-names-a-value), it is a
-  single typed column on `step`, and it reaches nothing else — not the run tables, the audit chain,
-  the evidence store or the editor. It should be settled from **measurement** against
-  `apps/legacy-portal`, which was built page by page for exactly that, rather than from a ladder
-  argued from first principles.
+- **Terminal and service bindings.** [Decision 15](#decision-15--the-locator-from-measurement)
+  measures a browser. A terminal names a field by its address on a screen, and a service names an
+  operation in a contract; neither is a rung on this ladder and both want their own measurement
+  when those surfaces arrive.
 - **The closed set of typed errors.** §13's matrix is written as testable behaviour and the error
   kind is stored on every failed run for good. It is as closed a set as the step kinds, and it has
   never been enumerated.
