@@ -1,0 +1,42 @@
+/**
+ * Every colour, in one place, as custom properties resolved at run time.
+ *
+ * Decision 10: a customer's branding is data the deployment serves, not a
+ * rebuild. No component names a colour — the discipline that makes the swap
+ * a swap rather than a rewrite.
+ *
+ * Colour has five jobs and no more. A business outcome is never coloured,
+ * because judging someone else's conclusion would be guessing.
+ */
+:root {
+  --page: #FAF9F5;
+  --panel: #FFFFFF;
+  --panel-2: #F3F1EA;
+  --nav: #12131A;
+  --ink: #141413;
+  --ink-2: #6B6B66;
+  --rule: #ECE9E2;
+  --rule-2: #DCD8CE;
+
+  --primary: #FF6B6B;          /* the one loud thing: a primary action */
+  --ok: #4ECDC4;               /* succeeded */
+  --running: #A78BFA;          /* in progress */
+  --attention: #FFD93D;        /* waiting on you */
+  --failed: #B3352F;           /* a technical failure, and nothing else */
+
+  --ok-ink: #0F766E;
+  --running-ink: #6D46C8;
+  --attention-ink: #8A6A00;
+  --failed-ink: #B3352F;
+  --ok-wash: #E3F7F5;
+  --running-wash: #F1ECFE;
+  --attention-wash: #FFF8DC;
+  --failed-wash: #FFECEC;
+
+  --font: 'Libre Franklin', system-ui, sans-serif;
+  --mono: 'Spline Sans Mono', ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font-family: var(--font); -webkit-font-smoothing: antialiased; }
+a { color: var(--failed-ink); }

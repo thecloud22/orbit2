@@ -1,3 +1,4 @@
 packages:
-  - 'apps/*'
-  - 'packages/*'
+  - 'apps/*'       # Orbit's own applications
+  - 'demo/*'       # the applications Orbit is pointed at
+  - 'packages/*'   # shared code

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "migrate": "node --experimental-strip-types src/migrate.ts",
+    "seed": "node --experimental-strip-types src/seed.ts",
+    "dev": "node --experimental-strip-types --watch src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/*.test.ts"
   },
