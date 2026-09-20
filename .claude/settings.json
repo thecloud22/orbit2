@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude plugin *)",
+      "Bash(brew reinstall *)",
+      "Bash(git clone *)",
+      "Bash(ls -la ~/.claude/skills/ 2>/dev/null | grep designer)",
+      "Read(//Users/karthik/.claude/skills/**)",
+      "Bash(rm -rf claude-code)",
+      "Bash(find ~/.claude/plugins/marketplaces -name \"plugin.json\" -o -name \"PLUGIN.md\" 2>/dev/null | head -20)",
+      "Read(//Users/karthik/.claude/plugins/marketplaces/**)"
+    ],
+    "additionalDirectories": [
+      "/Users/karthik/labs/orbit2/claude-code"
+    ]
+  }
+}

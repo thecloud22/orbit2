@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ],
+    "deny": []
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/guard-immutable.py",
+            "statusMessage": "Checking immutability rules"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import json;print(json.dumps({'systemMessage':'Slice check: if behaviour changed, is docs/ACTIVE_TASK.md updated, and does it still match the slice brief?'}))\""
+          }
+        ]
+      }
+    ]
+  }
+}
