@@ -10,8 +10,20 @@ reality.
 
 ## Status
 
-**Nothing has been built.** No code, no package manifest, no schema. Twelve architecture decisions
-are closed and recorded in `docs/decisions.md`.
+**One loop runs, end to end.** A published version executes against a real browser and leaves
+evidence a stranger can read. Fourteen decisions are closed in `docs/decisions.md`.
+
+| | |
+|---|---|
+| `packages/contract` | The closed sets, declared once. Ten step kinds, five value types, the error and event vocabularies. Unknown keys refused; a secret accepted in one field of one kind. |
+| `apps/api` | Six migrations. Immutability enforced by revoked privileges **and** a trigger, proved by a test that asserts the owner is refused too. Artefacts verified against their digest when served. |
+| `apps/worker` | Claims a run with a lease, drives Chromium, records every attempt, event and screenshot. Consults no model, and cannot. |
+| `apps/web` | The run page, reading real records. Status and outcome as two facts; only the technical one is coloured. |
+| `demo/*` | Four portals Orbit is pointed at. |
+
+**Proved against a real page, not a fixture:** two runs of one version differing only in their input.
+The loan number that does not exist comes out **succeeded**, conclusion *no such file*, **no error** —
+acceptance criterion 7. Not one binding reads a `data-testid`.
 
 ## What is closed
 
@@ -61,9 +73,8 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | The application slice 1 runs against | **Karthik** | To be provided. Legacy, server-rendered, WebSEAL-fronted. |
 | One accessibility snapshot of a real WebSEAL page | **Karthik** | Determines whether the locator ladder in Decision 11 needs a rung below structural anchors. Cheap to get, expensive to discover late. |
 | The locator's stored shape | Claude | One typed column on `step`, and the only hole left in Decision 14. To be settled from **measurement** against `apps/legacy-portal`, not from argument. |
-| The schema and its migrations | Claude | **In progress.** Zod at the boundaries, the database owning the invariants. Drizzle over raw SQL so the grants and triggers stay visible. |
-| The closed set of typed errors | Claude | §13's matrix, stored on every failed run for good. Never enumerated. |
-| The closed set of event kinds | Claude | §10's structured events — the record a run is reconstructed from. Never enumerated. |
+| Authoring | Claude | Nothing yet. Needs a model key in `.env`; execution needs none, and has none. |
+| The locator ladder, from measurement | Claude | **In progress.** Being measured against `demo/legacy-portal` — which strategies resolve to exactly one thing, and which shapes nothing reaches. |
 
 ## Open, not blocking
 
@@ -88,6 +99,8 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | 2026-09-20 | Decisions 9–12 recorded: TypeScript/Node, React with headless primitives, *model maps Orbit verifies*, exact resolution. |
 | 2026-09-20 | Engineering instructions moved to `docs/engineering/`; all documentation now under `docs/`. |
 | 2026-09-20 | Interface designed as 23 screens on a canvas, in the customer palette. Home drawn in both states, day one and in use. |
+| 2026-09-20 | Error and event vocabularies enumerated from §13's matrix and from what the executor actually writes, and constrained in the database. A succeeded run cannot carry an error and a failed one must name its kind. |
+| 2026-09-20 | One loop end to end: schema, worker, browser, evidence, run page. |
 | 2026-09-20 | Amendments: redaction deferred with a sign-in interlock; S3 named as the eventual store; a registered credential held encrypted and written out of band; provider and model moved to configuration. |
 | 2026-09-20 | Decision 14 recorded: ten step kinds, five value types, how a step names a value, the authority flag, `for each` semantics, and calculation deferred. |
 | 2026-09-20 | Practice portals moved to `apps/`; ADR references from another project removed; repo made a pnpm workspace with a strict shared tsconfig. |

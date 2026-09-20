@@ -9,14 +9,14 @@
  * (Decision 2), so an attempt that started and never ended is exactly the
  * interrupted case and is found by a query rather than by inference.
  */
-import type { Step } from '@orbit/contract';
+import type { ErrorKind, Step } from '@orbit/contract';
 import type { Page } from 'playwright';
 import { chromium } from 'playwright';
 import type { PoolClient } from 'pg';
 import { describeRefusal, resolve, type Binding } from './binder.ts';
 import { capture } from './evidence.ts';
 
-export interface Halt { kind: string; step: number; describe: string }
+export interface Halt { kind: ErrorKind; step: number; describe: string }
 
 interface Ctx {
   db: PoolClient;
@@ -93,7 +93,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
     case 'enter': {
       const found = await bind();
       if ('refusal' in found) {
-        const halt = { kind: found.many ? 'controlAmbiguous' : 'controlNotFound', step: position, describe: found.refusal };
+        const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
       const ref = step.value;
@@ -107,7 +107,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
     case 'activate': {
       const found = await bind();
       if ('refusal' in found) {
-        const halt = { kind: found.many ? 'controlAmbiguous' : 'controlNotFound', step: position, describe: found.refusal };
+        const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
       await found.locator.click();
@@ -128,7 +128,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
           await event(ctx, attemptId, 'read.absent', { value: name });
           await end('ok'); return 'ok';
         }
-        const halt = { kind: found.many ? 'regionAmbiguous' : 'regionNotFound', step: position, describe: found.refusal };
+        const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
       const text = (await found.locator.innerText()).trim();
@@ -154,8 +154,8 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       const target = took ? step.ifTrue : step.ifFalse;
       const to = positionOf.get(target);
       if (to === undefined) {
-        const halt = { kind: 'pathReachesNothing', step: position,
-          describe: 'this branch names a step the version does not contain' };
+        const halt: Halt = { kind: 'pathReachesNothing', step: position,
+          describe: 'This branch names a step the version does not contain.' };
         return halt;
       }
       return { goto: to };
@@ -166,7 +166,11 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       await end('ok'); return 'ok';
     }
     default: {
-      const halt = { kind: 'notYetExecutable', step: position, describe: `${step.kind} is not executed yet` };
+      // A kind the executor does not carry out yet halts rather than skipping.
+      // Skipping would make a run that did less than the version says look the
+      // same as one that did all of it.
+      const halt: Halt = { kind: 'pathReachesNothing', step: position,
+        describe: `A ${step.kind} step is not executed yet, so this run cannot continue.` };
       await end('halted', halt); return halt;
     }
   }

@@ -8,8 +8,15 @@
     "seed": "node --experimental-strip-types src/seed.ts",
     "dev": "node --experimental-strip-types --watch src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/*.test.ts"
+    "test": "node --experimental-strip-types --test --test-concurrency=1 src/*.test.ts"
   },
-  "dependencies": { "@orbit/contract": "file:../../packages/contract", "pg": "^8.13.0" },
-  "devDependencies": { "@types/node": "^22", "@types/pg": "^8.11.0", "typescript": "^5.9.0" }
+  "dependencies": {
+    "@orbit/contract": "file:../../packages/contract",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.9.0"
+  }
 }
