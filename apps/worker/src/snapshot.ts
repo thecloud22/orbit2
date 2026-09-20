@@ -1,0 +1,208 @@
+/**
+ * What the model is shown, and what it is allowed to say back.
+ *
+ * Two decisions shape this, and the second is the one that matters.
+ *
+ * **Show structure, not pixels** (Decision 6 constraint 5): cheaper, and it
+ * makes what the model saw reviewable as text six months later. A page is
+ * reduced to the elements a workflow could plausibly act on — a `legacy-portal`
+ * page has around two hundred nodes and perhaps fifteen worth naming, and the
+ * rest is haystack.
+ *
+ * **The model says which element; Orbit decides how to find it again.** The
+ * model picks an index off this list. It never chooses a strategy, never
+ * writes a selector and never sees one. The binding is derived by Orbit from
+ * the measured ladder (Decision 15), so the safety of a workflow does not
+ * depend on a model having picked the safe rung.
+ */
+import type { Frame, Page } from 'playwright';
+import type { Binding, Strategy } from './binder.ts';
+
+export interface Seen {
+  /** What the model refers to. Meaningless outside this snapshot, and never
+   *  stored: an index is converted to a durable binding before anything keeps it. */
+  index: number;
+  what: 'field' | 'button' | 'link' | 'value' | 'heading';
+  role: string;
+  name: string;
+  /** For a value: the label beside it, which is how a person names it. */
+  labelledBy?: string;
+  /** For a grid cell: its row and its column heading. */
+  row?: string;
+  column?: string;
+  /** Filled by Orbit, never proposed by the model. */
+  binding: Binding;
+}
+
+/**
+ * `data-testid` is deliberately absent from everything below. These portals
+ * carry them for their own test suites; an application a customer runs will
+ * not, and binding to one would make the binder look solved.
+ */
+const COLLECT = `
+(() => {
+  const out = [];
+  const text = (el) => (el.textContent || '').trim().replace(/\\s+/g, ' ');
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+
+  // Fields, buttons and links: the things a step can act on.
+  for (const el of document.querySelectorAll('input, select, textarea, button, a')) {
+    if (!visible(el)) continue;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'input' && ['hidden'].includes(el.type)) continue;
+    // A link or button wrapping a structure is chrome, not a control. Its text
+    // is the concatenation of everything inside it — a name no person would
+    // use and no strategy can match. A genuine control has no element children
+    // or one, an icon.
+    if (el.querySelector('input, select, textarea, button, a')) continue;
+    if (el.children.length > 1) continue;
+
+    const labelEl = el.labels && el.labels[0];
+    const name =
+      (labelEl && text(labelEl))
+      || el.getAttribute('aria-label')
+      || el.getAttribute('title')
+      || el.getAttribute('alt')
+      || (el.querySelector('img') && el.querySelector('img').getAttribute('alt'))
+      || (tag === 'input' && el.type === 'submit' ? el.value : '')
+      || el.getAttribute('placeholder')
+      || text(el);
+
+    // The label in the cell beside it, which is what an old two-column form
+    // gives you and often the only name a person would use.
+    let beside = '';
+    const cell = el.closest('td');
+    if (cell && cell.previousElementSibling) beside = text(cell.previousElementSibling);
+
+    // A name longer than a label is a subtree that got collapsed, not a name.
+    if ((name || '').trim().length > 80) continue;
+
+    out.push({
+      tag,
+      type: el.type || null,
+      what: tag === 'a' ? 'link' : (tag === 'button' || el.type === 'submit' ? 'button' : 'field'),
+      role: tag === 'a' ? 'link' : (tag === 'button' || el.type === 'submit' ? 'button' : (tag === 'select' ? 'combobox' : 'textbox')),
+      name: (name || '').trim(),
+      formName: el.getAttribute('name') || null,
+      labelledBy: beside || null,
+      row: null, column: null,
+    });
+  }
+
+  // Values a workflow could read: a labelled figure, and a grid cell.
+  for (const el of document.querySelectorAll('td, dd')) {
+    if (!visible(el)) continue;
+    if (el.querySelector('input, select, textarea, button, a')) continue;
+    const value = text(el);
+    if (!value || value.length > 120) continue;
+
+    const table = el.closest('table');
+    let row = null, column = null;
+    if (table) {
+      const tr = el.closest('tr');
+      const position = Array.from(tr.children).indexOf(el);
+      const headerRow = table.querySelector('tr');
+      const header = headerRow && headerRow.children[position];
+      column = header ? text(header) : null;
+      row = tr.children[0] && tr.children[0] !== el ? text(tr.children[0]) : null;
+    }
+    const before = el.previousElementSibling;
+    out.push({
+      tag: el.tagName.toLowerCase(), type: null, what: 'value', role: 'cell',
+      name: value, formName: null,
+      labelledBy: before && !before.querySelector('input,button,a') ? text(before) : null,
+      row, column,
+    });
+  }
+
+  // A labelled figure that is not in a table: <div>label</div><div>value</div>.
+  for (const el of document.querySelectorAll('div, span, p')) {
+    if (!visible(el)) continue;
+    if (el.children.length > 0) continue;
+    const before = el.previousElementSibling;
+    if (!before || before.children.length > 0) continue;
+    const label = text(before), value = text(el);
+    if (!label || !value || label.length > 60 || value.length > 60) continue;
+    out.push({ tag: 'div', type: null, what: 'value', role: 'text',
+      name: value, formName: null, labelledBy: label, row: null, column: null });
+  }
+
+  for (const el of document.querySelectorAll('h1, h2, h3')) {
+    if (!visible(el)) continue;
+    out.push({ tag: el.tagName.toLowerCase(), type: null, what: 'heading',
+      role: 'heading', name: text(el), formName: null, labelledBy: null, row: null, column: null });
+  }
+  return out;
+})()
+`;
+
+interface Raw {
+  tag: string; type: string | null; what: Seen['what']; role: string;
+  name: string; formName: string | null; labelledBy: string | null;
+  row: string | null; column: string | null;
+}
+
+/**
+ * Orbit's choice of rung, taken in the order Decision 15 measured, from what
+ * this element actually offers. The model is not consulted.
+ */
+function bindingFor(raw: Raw, seenNames: Map<string, number>): Binding {
+  const unique = (name: string) => (seenNames.get(name) ?? 0) === 1;
+
+  if (raw.name && raw.role && unique(raw.name)) {
+    return { strategy: 'roleAndName' as Strategy, role: raw.role, name: raw.name };
+  }
+  if (raw.formName) return { strategy: 'formName', name: raw.formName };
+  if (raw.labelledBy && raw.what === 'field') {
+    return { strategy: 'controlBeside', name: raw.labelledBy };
+  }
+  if (raw.row && raw.column) return { strategy: 'rowAndColumn', row: raw.row, column: raw.column };
+  if (raw.labelledBy) {
+    // The rung measured at 28 wrong binds out of 181, so it never goes out
+    // without something that must also be true.
+    return { strategy: 'structural', name: raw.labelledBy, corroborate: { text: raw.name.slice(0, 24) } };
+  }
+  return { strategy: 'text', name: raw.name, corroborate: { text: raw.name.slice(0, 24) } };
+}
+
+export async function snapshot(page: Page | Frame): Promise<Seen[]> {
+  const raw = await page.evaluate(COLLECT) as Raw[];
+  const counts = new Map<string, number>();
+  for (const r of raw) counts.set(r.name, (counts.get(r.name) ?? 0) + 1);
+
+  return raw
+    .filter((r) => r.name.length > 0)
+    .map((r, index) => {
+      const seen: Seen = {
+        index: index + 1, what: r.what, role: r.role, name: r.name,
+        binding: bindingFor(r, counts),
+      };
+      if (r.labelledBy) seen.labelledBy = r.labelledBy;
+      if (r.row) seen.row = r.row;
+      if (r.column) seen.column = r.column;
+      return seen;
+    });
+}
+
+/** How the page reaches the model: text, numbered, and nothing else. */
+export function asText(seen: Seen[]): string {
+  // One unambiguous name per line, after the dash. An earlier format put the
+  // kind and quotes on the same line and the model copied all of it — which
+  // was the format's fault, not the model's.
+  return seen.map((s) => {
+    const extra = s.row && s.column ? `  (row ${s.row}, column ${s.column})`
+      : s.labelledBy && s.what === 'value' ? `  (labelled ${s.labelledBy})` : '';
+    return `${s.what.padEnd(7)} — ${s.name}${extra}`;
+  }).join('\n');
+}
+
+/** Tolerates a name copied with its kind or its quotes still attached. */
+export function normaliseName(given: string): string {
+  return given
+    .replace(/^(field|button|link|value|heading)\s*[\u2014-]?\s*/i, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+}
