@@ -2,6 +2,8 @@ import { createServer } from 'node:http';
 import { serveArtefact } from './artefacts.ts';
 import { listRuns, readRun, readRunSteps } from './runs.ts';
 import { listWorkflows, readWorkflow } from './workflows.ts';
+import { testCases } from './activate.ts';
+import { pool } from './db.ts';
 
 const port = Number(process.env['ORBIT_PORT'] ?? 4000);
 
@@ -24,6 +26,13 @@ createServer(async (req, res) => {
       return found
         ? json(res, 200, found)
         : json(res, 404, { kind: 'nothingMatching', reference: workflow[1] });
+    }
+
+    const tests = /^\/api\/versions\/([0-9a-f-]{36})\/tests$/.exec(url.pathname);
+    if (tests) {
+      const db = await pool.connect();
+      try { return json(res, 200, await testCases(db, tests[1]!)); }
+      finally { db.release(); }
     }
 
     const artefact = /^\/api\/artefacts\/([0-9a-f-]{36})$/.exec(url.pathname);
