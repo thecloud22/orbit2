@@ -32,3 +32,6 @@ pnpm-debug.log*
 # Playwright
 test-results/
 playwright-report/
+
+# Workspace installs
+node_modules/
