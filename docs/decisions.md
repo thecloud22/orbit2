@@ -29,6 +29,7 @@ specification forced a choice, that is said plainly instead of being dressed up.
 | 11 | [How a workflow is authored](#decision-11--how-a-workflow-is-authored) | Adopted |
 | 12 | [Resolution at the publish gate is exact](#decision-12--resolution-at-the-publish-gate-is-exact) | Adopted |
 | 13 | [A judged step, and what holds it](#decision-13--a-judged-step-and-what-holds-it) | Shape adopted; **not built in slice 1** |
+| 14 | [The step kinds, the value types, and how a step names a value](#decision-14--the-step-kinds-the-value-types-and-how-a-step-names-a-value) | Adopted |
 
 ## How these were judged
 
@@ -1618,6 +1619,236 @@ an address, or a path the version did not declare — Decision 6 is broken and t
 
 ---
 
+## Decision 14 — The step kinds, the value types, and how a step names a value
+
+**Status:** adopted.
+**Settles:** what a workflow is made of. The closed set of step kinds and what each declares; the
+closed set of value types; how a step refers to a value; the authority flag on a state-changing
+step; what `for each` may do; and whether a workflow can calculate.
+
+Almost everything else depends on this — the schema, the editor, the executor, the run page and
+the acceptance tests all take their shape from it.
+
+### The requirement
+
+> The workflow editor is where a procedure becomes precise. It is a structured, step-based editor
+> rather than a free canvas, because **every step must be one of a closed set of things Orbit knows
+> how to carry out and can validate**. A designer cannot express something ambiguous, and therefore
+> cannot publish something ambiguous. (§6)
+
+> **No free-form option**: the absence of an "arbitrary code" choice is a product guarantee, not a
+> gap. (§6)
+
+> **Every kind named in business terms**: what the step accomplishes, not the mechanism by which it
+> is carried out. (§6)
+
+> Publication is the gate. Orbit refuses to publish a workflow it cannot resolve completely: an
+> incomplete step, **a value no step in the workflow produces**, a path that reaches no declared
+> ending, or an instruction it does not fully understand each block publication. (§4)
+
+### The options
+
+**Option A — a set with an escape hatch**, a "custom step" for whatever the set does not cover.
+Ruled out in as many words by §6: "the absence of an 'arbitrary code' choice is a product
+guarantee, not a gap." It is listed only so the rejection is recorded rather than assumed.
+
+**Option B — a minimal set**, four or five primitives from which everything else is composed.
+Attractive on paper. It fails in practice for a specific reason: when ordinary work is awkward to
+express, authors route around the editor. A free-text "notes" field becomes a scripting language by
+convention, and the guarantee is lost without anybody deciding to lose it.
+
+**Option C — a set sized to the work**, closed, with additions only by a decision like this one.
+
+### The trade-off
+
+B keeps the set small and makes the product harder to use; A makes the product easy and the claim
+false. C has to be judged by whether each kind earns its place, and the test is whether a procedure
+a person could write down can be expressed without contortion. Ten kinds is what that came to.
+
+The discipline C needs is that the set stays *closed*: adding a kind is a decision with a
+requirement behind it, not a ticket.
+
+### Decision
+
+#### 1. Ten kinds
+
+Named in business terms, and surface-neutral — a step says what the business does, and the
+registered application determines how it is carried out ([Decision 5](#decision-5--what-a-registered-application-is) item 9).
+
+| Kind | Declares | Produces | Halts when |
+|---|---|---|---|
+| `open` | the page; what must be true for it to count as arrived; whether opening it changes a record | — | will not load · not the expected page · address not permitted |
+| `enter` | the control; the value; whether the value is sensitive | — | control missing · resolves twice · not writable · corroboration failed |
+| `activate` | the control; what must be true after; **whether pressing it changes a record** | — | control missing · resolves twice · nothing changed · corroboration failed |
+| `read` | the region; what to call the value; its type; whether it is required | one value | region missing · resolves twice · empty when required · not of the declared type |
+| `collect` | the table; the columns wanted; what to call the list; the most rows | a list of rows | table missing · resolves twice · column missing · more rows than allowed |
+| `check` | two values; a comparison; what to say if it is not true | — | it is not true — with both values recorded as they arrived |
+| `branch` | two values; a comparison; a path per result | — | never. Publication fails if a path reaches no ending |
+| `for each` | the list; what each row is called; the steps; **the most passes** | — | the list is longer than the ceiling |
+| `hand off` | what to ask; which values to show the person; what they hand back | what the person supplied | never. It waits, indefinitely |
+| `end` | which declared conclusion; which values to publish | the run's outputs | never. It is the stop |
+
+`judge` is an eleventh, held back by
+[Decision 13](#decision-13--a-judged-step-and-what-holds-it). `derive` is a twelfth, deferred at
+item 6 below. `attach` and `download` arrive with the file surface.
+
+**Evidence, which is uniform enough not to need a column:** a screenshot after anything that
+changes the screen, and a page snapshot after navigation. `read` also keeps the value it read;
+`collect` the rows and a spreadsheet; `check` and `branch` both operands exactly as they arrived;
+`for each` each pass on its own; `hand off` the request, the responder and the time.
+
+**`branch` is two-way.** A multi-way switch avoids nesting at the cost of a single step quietly
+holding nine outcomes, and it makes §10's requirement to show both operands much harder to render
+honestly. Deep nesting is a signal that a procedure wants splitting, not a problem to design around.
+
+**An empty region is not automatically a failure.** `read` declares whether the value is required.
+Not required and empty means the value is *absent*, and a later `branch` may test for that. This is
+what makes §10's *"a run that correctly establishes a record does not exist"* expressible at all;
+without it, acceptance criterion 7 cannot be written.
+
+#### 2. Five value types
+
+| Type | What it is | Compares with |
+|---|---|---|
+| `text` | a string. Constraints: a pattern, a list of allowed values, a maximum length | is · is not · contains · starts with |
+| `number` | any number, amounts included | is · is more than · is at least · is less than · is at most |
+| `date` | a calendar date | is · is before · is after |
+| `yes/no` | true or false. The step declares what counts as each on screen | is · is not |
+| `list of rows` | what `collect` produces; typed columns | row count. `for each` takes one |
+
+**Deliberately not types:** reference, account number, email, postcode, money. Each is `text` with a
+pattern, or a `number`. The moment "reference" is a type, the type set begins modelling a business
+rather than being closed, and it acquires a new member every quarter.
+
+**A time type is deferred.** Nothing in §4, §10 or §13 needs a time comparison. When it arrives it
+is absolute — stored as an instant — and a screen value must carry a zone or the application
+revision must declare one. Never inferred. Until then a procedure needing "within the last hour" is
+refused at publication, which is a refusal doing its job rather than a gap.
+
+**Absent is not a value of any type.** It is a separate state. A `branch` may test whether a value
+is absent; any other comparison against an absent value halts. Without this, "there was no record"
+and "the record said nothing" are the same thing, which is the confusion the product exists to
+prevent.
+
+**Nothing is ever coerced.** If the screen says `N/A` where the step declared `number`, the run
+halts and the raw text is kept exactly as it appeared — which is what makes it fixable, because
+almost always the screen showed something the workflow did not expect and the raw text says so.
+
+**Like compares with like.** Text against number does not publish. Implicit conversion is the thin
+end of an expression language.
+
+**The application revision declares how its screens write numbers and dates** — thousands and
+decimal separators, symbols to ignore, whether a negative is `-1,234` or `(1,234)`, and the date
+format. Parsing is then exact rather than heuristic: it matches the declared format or it halts.
+This sits on the application because it is a property of the screens rather than of any one
+reading, and changing it mints a revision, which is Decision 5 already working.
+
+#### 3. How a step names a value
+
+Five things may appear where a step expects a value, and nothing else:
+
+| Reference | Where it is allowed |
+|---|---|
+| a run input, declared on the version | anywhere |
+| a value an earlier step produced | anywhere after its producer |
+| a column of the row being processed | only inside a `for each` pass |
+| a literal | anywhere |
+| **a named secret** | **only as the value of an `enter` step** |
+
+1. **A step may reference a value only if it is produced on every path that reaches it.**
+   Publication checks it and names the step and the value. This is §4's "a value no step in the
+   workflow produces" as a check that runs. It is not as strict as it sounds, because branches here
+   usually run to their own `end` rather than merging.
+2. **Two steps may produce the same value**, provided every producer declares the same type. This
+   is what makes rule 1 livable: two branches may each read into the same name, and after a merge
+   it is properly defined.
+3. **A secret is in a namespace of its own.** It cannot be read into, compared, published, or used
+   in a `check`. Not by policy — the reference kind is accepted in exactly one field of one step
+   kind, so rule 8 is structural rather than remembered.
+4. **Nothing escapes a `for each` pass.** Values produced inside a pass are scoped to it and
+   recorded per pass. An `end` cannot publish one.
+5. **No shadowing.** A row's name may not collide with a run value's.
+6. **A value nothing references is allowed, silently.** Reading a value purely so that it is in the
+   evidence is legitimate; sometimes the record is the point of the step.
+
+**There is no syntax, and that is the point.** No `${value}`, no dotted path anybody types, no
+parser. The editor offers a control that either picks an existing value from a list or takes a
+literal, so a reference cannot be malformed and "no expressions" is true by construction rather
+than by validation. The moment there is a text field where a value belongs, somebody will want
+`+ 1` in it.
+
+**On step identity.** §6 says the position number is "what the rest of the product refers to". That
+is safe, and it is worth saying why, because it looks unsafe: positions shift when a draft is
+reordered, but a *version* is immutable, and every run names its version. Within a version a
+position never moves. So run evidence may refer to a position, while the draft needs stable step
+identifiers of its own so that references survive the reordering §6 explicitly permits.
+
+#### 4. The authority flag on a state-changing step
+
+`activate` and `open` each declare whether the action changes a record. Default: no. Orbit proposes
+the answer — a submit inside a form that POSTs, against a link that GETs — and the author confirms
+it, exactly as they confirm a mapping. `open` carries the flag too because an old application will
+change something on a GET.
+
+The flag pairs with authority declared on the **version**. §7:
+
+> Where a workflow is granted authority to change a system of record, that authority is declared on
+> the version, approved separately, and visible on every run. Without it, a step that would change
+> something is compiled into a hand-off to a person, and Orbit states which action it declined and
+> why. (§7)
+
+**The compilation happens at publication, not at run time.** The immutable version already contains
+the hand off, and records which action was declined. Nothing decides it live. Without this flag
+that requirement is unimplementable, because Orbit cannot otherwise tell Search from Submit.
+
+Slice 1 grants no version that authority, so every state-changing step becomes a hand off, and
+slice 1 is read-only end to end.
+
+#### 5. What `for each` may do
+
+1. **The ceiling is checked before the first pass.** A list of sixty against a ceiling of fifty
+   halts immediately and names both numbers. Not fifty done and ten abandoned: a partial sweep
+   leaves the world half-changed with no record of intent, and refusing to start is recoverable.
+2. **An empty list is zero passes, not a failure.**
+3. **No nesting.** A loop inside a loop is where "a list of steps" stops being reviewable.
+4. **Each pass is recorded separately**, with its own evidence and its own outcome.
+5. **Nothing escapes a pass** (item 3 rule 4). There are no accumulators, because an accumulator is
+   a programming language with one variable. The purpose of iterating is to *act* per row. A total
+   is `collect` or `derive`, never a loop variable.
+
+#### 6. Calculation, deferred
+
+A workflow cannot calculate. Every value comes from an input, a screen, or a person.
+
+When `derive` arrives it carries one constraint that keeps it from becoming an expression language:
+**one operation per step**. `subtract B from A into C` — two operands, one result. A step that can
+hold `(a − b) × c` is an expression, and rule 13 is gone. A real calculation becomes three visible
+steps, which is more reviewable anyway. Its operation list is closed: add, subtract, multiply,
+divide, count a list, today's date, days between, round.
+
+Nothing in the acceptance criteria needs it, and it is the kind most likely to grow.
+
+### How this is tested
+
+- A step kind outside the ten is not representable: the union is exhaustive and adding a member
+  produces a compile error at every site that must handle it
+  ([Decision 9](#decision-9--backend-stack) item 2).
+- A workflow referencing a value that is not produced on every path reaching the step is refused at
+  publication, naming both.
+- A secret reference in any field other than an `enter` step's value fails validation.
+- A `read` declaring `number` against a screen reading `N/A` halts, and the stored error carries the
+  raw text.
+- A comparison between two different types is refused at publication.
+- A `for each` whose list exceeds its ceiling halts before the first pass, and no pass is recorded.
+- A value produced inside a pass cannot be published by an `end`; publication is refused.
+- An `activate` marked as changing a record, in a version without that authority, appears in the
+  published version as a hand off, with the declined action named.
+- Acceptance criterion 7 is expressible: a workflow that reads a non-required region, finds it
+  absent, branches on the absence and ends with a *not found* conclusion, succeeds and carries no
+  error.
+
+---
+
 ## What these decisions commit each other to
 
 The decisions are not independent, and it is worth stating the joins so that a later change to one
@@ -1655,6 +1886,13 @@ is recognised as a change to the others.
 - **Decision 5 → 2, 4.** A workflow naming a set of applications means each step records which one
   it ran against, each allowlist is checked per application, and a single run may resolve two
   credentials without ever holding either value.
+- **Decision 14 → almost everything.** The step kinds are the schema's shape, the editor's forms,
+  the executor's dispatch, the run page's per-step detail and the acceptance tests' vocabulary. A
+  new kind is a change to all five, which is why the set is closed and why adding one is a decision
+  rather than a ticket.
+- **Decision 14 → 12.** "Resolves twice" is a halt condition on four of the ten kinds. Exact
+  resolution is not a property of the binder; it is a property every step that names something on a
+  page inherits.
 
 ## What slice 1 will not satisfy
 
@@ -1698,27 +1936,19 @@ Named here so that an omission is not mistaken for a decision.
 - **Environments, and promotion between them** (§12) — removed from slice 1 by Decision 5 item 6,
   returning with roles. Until then the host allowlist is the only boundary, and Decision 6's
   amendment says what that costs.
-- **The closed set of step kinds.** Decision 5 item 9 fixes that step kinds are surface-neutral.
-  The working set is now ten — `open`, `enter`, `activate`, `read`, `collect`, `check`, `branch`,
-  `for each`, `hand off`, `end` — with `judge` held back by
-  [Decision 13](#decision-13--a-judged-step-and-what-holds-it). Reviewed and accepted in the
-  interface, but **never ratified as a decision**, and almost everything depends on it: the schema,
-  the editor, the executor, the run page and the acceptance tests. It should be the next decision
-  written, and it carries three things that are not yet settled:
-  - **`for each` must declare a ceiling**, fixed at publication. A run that reaches it halts rather
-    than carrying on. Repetition is where a closed set of steps turns into a programming language,
-    and without a bound "what could this have done" has no answer that does not depend on what
-    happened to be on the page that morning.
-  - **`activate` must declare whether pressing the control changes a system of record.** §7
-    requires that, without granted authority, "a step that would change something is compiled into
-    a hand-off to a person" — and Orbit cannot obey that rule while it cannot tell Search from
-    Submit. This is a missing field, not a missing kind, and the rule is unimplementable without it.
-  - **`derive` is proposed and undecided.** A procedure that works out a difference cannot be
-    expressed by reading values off a screen. The wrong answer is an expression field, which is
-    rule 13 gone; the right one is a closed list of operations — difference, sum, count, today's
-    date, days between — and nothing else. Worth deciding deliberately rather than under pressure.
-- **The closed set of value types**, which is as closed as the step kinds and belongs in the same
-  decision. Drawn as claim reference, text, money, date and whole number; never settled.
+- **The locator — what actually gets written into a published version.**
+  [Decision 11](#decision-11--how-a-workflow-is-authored) fixed the *ladder* a proposal is derived
+  by; it never fixed the stored shape. This is the one remaining hole in
+  [Decision 14](#decision-14--the-step-kinds-the-value-types-and-how-a-step-names-a-value), it is a
+  single typed column on `step`, and it reaches nothing else — not the run tables, the audit chain,
+  the evidence store or the editor. It should be settled from **measurement** against
+  `apps/legacy-portal`, which was built page by page for exactly that, rather than from a ladder
+  argued from first principles.
+- **The closed set of typed errors.** §13's matrix is written as testable behaviour and the error
+  kind is stored on every failed run for good. It is as closed a set as the step kinds, and it has
+  never been enumerated.
+- **The closed set of event kinds.** §10 requires structured events, and they are the record a run
+  is reconstructed from. Same problem, same permanence.
 - **The frontend stack, and the design system behind it.** Nothing has been chosen. It is a real
   decision, not a detail: `docs/engineering/engineering-instructions.md`'s "Interface standards" sets the bar, and most of
   that bar is specified behaviour from §3, §4 and §10 rather than taste — one derived status shown
