@@ -15,14 +15,19 @@ import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pool } from './db.ts';
 
+/** Anything that can run a query: a pool, a client, a transaction. */
+export interface Queryable {
+  query<R extends Record<string, unknown>>(sql: string, values?: unknown[]): Promise<{ rows: R[] }>;
+}
+
 const root = resolve(process.env['ORBIT_EVIDENCE_DIR'] ?? './data/evidence');
 
 export type Served =
   | { ok: true; bytes: Buffer; mediaType: string }
   | { ok: false; kind: 'notFound' | 'withheld' | 'integrityFailure'; describe: string };
 
-export async function serveArtefact(id: string): Promise<Served> {
-  const { rows: [row] } = await pool.query<{
+export async function serveArtefact(id: string, db: Queryable = pool): Promise<Served> {
+  const { rows: [row] } = await db.query<{
     digest: string | null; media_type: string | null; withheld: boolean; withheld_why: string | null;
   }>(`SELECT digest, media_type, withheld, withheld_why FROM artefact WHERE id = $1`, [id]);
 

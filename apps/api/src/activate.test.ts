@@ -16,6 +16,11 @@ let workflowId: string;
 let v1: string;
 let v2: string;
 
+/** A reference nothing else will pick. A test that only passes against a fresh
+ *  database is a test nobody runs twice, and one nobody runs twice is one
+ *  nobody trusts. */
+const reference = (prefix: string) => `${prefix}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
+
 const version = async (n: number) => {
   const { rows: [v] } = await db.query<{ id: string }>(
     `INSERT INTO workflow_version (workflow_id, version, body, digest, outcomes, declared_inputs, applications)
@@ -52,7 +57,7 @@ test('a version nobody activated cannot be started', async () => {
 test('a test run that reached the ending is what proves it', async () => {
   await db.query(
     `INSERT INTO run (version_id, reference, status, outcome, is_test, inputs, ended_at)
-     VALUES ($1, 'T-0001', 'succeeded', 'found', true, '{}', now())`, [v1]);
+     VALUES ($1, $2, 'succeeded', 'found', true, '{}', now())`, [v1, reference('T')]);
   const activated = await activate(db as never, v1);
   assert.equal(activated.outcome, 'activated');
   assert.equal(activated.version, 1);
@@ -62,7 +67,7 @@ test('a test run that reached the ending is what proves it', async () => {
 test('a superseded version is refused rather than redirected to the live one', async () => {
   await db.query(
     `INSERT INTO run (version_id, reference, status, outcome, is_test, inputs, ended_at)
-     VALUES ($1, 'T-0002', 'succeeded', 'found', true, '{}', now())`, [v2]);
+     VALUES ($1, $2, 'succeeded', 'found', true, '{}', now())`, [v2, reference('T')]);
   await activate(db as never, v2);
 
   const may = await mayStart(db as never, v1);
