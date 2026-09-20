@@ -19,7 +19,7 @@
 import { z, type Step } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
 import { chromium, type Page } from 'playwright';
-import { asText, normaliseName, snapshot, type Seen } from './snapshot.ts';
+import { asText, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
 
 /**
  * What the model may answer. Note what is absent: no URL, no selector, no
@@ -185,7 +185,7 @@ export async function authorFromProcedure(opts: {
       if (p.act === 'done') { turns.push(record('kept', 'the model said the procedure is finished')); break; }
 
       const wanted = normaliseName(p.element ?? '');
-      const named = seen.filter((s) => s.name === wanted);
+      const named = seen.filter((s) => calledIn(s) === wanted);
       if (named.length === 0) {
         // It named something it was not shown. Rejected, not retried into
         // existence: the session's record is evidence either way.

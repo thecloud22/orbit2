@@ -29,6 +29,10 @@ export interface Answered<T> {
   tokensIn: number;
   tokensOut: number;
   costMicros: number;
+  /** True when no price is held for this model, so the cost above is not a
+   *  figure. Reporting zero for a model whose price is unknown would put a
+   *  number in the spend record that is simply false. */
+  costUnknown?: boolean;
   /** Why nothing was kept, when nothing was. */
   refusedBecause?: string;
 }
@@ -42,6 +46,7 @@ export interface ModelProvider {
 /** Priced per million tokens. Used to meter, never to choose. */
 const PRICE: Record<string, { in: number; out: number }> = {
   'gpt-4.1-nano': { in: 0.1, out: 0.4 },
+  'gpt-4.1-mini': { in: 0.4, out: 1.6 },
 };
 
 class OpenAIProvider implements ModelProvider {
@@ -85,10 +90,11 @@ class OpenAIProvider implements ModelProvider {
 
     const tokensIn = body.usage?.prompt_tokens ?? 0;
     const tokensOut = body.usage?.completion_tokens ?? 0;
-    const price = PRICE[this.model] ?? { in: 0, out: 0 };
+    const price = PRICE[this.model];
     const meta = {
       model: body.model, provider: this.provider, tokensIn, tokensOut,
-      costMicros: Math.round((tokensIn * price.in + tokensOut * price.out)),
+      costMicros: price ? Math.round(tokensIn * price.in + tokensOut * price.out) : 0,
+      ...(price ? {} : { costUnknown: true }),
     };
 
     const content = body.choices[0]?.message.content;

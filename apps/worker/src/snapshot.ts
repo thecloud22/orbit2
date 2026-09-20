@@ -193,10 +193,23 @@ export function asText(seen: Seen[]): string {
   // kind and quotes on the same line and the model copied all of it — which
   // was the format's fault, not the model's.
   return seen.map((s) => {
-    const extra = s.row && s.column ? `  (row ${s.row}, column ${s.column})`
-      : s.labelledBy && s.what === 'value' ? `  (labelled ${s.labelledBy})` : '';
-    return `${s.what.padEnd(7)} — ${s.name}${extra}`;
+    // A value is named by its LABEL, not by what it currently says. "Note
+    // rate" is what a procedure calls it; "6.375%" is what it happens to hold
+    // today, and naming it that way would be naming the answer.
+    const called = s.what === 'value' && s.labelledBy ? s.labelledBy
+      : s.what === 'value' && s.column ? s.column
+      : s.name;
+    const extra = s.what === 'value' && s.row && s.column ? `  (row ${s.row})`
+      : s.what === 'value' && s.name !== called ? `  (currently ${s.name.slice(0, 40)})` : '';
+    return `${s.what.padEnd(7)} — ${called}${extra}`;
   }).join('\n');
+}
+
+/** What the model calls this element: a value goes by its label. */
+export function calledIn(s: Seen): string {
+  if (s.what === 'value' && s.labelledBy) return s.labelledBy;
+  if (s.what === 'value' && s.column) return s.column;
+  return s.name;
 }
 
 /** Tolerates a name copied with its kind or its quotes still attached. */
