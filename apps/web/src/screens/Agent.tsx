@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { describeBinding } from '@orbit/contract';
 import { Action, Page, Refusal, Section } from '../Page.tsx';
 import { Chip, EmptyState, Row } from '../ui.tsx';
-import { send, useFetch } from '../fetching.ts';
+import { send as send2, useFetch } from '../fetching.ts';
 import type { Route } from '../router.ts';
 
 interface Draft {
@@ -11,7 +11,7 @@ interface Draft {
               live_version_id?: string | null; paused_at?: string | null };
   steps: Array<{ id: string; position: number; kind: string; declares: Record<string, unknown>; complete: boolean }>;
   notes: Array<{ id: string; kind: string; body: string; answer: string | null; resolved_at: string | null }>;
-  versions: Array<{ version: number; digest: string; published_at: string }>;
+  versions: Array<{ id: string; version: number; digest: string; published_at: string }>;
   authoring: { turns: Turn[]; producedNothing: number; costMicros: number };
 }
 interface Turn { turn: number; model: string; verdict: string; why: string;
@@ -299,6 +299,99 @@ function Confirm({ draft, onDone, onCancel }: {
 }
 
 /**
+ * Proving a version before it may touch a real system.
+ *
+ * §4: an agent cannot go live until every ending it declares has been reached
+ * by an actual run. The button used to navigate to the agents list and do
+ * nothing at all, which made the last gate in the product look like a dead
+ * end — the version was published, the control did nothing, and there was
+ * nothing on screen to say what was missing.
+ *
+ * What a person needs here is short: which conclusions this version claims it
+ * can reach, which of them a run has actually reached, and one control for the
+ * rest.
+ */
+function Proving({ versionId, onDone }: { versionId: string; onDone: () => void }) {
+  const [cases, setCases] = useState<Array<{
+    outcome: string; label: string; example: Record<string, string>;
+    provedBy: { reference: string; at: string } | null;
+  }> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const poll = async () => {
+      const res = await fetch(`/api/versions/${versionId}/tests`).catch(() => null);
+      if (live && res?.ok) setCases(await res.json());
+    };
+    void poll();
+    const timer = setInterval(() => { void poll(); }, 2000);
+    return () => { live = false; clearInterval(timer); };
+  }, [versionId]);
+
+  const unproved = (cases ?? []).filter((c) => !c.provedBy);
+  const send = async (verb: 'tests' | 'activate') => {
+    setBusy(true); setRefused(null);
+    const result = await send2(`/api/versions/${versionId}/${verb}`, {});
+    setBusy(false);
+    if (!result.ok) { setRefused([result.why]); return; }
+    if (verb === 'activate') onDone();
+  };
+
+  return (
+    <Section title="Prove it, then activate"
+      note="an agent may not touch a real system until every conclusion it declares has been reached">
+      {cases === null ? (
+        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)' }}>Reading what this version claims.</p>
+      ) : (
+        <div style={{ borderTop: '1px solid var(--ink)' }}>
+          {cases.map((c) => (
+            <div key={c.outcome} style={{ borderBottom: '1px solid var(--rule)', padding: '12px 0',
+              display: 'flex', gap: 13, alignItems: 'center' }}>
+              <span style={{ width: 92, flexShrink: 0 }}>
+                <Chip state={c.provedBy ? 'ok' : 'attention'}>{c.provedBy ? 'proved' : 'not yet'}</Chip>
+              </span>
+              <span style={{ flexGrow: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 13.5 }}>{c.label}</span>
+                <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-2)',
+                  fontFamily: 'var(--mono)', marginTop: 3 }}>
+                  {/* The author's own example, which is what the test runs with. */}
+                  {Object.entries(c.example).map(([k, v]) => `${k}=${v}`).join('  ') || 'no values needed'}
+                </span>
+              </span>
+              {c.provedBy && (
+                <a href={`/runs/${c.provedBy.reference}`}
+                  style={{ fontSize: 12.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}>
+                  {c.provedBy.reference}
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 16 }}>
+        <Action kind="ghost" disabled={busy || unproved.length === 0}
+          why="Every conclusion has been reached already"
+          onClick={() => void send('tests')}>
+          {unproved.length === 1 ? 'Run the test that is missing' : `Run the ${unproved.length} tests that are missing`}
+        </Action>
+        <Action disabled={busy || cases === null || unproved.length > 0}
+          why={unproved.length === 1
+            ? `"${unproved[0]?.label}" has not been reached by a run yet`
+            : `${unproved.length} conclusions have not been reached by a run yet`}
+          onClick={() => void send('activate')}>Activate</Action>
+      </div>
+
+      {refused && <div style={{ paddingTop: 14 }}>
+        <Refusal title="Not activated" blockers={refused} />
+      </div>}
+    </Section>
+  );
+}
+
+/**
  * One agent, and where it is in its life.
  *
  * §4's stage rail: the phases a workflow passes through, each an attributable
@@ -314,6 +407,7 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const [adding, setAdding] = useState({ kind: 'read' as string, after: 0 });
   const [confirming, setConfirming] = useState(false);
   const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const [proving, setProving] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -326,11 +420,12 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const outstanding = notes.filter((n) => !n.resolved_at);
   const sides = sidesOf(steps);
   const published = versions.length > 0;
+  const liveOrLatest = workflow.live_version_id ?? versions[0]?.id ?? null;
   const live = Boolean(workflow.live_version_id);
 
   const act = async (path: string, body: unknown = {}) => {
     setBusy(true); setRefused(null);
-    const result = await send<{ blockers?: string[]; unproved?: string[] }>(path, body);
+    const result = await send2<{ blockers?: string[]; unproved?: string[] }>(path, body);
     setBusy(false);
     if (!result.ok) { setRefused([result.why]); return; }
     const value = result.value;
@@ -353,7 +448,7 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const editable = !live;
   const edit = async (verb: string, body: unknown) => {
     setBusy(true); setEditRefusal(null);
-    const result = await send(`/api/workflows/${id}/${verb}`, body);
+    const result = await send2(`/api/workflows/${id}/${verb}`, body);
     setBusy(false);
     if (result.ok) setRefresh((n) => n + 1);
     else setEditRefusal(result.why);
@@ -371,7 +466,9 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
         {workflow.confirmed_at && !published && (
           <Action disabled={busy} onClick={() => void act(`/api/workflows/${id}/publish`)}>Publish a version</Action>
         )}
-        {published && !live && <Action disabled={busy} onClick={() => go({ at: 'agents' })}>Test and activate</Action>}
+        {published && !live && (
+          <Action disabled={busy} onClick={() => setProving(true)}>Test and activate</Action>
+        )}
         {live && <Action onClick={() => go({ at: 'start', version: workflow.live_version_id! })}>Start a run</Action>}
       </>}
     >
@@ -379,6 +476,10 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
         outstanding={outstanding.length} />
 
       {refused && <Refusal title="Nothing was changed" blockers={refused} />}
+
+      {proving && published && (
+        <Proving versionId={liveOrLatest!} onDone={() => { setProving(false); setRefresh((n) => n + 1); }} />
+      )}
 
       {confirming && (
         <Confirm draft={draft.value}
