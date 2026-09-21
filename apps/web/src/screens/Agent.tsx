@@ -252,9 +252,18 @@ function Confirm({ draft, onDone }: {
             </div>
             {inputs.length > 0 && (
               <>
+                {/* It said "the test before activation runs with it", and
+                    there is no activation — that stage was taken out, and this
+                    went on describing it. A field whose only explanation names
+                    something that does not exist reads as paperwork. What it
+                    is actually for is unchanged: "Test it" runs the agent once
+                    per conclusion with these, which is the only way to know
+                    this ending is one a run can really reach. Two conclusions
+                    want two different records, and nothing said so. */}
                 <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 7 }}>
-                  A value that reaches this conclusion. The test before activation runs with it,
-                  so it has to be one you would really use.
+                  A record that really ends this way. &ldquo;Test it&rdquo; runs the agent with it
+                  to show this conclusion can be reached &mdash; so each conclusion wants a
+                  different one.
                 </div>
                 {inputs.map((input) => (
                   <div key={input.name} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 7 }}>
