@@ -316,6 +316,36 @@ async function runOne(runId: string) {
     await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.succeeded', $2)`,
       [runId, JSON.stringify({ outcome })]);
     console.log(`  ${row.reference}: succeeded — ${outcome}`);
+  } catch (error) {
+    // A driver that throws ends the run, not the worker.
+    //
+    // `execute` halts with a typed error for everything it decides — a control
+    // it cannot find, a comparison it cannot carry out — but the driver
+    // underneath it can throw on its own account, and nothing caught that. A
+    // single slow page took the whole process down mid-suite:
+    //
+    //   page.goto: Timeout 30000ms exceeded.
+    //     at BrowserSurface.open (surface-browser.ts:31)
+    //   Node.js v26.8.1
+    //
+    // The run it was doing was left `running` with no error on it, every
+    // queued run and authoring session behind it stopped, and the only sign
+    // was a process that was no longer there. `authorOne` and `recordOne` have
+    // caught this since they were written; the run path never did.
+    //
+    // `timedOut` has been in the error vocabulary from the start with nothing
+    // producing it. This is what it is for.
+    const why = String(error);
+    const halt = {
+      kind: /Timeout|timed out/i.test(why) ? 'timedOut' : 'applicationUnavailable',
+      step: 0,
+      describe: `The application did not answer: ${why.split('\n')[0]}`,
+    };
+    await db.query(`UPDATE run SET status = 'failed', error = $2, ended_at = now() WHERE id = $1`,
+      [runId, JSON.stringify(halt)]).catch(() => undefined);
+    await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.failed', $2)`,
+      [runId, JSON.stringify(halt)]).catch(() => undefined);
+    console.log(`  run ${runId}: failed — ${halt.describe}`);
   } finally {
     db.release();
   }
