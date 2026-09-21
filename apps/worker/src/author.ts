@@ -358,7 +358,10 @@ export async function authorFromProcedure(opts: {
   /** Conditions the procedure puts on a step, kept aside until the conclusions
    *  are known — the path a failed condition takes is a conclusion, and those
    *  are named at the end. */
-  const guards = new Map<string, Array<{ value: string; is: string; than: string; of: { name: string; label: string } }>>();
+  // `of` carries the whole declared value, type included: a comparison is
+  // typed by what the read produces, not by what the threshold looks like.
+  const guards = new Map<string, Array<{ value: string; is: string; than: string;
+    of: { name: string; label: string; type: string } }>>();
   const turns: Turn[] = [];
   const questions: Note[] = [];
 
@@ -716,15 +719,38 @@ export async function authorFromProcedure(opts: {
       const passEnd: Step = { id: crypto.randomUUID(), kind: 'end',
         summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
         outcome: found || 'unnamed', publishes: published };
+      // The path that leaves before the guarded steps can only report what
+      // was read before them.
+      //
+      // Both endings published every value the walk read, including ones read
+      // after the guard — so test case 6, which reads the loan program while
+      // deciding on it, was refused at publication: "Step 14 uses
+      // loanProgram, which is not produced on every path that reaches it."
+      // The gate was right and the draft was wrong. A conditional procedure
+      // that reads anything after its condition could not be published at
+      // all, and the author was sent to fix something Orbit had built.
+      const beforeGuard = new Set(prefix.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : [])));
       const failEnd: Step = { id: crypto.randomUUID(), kind: 'end',
         summary: said?.whenAbsent?.label || 'Finish — this conclusion has no name yet',
-        outcome: absent || 'unnamedOtherwise', publishes: published };
+        outcome: absent || 'unnamedOtherwise',
+        publishes: published.filter((v) => beforeGuard.has(v)) };
 
-      const ids = allConditions.map(() => crypto.randomUUID());
-      const branches: Step[] = allConditions.map((c, i) => ({
+      // A condition Orbit cannot turn into a comparison is not quietly made
+      // into one that can never hold. It is dropped and said.
+      const buildable = allConditions.filter((c) => comparisonFor(c, c.of) !== null);
+      for (const c of allConditions) {
+        if (comparisonFor(c, c.of) !== null) continue;
+        questions.push(asQuestion(
+          `The procedure conditions this on ${c.of.label} ${readable(c.is)} "${c.than}", and ${c.of.label} is`
+          + ` recorded as ${c.of.type}. Orbit could not make that a comparison it can carry out, so the`
+          + ' condition is not on the steps below. Say it another way, or say what should be compared.'));
+      }
+
+      const ids = buildable.map(() => crypto.randomUUID());
+      const branches: Step[] = buildable.map((c, i) => ({
         id: ids[i]!, kind: 'branch',
         summary: `Is ${c.of.label} ${readable(c.is)} ${c.than}?`,
-        when: comparisonFor(c),
+        when: comparisonFor(c, c.of)!,
         // Each condition passes to the next; the last passes to the act it
         // guards. Any that fails leaves the guarded path entirely, which is
         // what "only when" means.
@@ -875,15 +901,41 @@ function readable(is: string): string {
  * only be compared for equality, so an ordering operator against one is a
  * condition Orbit cannot carry out and does not pretend to.
  */
-function comparisonFor(c: { value: string; is: string; than: string }): Extract<Step, { kind: 'branch' }>['when'] {
-  const n = asNumber(c.than);
+/**
+ * A condition becomes a comparison, typed by the value rather than by the
+ * threshold.
+ *
+ * This read only the threshold: anything that parsed as a number made a number
+ * comparison. So a condition on the income analyst's note against "1" compared
+ * a paragraph of prose to the number one, published, and halted the run with
+ * `valueNotOfDeclaredType` — "was compared as a number, and it is not one".
+ *
+ * The read declares what it produces, and Orbit has that here. A value
+ * declared as text is compared as text whatever the threshold looks like; a
+ * value declared as a number needs a threshold that is one, and where it is
+ * not there is no comparison to build — `null`, so the caller refuses the
+ * condition rather than inventing one that cannot hold.
+ */
+function comparisonFor(
+  c: { value: string; is: string; than: string },
+  produces?: { type: string } | null,
+): Extract<Step, { kind: 'branch' }>['when'] | null {
+  const said = (c.than ?? '').trim();
+  if (!said) return null;                     // a comparison against nothing
+
   const left = { from: 'step' as const, value: c.value };
-  if (n !== null) {
+  const n = asNumber(said);
+  const declared = produces?.type;
+
+  if (declared === 'number' || (declared === undefined && n !== null)) {
+    if (n === null) return null;              // a number against something that is not one
     return { of: 'number', operator: c.is as 'isMoreThan',
       left, right: { from: 'literal', literal: { type: 'number', number: n } } };
   }
+  // Text, and anything else Orbit does not yet compare as itself. Only `is`
+  // and `isNot` are meaningful, which is what the contract allows for text.
   return { of: 'text', operator: c.is === 'isNot' ? 'isNot' : 'is',
-    left, right: { from: 'literal', literal: { type: 'text', text: c.than } } };
+    left, right: { from: 'literal', literal: { type: 'text', text: said } } };
 }
 
 /** A proposal becomes a step, with Orbit's binding rather than the model's. */
@@ -945,4 +997,4 @@ function makeStep(p: Proposal, element: Seen, procedure: string,
 
 /** Reached by tests only: the rules worth pinning without driving a browser. */
 export const forTest = {
-  toType, valueToEnter };
+  toType, comparisonFor, valueToEnter };
