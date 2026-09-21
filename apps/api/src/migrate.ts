@@ -52,8 +52,22 @@ export async function migrate(connectionString: string): Promise<string[]> {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const url = process.env['ORBIT_DATABASE_URL'];
-  if (!url) throw new Error('ORBIT_DATABASE_URL is not set');
+  // The owner, not the application.
+  //
+  // This read `ORBIT_DATABASE_URL`, which is the `orbit_app` role — the one
+  // deliberately holding INSERT and SELECT and no DDL at all, because that is
+  // what makes the immutable tables immutable. Migrations create tables, grant
+  // privileges and revoke them, so running them as that role cannot work: the
+  // one entrypoint a new developer reaches for failed on the first statement.
+  // `.env.example` has said "Migrations run as the owner, separately" since it
+  // was written; this is that, in code.
+  //
+  // A database may be named as an argument, so the test database is migrated
+  // by the same command rather than by a second one that drifts from it.
+  const url = process.argv[2]
+    ?? process.env['ORBIT_OWNER_DATABASE_URL']
+    ?? process.env['ORBIT_DATABASE_URL'];
+  if (!url) throw new Error('Set ORBIT_OWNER_DATABASE_URL, or pass a connection string.');
   const applied = await migrate(url);
   console.log(applied.length ? `applied:\n  ${applied.join('\n  ')}` : 'nothing to apply');
 }

@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+#
+# Everything a machine needs before `scripts/orbit start` will work.
+#
+#   scripts/setup
+#
+# Safe to run twice. It creates what is missing and leaves what is there, so
+# running it again after a failure picks up where it stopped rather than
+# starting an argument about what already exists.
+#
+# It does not write secrets. `.env` is copied from `.env.example` if it is
+# absent and then left alone — a setup script that invents a model key is a
+# setup script somebody has to audit.
+
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+ROOT="$PWD"
+
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+no()   { printf '  \033[31m✗\033[0m %s\n' "$1"; }
+note() { printf '    %s\n' "$1"; }
+step() { printf '\n%s\n' "$1"; }
+
+missing=0
+
+step "Checking what is installed"
+
+# Node 22.6 is where --experimental-strip-types arrives, and every process here
+# is started with it. An older Node fails at the first import with a syntax
+# error about a type annotation, which reads like a broken repository.
+if command -v node > /dev/null 2>&1; then
+  major=$(node -p 'process.versions.node.split(".")[0]')
+  minor=$(node -p 'process.versions.node.split(".")[1]')
+  if [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 6 ]; }; then
+    ok "node $(node -v)"
+  else
+    no "node $(node -v) — 22.6 or newer is needed for --experimental-strip-types"
+    missing=1
+  fi
+else
+  no "node is not installed"; missing=1
+fi
+
+if command -v pnpm > /dev/null 2>&1; then
+  ok "pnpm $(pnpm --version)"
+else
+  no "pnpm is not installed — 'npm install -g pnpm@9.15.0', or 'corepack enable'"
+  missing=1
+fi
+
+if command -v psql > /dev/null 2>&1; then
+  if psql postgres -X -t -c 'select 1' > /dev/null 2>&1; then
+    ok "postgres, and it answers as $(whoami)"
+  else
+    no "postgres is installed but will not answer as $(whoami)"
+    note "Orbit connects over a local socket as you. Start the server, or create your role."
+    missing=1
+  fi
+else
+  no "postgres is not installed"; missing=1
+fi
+
+[ "$missing" -eq 1 ] && { printf '\nInstall what is missing above, then run this again.\n'; exit 1; }
+
+step "Settings"
+
+if [ -f "$ROOT/.env" ]; then
+  ok ".env is already here — leaving it alone"
+else
+  cp "$ROOT/.env.example" "$ROOT/.env"
+  # The database URLs in the example name a user called "you".
+  if [ "$(uname)" = "Darwin" ]; then
+    sed -i '' "s#postgres://you@#postgres://$(whoami)@#g" "$ROOT/.env"
+  else
+    sed -i "s#postgres://you@#postgres://$(whoami)@#g" "$ROOT/.env"
+  fi
+  ok ".env written from .env.example, with your database user in it"
+  note "Two values are deliberately blank and only you can fill them:"
+  note "  OPENAI_API_KEY        — needed to bring a procedure in. A run needs none."
+  note "  ORBIT_CREDENTIAL_KEY  — encrypts registered passwords. Any long random string."
+fi
+
+step "Dependencies"
+pnpm install --silent || { no "pnpm install failed"; exit 1; }
+ok "workspace installed"
+
+# Playwright ships the driver with the package and the browser separately, so a
+# successful install still leaves nothing to drive.
+if pnpm --filter @orbit/worker exec playwright install chromium > /dev/null 2>&1; then
+  ok "chromium installed for Playwright"
+else
+  no "could not install chromium — try 'pnpm --filter @orbit/worker exec playwright install chromium'"
+fi
+
+step "Databases"
+
+# Named here rather than parsed out of .env: a setup script that infers which
+# database to create from a URL it did not write is one that creates the wrong
+# one on the day somebody edits that URL.
+for db in orbit2_dev orbit2_test; do
+  if psql -lqt 2>/dev/null | cut -d'|' -f1 | grep -qw "$db"; then
+    ok "$db is already there"
+  else
+    createdb "$db" 2>/dev/null && ok "$db created" || { no "could not create $db"; exit 1; }
+  fi
+done
+
+step "Schema"
+
+# Migrations run as you, the owner. The application connects as orbit_app,
+# which migration 0001 creates and which holds INSERT and SELECT on the
+# immutable tables and nothing else — that is what makes a published version
+# impossible to rewrite, and it only works if migrations are not run as it.
+for db in orbit2_dev orbit2_test; do
+  out=$(cd "$ROOT/apps/api" && node --experimental-strip-types src/migrate.ts \
+        "postgres://$(whoami)@localhost/$db" 2>&1)
+  if [ $? -eq 0 ]; then
+    count=$(printf '%s' "$out" | grep -c '\.sql' || true)
+    ok "$db — $( [ "$count" -gt 0 ] && echo "$count migrations applied" || echo 'already up to date' )"
+  else
+    no "$db — migrations failed"; printf '%s\n' "$out" | tail -5; exit 1
+  fi
+done
+
+mkdir -p "$ROOT/data/evidence" "$ROOT/var/log"
+ok "evidence store and logs ready"
+
+step "Ready"
+cat <<'DONE'
+  1. Put your OPENAI_API_KEY and an ORBIT_CREDENTIAL_KEY in .env.
+  2. scripts/orbit start
+  3. Open http://localhost:5173/admin and register the demo application:
+       Name        Mortgage Portal
+       Surface     browser
+       Address     localhost:4101   path /
+       Signs in as admin
+       Password    anything — the demo portal accepts any value
+  4. Open http://localhost:5173/bring-in and write a procedure.
+
+  scripts/orbit status | stop | restart | logs [api|worker|web|portal]
+DONE
