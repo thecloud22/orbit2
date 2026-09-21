@@ -460,6 +460,20 @@ export async function authorFromProcedure(opts: {
       const p = answered.value;
       if (p.act === 'done') {
         finished = true;
+        // Finished, or gave up? The difference is whether the last thing it
+        // tried worked. Test case 1 asked for three things: sign in, confirm
+        // the pipeline loads, and note how many files await a decision. The
+        // walk did the first two, failed to name anything for the third, and
+        // then said it was finished — producing a draft with no step for that
+        // clause and nothing at all to say so. A draft that quietly does less
+        // than the procedure is the same failure as one that claims a
+        // conclusion it never reached, arriving by a different door.
+        if (lastRejection) {
+          questions.push(asQuestion(
+            `The last thing Orbit tried here could not be used — ${lastRejection} — and the procedure was`
+            + ' reported finished straight afterwards. Check the steps below against everything you wrote:'
+            + ' something it asks for may have no step.'));
+        }
         turns.push(record('kept', 'the model said the procedure is finished'));
         break;
       }
