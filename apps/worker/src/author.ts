@@ -559,9 +559,26 @@ export async function authorFromProcedure(opts: {
       // wants forever: it fixes the agent to one record. Orbit does not guess
       // which — it does the faithful thing and asks.
       if (made.kind === 'enter' && made.value.from === 'literal') {
+        // Asked so it can be answered, not so it can be filed.
+        //
+        // This used to offer a choice: "is that right, or is it an example of
+        // something supplied each time?" An author answered "it's an example,
+        // it should be an input variable" — and nothing happened. The answer
+        // is recorded against the note and read by nothing; the step stays a
+        // literal, and `workflow.declared_inputs` is written once when the
+        // draft is made and never updated, so neither Orbit nor the author can
+        // turn it into an input afterwards. The version published fixed to one
+        // loan file, with the answer saying otherwise on its own record.
+        //
+        // Until confirmation can change a draft, the question does not offer
+        // what cannot be done. It says what will happen and what to do instead,
+        // and what to do instead is the thing that works: give the value as an
+        // example on the way in, and the step becomes an input.
         questions.push(asQuestion(
-          `The procedure names "${made.value.literal.type === 'text' ? made.value.literal.text : ''}" specifically, so every run would use it. `
-          + 'Is that right, or is it an example of something supplied each time?'));
+          `The procedure names "${made.value.literal.type === 'text' ? made.value.literal.text : ''}" specifically, so every run of this agent will use that one record. `
+          + 'If it should be different each time, bring the procedure in again with that value filled in under '
+          + '"An example to work through" — Orbit declares an input for a value it is given an example of, '
+          + 'and cannot add one afterwards.'));
       }
 
       // Conditions are checked against what has actually been read, before the

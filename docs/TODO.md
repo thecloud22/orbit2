@@ -189,3 +189,42 @@ it had been doing something — so they are the obvious first to take.
 change by the same standard, and it is also what stopped the worker typing an
 empty string into every password field (`pilot-readiness.md` item 1).
 Reverting it would reopen that, so it stays, flagged rather than undone.
+
+---
+
+## An answer to a question changes nothing
+
+**What.** `confirm.ts` writes a note's answer and marks it resolved. Nothing
+anywhere reads an answer back. For a question that is really a record — "is
+this assumption right?" — that is correct. For one that is a decision, it is
+not.
+
+The one that exposed it: a procedure naming a loan file produces a literal, and
+Orbit asks whether that is right "or an example of something supplied each
+time". An author answered *"its an example. it should be input variable"*, and
+the version published bound to that one file, with the answer saying otherwise
+on its own record.
+
+**Why it cannot be worked around.** `workflow.declared_inputs` is written once,
+by `author-store.ts` when the draft is made, and never updated. So even editing
+the step by hand to use an input leaves publication refusing it as a value no
+step produces. The author cannot do what the question invited.
+
+**What has been done.** The question no longer offers a choice the product
+cannot honour: it says every run will use that one record, and that the way to
+make it vary is to give the value as an example on the way in, which is what
+makes authoring declare an input. That is a wording fix, not a fix.
+
+**What closing it takes.** A decision first, because it changes what
+confirmation *is*. §4 makes confirmation an attestation — the act of saying
+"this is the procedure" — and acting on an answer would make it an edit as
+well. Either:
+
+- confirmation may change the draft, for the specific questions whose answers
+  are decisions (a literal becoming an input is the only one today); or
+- the questions stay records, and the *editor* gains what it is missing — a way
+  to change a step's value and to declare an input — so the author can act on
+  their own answer before confirming.
+
+The second is smaller and keeps §4 intact. Both need `declared_inputs` to stop
+being write-once.
