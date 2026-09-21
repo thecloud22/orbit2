@@ -10,8 +10,10 @@ be sure it could not have done anything else.**
 
 ## Getting it running
 
-You need **Node 22.6 or newer**, **pnpm**, the **psql** client, and a
-**PostgreSQL** server it can reach. Then:
+You need **Node 22.6 or newer**, **pnpm**, and a **PostgreSQL** server it can
+reach — installed, in a container, or remote. No postgres client is needed;
+Orbit creates and migrates its databases through the driver it already ships
+with. Then:
 
 ```
 git clone git@github.com:thecloud22/orbit2.git

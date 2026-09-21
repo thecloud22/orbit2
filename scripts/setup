@@ -48,12 +48,6 @@ else
   missing=1
 fi
 
-if command -v psql > /dev/null 2>&1; then
-  ok "psql $(psql --version | awk '{print $3}')"
-else
-  no "the postgres client (psql) is not installed"; missing=1
-fi
-
 [ "$missing" -eq 1 ] && { printf '\nInstall what is missing above, then run this again.\n'; exit 1; }
 
 step "Settings"
@@ -72,20 +66,9 @@ else
   note "Two values are deliberately blank and only you can fill them:"
   note "  OPENAI_API_KEY        — needed to bring a procedure in. A run needs none."
   note "  ORBIT_CREDENTIAL_KEY  — encrypts registered passwords. Any long random string."
-  # It guessed a postgres running locally as you, because that is what it can
-  # see from here. If it is in a container it is a different role over TCP, and
-  # the next step will fail against a URL nobody has looked at.
-  guessed=$(node --env-file="$ROOT/.env" -e \
-    'const u = new URL(process.env.ORBIT_OWNER_DATABASE_URL); u.pathname = "/postgres"; console.log(u.toString())')
-  if ! psql "$guessed" -X -t -c 'select 1' > /dev/null 2>&1; then
-    printf '\n'
-    no "no postgres answered at the URLs just written"
-    note "They assume one installed locally, listening as $(whoami). If yours is"
-    note "in a container it is a different role over TCP — set the three"
-    note "ORBIT_*DATABASE_URL lines in .env, then run this again. .env.example"
-    note "shows what a containerised one looks like."
-    exit 1
-  fi
+  note "And check the three ORBIT_*DATABASE_URL lines. They assume a postgres"
+  note "installed locally answering as $(whoami); one in a container is a"
+  note "different role over TCP. .env.example shows that shape."
 fi
 
 step "Dependencies"
@@ -110,31 +93,27 @@ step "Databases"
 # after you. A postgres in a container has none of those — the role is whatever
 # the image was started with, it answers over TCP, and `whoami` means nothing
 # inside it. So the URLs in .env are the truth, and this reads them.
-urls=$(node --env-file="$ROOT/.env" -e '
-  const need = ["ORBIT_OWNER_DATABASE_URL", "ORBIT_TEST_DATABASE_URL"];
-  for (const k of need) if (!process.env[k]) { console.error(`${k} is not set in .env`); process.exit(1); }
-  for (const k of need) {
-    const u = new URL(process.env[k]);
-    // The maintenance database, to create the others from.
-    const admin = new URL(u); admin.pathname = "/postgres";
-    console.log([u.pathname.slice(1), admin.toString()].join("\t"));
-  }
-') || { no "could not read the database URLs from .env"; printf '%s\n' "$urls"; exit 1; }
+for var in ORBIT_OWNER_DATABASE_URL ORBIT_TEST_DATABASE_URL; do
+  url=$(node --env-file="$ROOT/.env" -p "process.env.$var ?? ''")
+  if [ -z "$url" ]; then no "$var is not set in .env"; exit 1; fi
+  name=$(node -p "decodeURIComponent(new URL(process.argv[1]).pathname.slice(1))" "$url")
 
-while IFS=$'\t' read -r db admin; do
-  if psql "$admin" -X -t -c "select 1 from pg_database where datname = '$db'" 2>/dev/null | grep -q 1; then
-    ok "$db is already there"
+  out=$(cd "$ROOT/apps/api" && node --experimental-strip-types src/create-database.ts "$url" 2>&1)
+  if [ $? -eq 0 ]; then
+    ok "$name — $out"
   else
-    if psql "$admin" -X -q -c "CREATE DATABASE \"$db\"" > /dev/null 2>&1; then
-      ok "$db created"
-    else
-      no "could not create $db"
-      note "It connected to ${admin%%\?*}, from ORBIT_OWNER_DATABASE_URL in .env."
-      note "Check that URL names a server that is up and a role that may create a database."
-      exit 1
-    fi
+    no "could not create $name"
+    # The commonest failure by far, and the one worth naming: the URLs written
+    # from the example guess a postgres installed locally under your own name,
+    # and nobody has looked at them yet.
+    note "Orbit read $var from .env and could not reach the server it names."
+    note "Check it is up, that the role may create a database, and — if your"
+    note "postgres is in a container — that the URL is not still the local one"
+    note "this script guessed. .env.example shows the containerised shape."
+    printf '%s\n' "$out" | tail -3 | sed 's/^/      /'
+    exit 1
   fi
-done <<< "$urls"
+done
 
 
 step "Schema"
