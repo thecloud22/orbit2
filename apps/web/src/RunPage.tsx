@@ -165,6 +165,22 @@ export function RunPage({ reference, go }: { reference: string; go: (to: Route) 
     return () => { live = false; };
   }, [reference, refresh]);
 
+  // A run in flight is read again until it is not.
+  //
+  // This screen loaded once. A run opened while it was queued said "Queued"
+  // and "0 of 11 steps" until somebody pressed reload, which on a run that
+  // takes a second means the page you are looking at is almost always out of
+  // date. The steps are there to be read — an attempt is written before the
+  // side effect and again after it (Decision 2) — so there was nothing to
+  // build, only something to ask for.
+  const status = state.kind === 'loaded' ? String(state.data.run.status) : null;
+  const inFlight = status === 'queued' || status === 'running';
+  useEffect(() => {
+    if (!inFlight) return undefined;
+    const timer = setInterval(() => setRefresh((n) => n + 1), 1200);
+    return () => clearInterval(timer);
+  }, [inFlight]);
+
   return (
     <div>
 
@@ -191,6 +207,8 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
   const label = (name: string) => outcomes.find((o) => o.name === name)?.label ?? name;
   const state = run.status === 'succeeded' ? 'ok' : run.status === 'failed' ? 'failed'
     : run.status === 'running' ? 'running' : 'attention';
+  /** Still going: nothing about it is in the past tense yet. */
+  const going = run.status === 'queued' || run.status === 'running';
   const trace = runArtefacts.find((a) => a.kind === 'trace');
   /**
    * The step an attempt was of, found by its position.
@@ -224,9 +242,16 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
 
       <Controls run={run} again={again} />
 
+      {/* "No conclusion reached" is a finding about a run that finished. A
+          run that has not started has not failed to reach anything yet, and
+          saying so put a verdict on the screen before there was one. */}
       <OutcomePair state={state} status={run.status[0]!.toUpperCase() + run.status.slice(1)}
-        outcome={run.outcome ? label(run.outcome) : 'No conclusion reached'}
-        note={`One of ${outcomes.length} conclusions this version declares. Orbit reports it without judging it.`} />
+        outcome={run.outcome ? label(run.outcome)
+          : going ? 'Not yet'
+          : 'No conclusion reached'}
+        note={going
+          ? `One of ${outcomes.length} conclusions this version declares. Which one it reaches is what it is deciding.`
+          : `One of ${outcomes.length} conclusions this version declares. Orbit reports it without judging it.`} />
 
       <section style={{ display: 'flex', gap: 46, padding: '16px 0 18px',
         borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)' }}>
@@ -257,6 +282,9 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
             <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
               {run.status === 'succeeded' || run.status === 'handedToAPerson'
                 ? `${attempts.length} steps, all reached`
+                // "it did not get further" is the past tense of a run that
+                // stopped. One still going has not stopped anywhere.
+                : going ? `${attempts.length} of ${steps.length} steps so far`
                 : `${attempts.length} of ${steps.length} steps — it did not get further`}
             </span>
           </div>
@@ -280,6 +308,29 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
                 <Dot state="ok" size={8} />
               </button>
             ))}
+
+            {/* What it is doing now. Without this, a run that had reached step
+                three showed three steps and no sign whether a fourth was
+                coming — the same list a run that stopped at three would show. */}
+            {going && (
+              <div className="orbit-working" style={{ borderTop: attempts.length > 0 ? '1px solid var(--rule)' : 'none',
+                padding: '11px 0', display: 'flex', alignItems: 'center', gap: 13 }}>
+                <span style={{ width: 18 }} />
+                <span style={{ width: 66, fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
+                  color: 'var(--attention-ink)' }}>
+                  {run.status === 'queued' ? 'queued' : 'running'}</span>
+                <span style={{ flexGrow: 1, fontSize: 13.5, color: 'var(--ink-2)' }}>
+                  {run.status === 'queued'
+                    ? 'Waiting for a worker to pick this up'
+                    : `Working through step ${attempts.length + 1} of ${steps.length}`}
+                  <span style={{ fontFamily: 'var(--mono)' }}>
+                    <span className="orbit-dot">.</span>
+                    <span className="orbit-dot">.</span>
+                    <span className="orbit-dot">.</span>
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
           <p style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>
             The second column is the step&rsquo;s kind. Ten kinds exist, and no workflow can contain anything else.
@@ -290,7 +341,8 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 11 }}>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>What it saw at this step</h2>
           </div>
-          <EvidencePanel artefacts={stepArtefacts.filter((a) => a.attempt_id === attempts[selected]?.id)} />
+          <EvidencePanel going={going && attempts.length === 0}
+            artefacts={stepArtefacts.filter((a) => a.attempt_id === attempts[selected]?.id)} />
           <div style={{ paddingTop: 22 }}>
             <StepDetail attempt={attempts[selected]}
               step={attempts[selected] ? stepAt(attempts[selected]!.step_position) : undefined}
@@ -371,12 +423,17 @@ function StepDetail({ attempt, step, events }: {
  * no screenshot at all, which is a fact about the step, not a load failure —
  * so it gets its own quiet note rather than an empty grid (product rule 11).
  */
-function EvidencePanel({ artefacts }: { artefacts: ArtefactView[] }) {
+function EvidencePanel({ artefacts, going }: { artefacts: ArtefactView[]; going?: boolean }) {
   if (artefacts.length === 0) {
     return (
       <div style={{ border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel)',
         padding: '46px 20px', textAlign: 'center', color: 'var(--ink-2)', fontSize: 13.5 }}>
-        This step kept no screenshot. It has nothing on the page to resolve to.
+        {/* "It has nothing on the page to resolve to" is a fact about a step
+            that ran. A queued run has no steps yet, and saying that about one
+            explained the absence of evidence with the wrong reason. */}
+        {going
+          ? 'Nothing to see yet. Evidence appears as each step is carried out.'
+          : 'This step kept no screenshot. It has nothing on the page to resolve to.'}
       </div>
     );
   }
