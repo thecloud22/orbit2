@@ -47,6 +47,7 @@ class BrowserSurface implements Surface {
       fill: (value) => found.locator.fill(value),
       activate: () => found.locator.click(),
       text: () => found.locator.innerText(),
+      where: () => found.locator.boundingBox(),
     };
     return { found: 'one', it };
   }

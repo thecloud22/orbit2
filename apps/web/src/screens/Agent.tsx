@@ -139,7 +139,7 @@ const strategy = (d: Record<string, unknown>) => {
 
 const field: React.CSSProperties = {
   font: 'inherit', fontSize: 13.5, padding: '8px 10px', width: '100%', boxSizing: 'border-box',
-  border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)',
+  border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)', color: 'var(--ink)',
 };
 
 /**
@@ -430,14 +430,14 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
             <select value={adding.kind} disabled={busy} aria-label="Kind of step to add"
               onChange={(e) => setAdding((a) => ({ ...a, kind: e.target.value }))}
               style={{ font: 'inherit', fontSize: 13, fontFamily: 'var(--mono)', padding: '5px 7px',
-                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--paper)' }}>
+                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
               {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
             <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>step after</span>
             <select value={adding.after} disabled={busy} aria-label="Where to add the step"
               onChange={(e) => setAdding((a) => ({ ...a, after: Number(e.target.value) }))}
               style={{ font: 'inherit', fontSize: 13, padding: '5px 7px',
-                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--paper)' }}>
+                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
               <option value={0}>the beginning</option>
               {steps.map((s) => <option key={s.id} value={s.position}>step {s.position} · {s.kind}</option>)}
             </select>

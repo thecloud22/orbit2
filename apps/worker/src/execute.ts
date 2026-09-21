@@ -67,15 +67,23 @@ async function event(ctx: Ctx, attemptId: string | null, kind: string, detail: u
     [ctx.runId, attemptId, kind, JSON.stringify(detail)]);
 }
 
-async function screenshot(ctx: Ctx, attemptId: string) {
+/** What a picture is pointing at: the element the step resolved to. */
+interface Shows {
+  label: string;
+  by: string;
+  at: { x: number; y: number; width: number; height: number };
+}
+
+async function screenshot(ctx: Ctx, attemptId: string, shows?: Shows | null) {
   // Sign-in happened before capture started, so nothing here can hold a
   // credential — which is what makes deferring redaction safe rather than
   // reckless (Decision 4 item 13).
   const shot = await ctx.surface.capture();
   const { digest, bytes, mediaType } = await capture(shot.bytes, shot.mediaType);
   await ctx.db.query(
-    `INSERT INTO artefact (run_id, attempt_id, kind, media_type, bytes, digest)
-     VALUES ($1, $2, 'screenshot', $3, $4, $5)`, [ctx.runId, attemptId, mediaType, bytes, digest]);
+    `INSERT INTO artefact (run_id, attempt_id, kind, media_type, bytes, digest, shows)
+     VALUES ($1, $2, 'screenshot', $3, $4, $5, $6)`,
+    [ctx.runId, attemptId, mediaType, bytes, digest, shows ? JSON.stringify(shows) : null]);
 }
 
 async function runStep(ctx: Ctx, step: Step, position: number,
@@ -122,9 +130,11 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       const ref = step.value;
       const value = ref.from === 'input' ? ctx.inputs[ref.value] ?? ''
         : ref.from === 'literal' && ref.literal.type === 'text' ? ref.literal.text : '';
+      const intoBox = await found.it.where();
       await found.it.fill(value);
       await event(ctx, attemptId, 'entered', { into: step.into.label, by: found.by });
-      await screenshot(ctx, attemptId);
+      await screenshot(ctx, attemptId,
+        intoBox && { label: step.into.label, by: found.by, at: intoBox });
       await end('ok'); return 'ok';
     }
     case 'activate': {
@@ -133,6 +143,14 @@ async function runStep(ctx: Ctx, step: Step, position: number,
         const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
+      // Two pictures, because one cannot do both jobs. The control is boxed on
+      // the page as it stood before it was pressed — after the click the page
+      // has moved on and the box would point at whatever now occupies those
+      // pixels, which is worse than no box at all. The second picture is what
+      // pressing it did.
+      const controlBox = await found.it.where();
+      await screenshot(ctx, attemptId,
+        controlBox && { label: step.control.label, by: found.by, at: controlBox });
       await found.it.activate();
       await ctx.surface.settle();
       await event(ctx, attemptId, 'activated', { control: step.control.label, by: found.by });
@@ -157,7 +175,11 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       const text = (await found.it.text()).trim();
       ctx.values.set(name, text);
       await event(ctx, attemptId, 'read', { value: name, read: text, by: found.by });
-      await screenshot(ctx, attemptId);
+      // Reading changes nothing, so the box measured before the read is still
+      // true of the picture taken after it.
+      const regionBox = await found.it.where();
+      await screenshot(ctx, attemptId,
+        regionBox && { label: step.region.label, by: found.by, at: regionBox });
       await end('ok'); return 'ok';
     }
     case 'branch': {

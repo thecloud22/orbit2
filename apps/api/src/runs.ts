@@ -29,7 +29,7 @@ export async function readRun(reference: string) {
   const { rows: events } = await pool.query(
     `SELECT id, attempt_id, kind, detail, at FROM run_event WHERE run_id = $1 ORDER BY id`, [run.id]);
   const { rows: artefacts } = await pool.query(
-    `SELECT id, attempt_id, kind, media_type, bytes, digest, withheld, withheld_why
+    `SELECT id, attempt_id, kind, media_type, bytes, shows, digest, withheld, withheld_why
        FROM artefact WHERE run_id = $1 ORDER BY captured_at`, [run.id]);
 
   // The version's own steps, so a step's summary comes from the artefact that

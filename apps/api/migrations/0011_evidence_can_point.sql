@@ -1,0 +1,15 @@
+-- Evidence that points at what the step touched.
+--
+-- A reader can be told a step finds "whatever sits immediately after the label
+-- Credit score" and still have no way to check that it found the right thing.
+-- The screenshot was already captured; what was missing was where on it the
+-- resolved element actually was.
+--
+-- Recorded on the artefact rather than in an event, because it is a property
+-- of that image — it is only meaningful against the pixels it was measured
+-- against, and separating the two invites drawing last step's box on this
+-- step's picture.
+--
+-- Nullable, and expected to stay null for surfaces that have no geometry. A
+-- terminal knows rows and columns; a service knows neither.
+ALTER TABLE artefact ADD COLUMN IF NOT EXISTS shows jsonb;

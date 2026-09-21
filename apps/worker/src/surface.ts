@@ -46,6 +46,20 @@ export interface Found {
   /** §14's `read`. Raw text, never coerced — the declared type is checked
    *  afterwards, and the raw text is what makes a mismatch fixable. */
   text(): Promise<string>;
+  /**
+   * Where it is, so the evidence can point at it.
+   *
+   * A reader can be told a step finds "whatever sits immediately after the
+   * label Credit score" and still have no way to check that it found the
+   * right thing. This is what lets the screenshot carry a box around the
+   * element the step actually resolved to, which is the difference between
+   * being told and being shown.
+   *
+   * Null where the surface has no geometry — a terminal knows rows and
+   * columns, a service knows neither — and the evidence then simply carries
+   * no box rather than a made-up one.
+   */
+  where(): Promise<{ x: number; y: number; width: number; height: number } | null>;
 }
 
 /**

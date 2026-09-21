@@ -67,6 +67,10 @@ function paperSurface(present: Record<string, string>) {
         fill: async (value) => { did.push(`fill ${name}=${value}`); },
         activate: async () => { did.push(`activate ${name}`); },
         text: async () => present[name]!,
+        // A surface made of arrays has no geometry, which is the case the
+        // interface is written to allow: the evidence carries no box rather
+        // than a made-up one.
+        where: async () => null,
       };
       return { found: 'one', it };
     },

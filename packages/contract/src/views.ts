@@ -76,6 +76,10 @@ export interface ArtefactView {
   media_type: string | null;
   bytes: number | null;
   digest: string | null;
+  /** Where on this image the step's element was, measured against these
+   *  pixels. Null where the surface has no geometry, or where the picture is
+   *  the after-state of an act rather than the page it acted on. */
+  shows: { label: string; by: string; at: { x: number; y: number; width: number; height: number } } | null;
   withheld: boolean;
   withheld_why: string | null;
 }

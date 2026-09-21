@@ -11,6 +11,61 @@ const took = (events: RunEventView[], attemptId: string): number | undefined => 
 };
 
 /**
+ * The picture at a size where a person can actually check it.
+ *
+ * A 232px tile is enough to see that a box exists and not enough to see what
+ * it is around, which makes it decoration. The point of the box is that a
+ * reader can satisfy themselves the step resolved to the right thing, and
+ * that is a claim they have to be able to inspect.
+ */
+function Enlarged({ artefact, onClose }: { artefact: ArtefactView; onClose: () => void }) {
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [onClose]);
+
+  const shows = artefact.shows!;
+  const wide = Math.min(1100, (typeof window === 'undefined' ? 1100 : window.innerWidth) - 80);
+  const scale = size ? wide / size.w : 0;
+
+  return (
+    <div role="dialog" aria-label={`The screen when the step found ${shows.label}`} onClick={onClose}
+      style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(20,20,19,0.72)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
+      <figure onClick={(e) => e.stopPropagation()}
+        style={{ margin: 0, background: 'var(--panel)', borderRadius: 6, overflow: 'hidden',
+          maxHeight: '100%', display: 'flex', flexDirection: 'column' }}>
+        <figcaption style={{ padding: '13px 18px', display: 'flex', alignItems: 'baseline', gap: 10,
+          borderBottom: '1px solid var(--rule)' }}>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>Found &ldquo;{shows.label}&rdquo;</span>
+          <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+            by {shows.by} &middot; boxed where the step resolved it on this page
+          </span>
+          <span style={{ flexGrow: 1 }} />
+          <button type="button" onClick={onClose}
+            style={{ font: 'inherit', fontSize: 12.5, color: 'var(--ink-2)', background: 'transparent',
+              border: 0, cursor: 'pointer' }}>Close</button>
+        </figcaption>
+        <div style={{ position: 'relative', overflow: 'auto' }}>
+          <img src={`/api/artefacts/${artefact.id}`} alt={`The screen when the step found ${shows.label}`}
+            onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+            style={{ width: wide, display: 'block' }} />
+          {size && (
+            <span style={{ position: 'absolute', pointerEvents: 'none',
+              left: shows.at.x * scale, top: shows.at.y * scale,
+              width: shows.at.width * scale, height: shows.at.height * scale,
+              border: '2px solid var(--primary)', borderRadius: 2,
+              boxShadow: '0 0 0 9999px rgba(20,20,19,0.45)' }} />
+          )}
+        </div>
+      </figure>
+    </div>
+  );
+}
+
+/**
  * §10's run controls, and the reasons one is not offered.
  *
  * A retry is offered only where repeating the step could come out differently,
@@ -45,7 +100,7 @@ function Controls({ run, again }: { run: RunView['run']; again: () => void }) {
       style={{ font: 'inherit', fontSize: 13, fontWeight: 600, padding: '7px 14px', borderRadius: 3,
         cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1,
         border: kind === 'strong' ? 0 : '1px solid var(--rule-2)',
-        background: kind === 'strong' ? 'var(--ink)' : 'var(--paper)',
+        background: kind === 'strong' ? 'var(--ink)' : 'var(--panel)',
         color: kind === 'strong' ? 'var(--page)' : 'var(--ink)' }}>{label}</button>
   );
 
@@ -131,6 +186,16 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
   const state = run.status === 'succeeded' ? 'ok' : run.status === 'failed' ? 'failed'
     : run.status === 'running' ? 'running' : 'attention';
   const trace = runArtefacts.find((a) => a.kind === 'trace');
+  /**
+   * The step an attempt was of, found by its position.
+   *
+   * It was `steps[i]` — the attempt's place in the list — which is the same
+   * thing only while a run goes straight down the version. The moment a branch
+   * skips ahead they diverge, and the run page labelled the ending it reached
+   * with the summary of a step it never ran. A record that names the wrong
+   * step is worse than one that names none.
+   */
+  const stepAt = (position: number) => steps[position - 1];
   const withheld = runArtefacts.filter((a) => a.withheld);
 
   return (
@@ -203,7 +268,7 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
                 <span style={{ width: 66, fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--running-ink)' }}>
                   {a.step_kind}</span>
                 <span style={{ flexGrow: 1, fontSize: 13.5, fontWeight: i === selected ? 600 : 400 }}>
-                  {steps[i]?.summary ?? '—'}</span>
+                  {stepAt(a.step_position)?.summary ?? '—'}</span>
                 <span style={{ width: 34, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right' }}>
                   {formatTook(took(events, a.id))}</span>
                 <Dot state="ok" size={8} />
@@ -216,7 +281,8 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
         </div>
 
         <div style={{ flexGrow: 1, borderLeft: '1px solid var(--rule)', paddingLeft: 30, minWidth: 0 }}>
-          <StepDetail attempt={attempts[selected]} step={steps[selected]}
+          <StepDetail attempt={attempts[selected]}
+            step={attempts[selected] ? stepAt(attempts[selected]!.step_position) : undefined}
             events={events.filter((e) => e.attempt_id === attempts[selected]?.id)}
             artefacts={stepArtefacts.filter((a) => a.attempt_id === attempts[selected]?.id)} />
           {withheld.map((a) => (
@@ -327,6 +393,8 @@ function Evidence({ artefact }: { artefact: ArtefactView }) {
    * real one. So the reason is asked for.
    */
   const [failed, setFailed] = useState<string | null>(null);
+  const [shot, setShot] = useState<{ w: number; h: number } | null>(null);
+  const [open, setOpen] = useState(false);
   const askWhy = async () => {
     try {
       const res = await fetch(`/api/artefacts/${artefact.id}`);
@@ -350,7 +418,9 @@ function Evidence({ artefact }: { artefact: ArtefactView }) {
   return (
     <figure style={{ margin: 0, width: 232, border: '1px solid var(--rule)', borderRadius: 5,
       background: 'var(--panel)', overflow: 'hidden' }}>
-      <a href={`/api/artefacts/${artefact.id}`} target="_blank" rel="noreferrer" style={{ display: 'block', lineHeight: 0 }}>
+      <button type="button" onClick={() => artefact.shows && setOpen(true)}
+        style={{ display: 'block', lineHeight: 0, width: '100%', padding: 0, border: 0,
+          background: 'transparent', cursor: artefact.shows ? 'zoom-in' : 'default' }}>
         {failed ? (
           <div style={{ height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: 'var(--failed-wash)', color: 'var(--failed-ink)', fontSize: 12, padding: 14,
@@ -358,14 +428,44 @@ function Evidence({ artefact }: { artefact: ArtefactView }) {
             {failed}
           </div>
         ) : (
-          <img src={`/api/artefacts/${artefact.id}`} alt="The screen at this step"
-            onError={() => void askWhy()}
-            style={{ width: '100%', height: 150, objectFit: 'cover', objectPosition: 'top',
-              background: 'var(--panel-2)', display: 'block' }} />
+          <span style={{ display: 'block', position: 'relative' }}>
+            <img src={`/api/artefacts/${artefact.id}`} alt="The screen at this step"
+              onError={() => void askWhy()}
+              onLoad={(e) => setShot({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+              style={{ width: '100%', height: 150, objectFit: 'cover', objectPosition: 'top',
+                background: 'var(--panel-2)', display: 'block' }} />
+            {/* Where the step's element actually was, drawn from the box
+                measured against these pixels. The tile crops, so a box below
+                the fold is not drawn rather than drawn in the wrong place —
+                the full picture opens in a new tab. */}
+            {artefact.shows && shot && (() => {
+              const scale = 232 / shot.w;
+              const top = artefact.shows.at.y * scale;
+              if (top > 150) return null;
+              return (
+                <span style={{ position: 'absolute', pointerEvents: 'none',
+                  left: artefact.shows.at.x * scale, top,
+                  width: artefact.shows.at.width * scale,
+                  height: Math.min(artefact.shows.at.height * scale, 150 - top),
+                  border: '2px solid var(--primary)', borderRadius: 2,
+                  boxShadow: '0 0 0 1px rgba(255,255,255,0.9)' }} />
+              );
+            })()}
+          </span>
         )}
-      </a>
+      </button>
+      {open && artefact.shows && (
+        <Enlarged artefact={artefact} onClose={() => setOpen(false)} />
+      )}
       <figcaption style={{ padding: '9px 11px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600 }}>Screenshot</span>
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+          {artefact.shows ? `Found “${artefact.shows.label}”` : 'Screenshot'}
+        </span>
+        {artefact.shows && (
+          <span style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>
+            boxed where the step resolved it, by {artefact.shows.by}
+          </span>
+        )}
         <span style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>
           {Math.round((artefact.bytes ?? 0) / 1000)} KB &ensp; {short}
         </span>
