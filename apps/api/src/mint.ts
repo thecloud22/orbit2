@@ -10,6 +10,8 @@
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { checkForPublication, type DraftStep } from './publish.ts';
+
+const unfinishedStep = (s: DraftStep): boolean => 'incomplete' in s;
 import { type Blocker, type Publication, step as stepSchema, type Step } from '@orbit/contract';
 
 /**
@@ -103,12 +105,20 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
   const body = { steps, declaredInputs: inputs, outcomes, applications: apps };
   const digest = `sha256:${createHash('sha256').update(canonical(body)).digest('hex')}`;
 
+  // Derived from the steps, not asserted. It was written as `false` for every
+  // version, so a version containing a step that presses "Approve file"
+  // claimed no authority to write — and the run page reported "It changed:
+  // Nothing" about runs that had approved a loan. §7 makes this the flag that
+  // decides what authority a version needs; a constant false is not a modest
+  // default, it is a false statement on the record.
+  const mayChangeRecords = steps.some((s) => !unfinishedStep(s) && 'changesARecord' in s && s.changesARecord);
+
   await db.query(
     `INSERT INTO workflow_version
        (workflow_id, version, body, digest, outcomes, declared_inputs, applications, may_change_records)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, false)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [workflowId, version, JSON.stringify(body), digest,
-     JSON.stringify(outcomes), JSON.stringify(inputs), JSON.stringify(apps)]);
+     JSON.stringify(outcomes), JSON.stringify(inputs), JSON.stringify(apps), mayChangeRecords]);
 
   await db.query(
     `INSERT INTO audit_entry (act, object_kind, object_id, changed)

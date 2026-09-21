@@ -89,3 +89,49 @@ test('an unconfirmed workflow cannot be published, because nobody has attested t
   assert.ok(result.outcome === 'refused' && result.blockers.some((b) => b.kind === 'notConfirmed'),
     `refused for want of confirmation: ${JSON.stringify(result)}`);
 });
+
+/** A workflow of its own, so a test that adds a step does not change the others. */
+async function aWorkflowWith(steps: Array<{ kind: string; declares: object }>): Promise<string> {
+  const { rows: [w] } = await db.query<{ id: string }>(
+    `INSERT INTO workflow (name, declared_inputs, outcomes, examples, confirmed_at)
+     VALUES ($1, '[]', $2, $3, now()) RETURNING id`,
+    [`Authority ${crypto.randomUUID().slice(0, 6)}`,
+     JSON.stringify([{ name: 'done', label: 'Done' }]), JSON.stringify({ done: 'x' })]);
+  for (const [i, s] of steps.entries()) {
+    await db.query(
+      `INSERT INTO workflow_step (workflow_id, position, kind, declares, complete)
+       VALUES ($1, $2, $3, $4, true)`, [w!.id, i + 1, s.kind, JSON.stringify(s.declares)]);
+  }
+  return w!.id;
+}
+
+const approveFile = {
+  kind: 'activate',
+  declares: {
+    summary: 'Approve file',
+    control: { label: 'Approve file', binding: { strategy: 'roleAndName', role: 'button', name: 'Approve file' } },
+    then: { describe: 'the file is approved' },
+    changesARecord: true,
+  },
+};
+const ending = { kind: 'end', declares: { summary: 'done', outcome: 'done', publishes: [] } };
+
+async function authorityOf(workflowId: string): Promise<boolean> {
+  const minted = await mintVersion(db as never, workflowId);
+  assert.equal(minted.outcome, 'published', JSON.stringify(minted));
+  const { rows } = await db.query<{ may_change_records: boolean }>(
+    `SELECT may_change_records FROM workflow_version WHERE workflow_id = $1 ORDER BY version DESC LIMIT 1`,
+    [workflowId]);
+  return rows[0]!.may_change_records;
+}
+
+test('a version that presses something committing says it may change records', async () => {
+  // It was written as false for every version, so a workflow that approves a
+  // loan published as one with no authority to write — and the run page told
+  // readers "It changed: Nothing" about runs that had approved one.
+  assert.equal(await authorityOf(await aWorkflowWith([approveFile, ending])), true);
+});
+
+test('a version that only reads does not claim authority it does not need', async () => {
+  assert.equal(await authorityOf(await aWorkflowWith([ending])), false);
+});

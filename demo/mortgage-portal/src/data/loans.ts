@@ -258,6 +258,38 @@ export const LOANS: readonly Loan[] = [
     underwriter: 'T. Nakamura',
   },
   {
+    // A file that clears a conventional overlay outright: strong score, low
+    // ratios, meaningful equity. Every other file here fails at least one, so
+    // without this there is nothing an approval procedure could be proved on.
+    loanNumber: 'ML-26-04570',
+    borrowerName: 'Adaeze Nwachukwu',
+    coBorrowerName: 'Chidi Nwachukwu',
+    firstTimeBuyer: false,
+    homebuyerEducation: 'none',
+    employmentType: 'w2',
+    employmentNote:
+      'Both borrowers W2, same employers 6 and 11 years. No variable compensation used in qualifying.',
+    yearsInRole: 11,
+    propertyAddress: '88 Tualatin Commons',
+    propertyCity: 'Tualatin',
+    propertyState: 'OR',
+    propertyType: 'single_family',
+    occupancy: 'primary',
+    floodZone: 'X',
+    program: 'conventional',
+    purchasePrice: 545_000,
+    appraisedValue: 552_000,
+    loanAmount: 349_000,
+    monthlyIncome: 18_400,
+    monthlyDebt: 4_232,
+    creditScore: 771,
+    reserveMonths: 14,
+    noteRate: 6.25,
+    status: 'in_underwriting',
+    submittedOn: '2026-09-02',
+    underwriter: 'R. Alvarez',
+  },
+  {
     loanNumber: 'ML-26-04547',
     borrowerName: 'Trevor Mullane',
     coBorrowerName: null,

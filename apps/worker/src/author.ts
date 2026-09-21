@@ -19,6 +19,7 @@
 import { z, type Step } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
 import { chromium, type Page } from 'playwright';
+import { asNumber } from './compare.ts';
 import { asText, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
 
 /**
@@ -38,6 +39,40 @@ const proposal = z.object({
   value: z.string().nullable(),
   /** Whether a read may legitimately find nothing — the absent case. */
   optional: z.boolean().nullable(),
+  /**
+   * Whether carrying this act out commits something.
+   *
+   * Asked rather than assumed. It was hardcoded false, so a step pressing
+   * "Approve file" declared that it changed nothing, and the version it was
+   * published into inherited the same claim — the run page then told a reader
+   * "It changed: Nothing" about a run that approved a loan. §7 makes this the
+   * flag that decides what authority a version needs, so getting it wrong is
+   * not a display problem.
+   *
+   * It is a judgement about what a control means, which makes it a mapping
+   * question, which makes it the model's (Decision 11). Orbit still checks it
+   * against the kind of element: nothing that is merely read or typed into can
+   * change a record.
+   */
+  changesARecord: z.boolean().nullable(),
+  /**
+   * The conditions the procedure puts on this act.
+   *
+   * Without this the model has no way to say "it depends", so asked "what is
+   * next?" on a page with an Approve button it proposes pressing it — and the
+   * thresholds in the procedure are silently dropped. A workflow that reads a
+   * credit score, ignores it and approves the loan is not a misreading of the
+   * text; it is the only sentence the vocabulary could form.
+   *
+   * Each condition names a value an earlier step already read. Orbit checks
+   * that, builds the branches, and decides what happens when one does not
+   * hold — the model supplies a comparison, never control flow.
+   */
+  onlyIf: z.array(z.object({
+    value: z.string(),
+    is: z.enum(['isMoreThan', 'isAtLeast', 'isLessThan', 'isAtMost', 'is', 'isNot']),
+    than: z.string(),
+  })).nullable(),
   why: z.string(),
 });
 type Proposal = z.infer<typeof proposal>;
@@ -107,9 +142,23 @@ const shape = {
     element: { type: ['string', 'null'] },
     value: { type: ['string', 'null'] },
     optional: { type: ['boolean', 'null'] },
+    changesARecord: { type: ['boolean', 'null'] },
+    onlyIf: {
+      type: ['array', 'null'],
+      items: {
+        type: 'object',
+        properties: {
+          value: { type: 'string' },
+          is: { type: 'string', enum: ['isMoreThan', 'isAtLeast', 'isLessThan', 'isAtMost', 'is', 'isNot'] },
+          than: { type: 'string' },
+        },
+        required: ['value', 'is', 'than'],
+        additionalProperties: false,
+      },
+    },
     why: { type: 'string' },
   },
-  required: ['act', 'element', 'value', 'optional', 'why'],
+  required: ['act', 'element', 'value', 'optional', 'changesARecord', 'onlyIf', 'why'],
   additionalProperties: false,
 };
 
@@ -143,6 +192,13 @@ const INSTRUCTION = [
   '',
   'act=enter   put a value into a field. element=the field. value=the name of the input it comes from.',
   'act=activate press a button or link. element=that control.',
+  '            changesARecord=true when pressing it commits something a person would have to undo:',
+  '            approving, declining, submitting, saving, sending. false for searching, opening, filtering.',
+  '',
+  'If the procedure only permits an act under conditions — a score above a number, a ratio',
+  'below one — put every one of them in onlyIf. Each names a value an EARLIER step already read.',
+  'Do not press a button the procedure conditions and leave onlyIf empty: that drops the condition.',
+  'onlyIf is null when the procedure puts no condition on the act.',
   'act=read    take a value off the screen. element=the value. value=a short camelCase name for it.',
   '            Orbit binds a read to whatever labels the value, not to the value, so that the',
   '            step reads what the page says now rather than checking it still says what it said.',
@@ -177,6 +233,10 @@ export async function authorFromProcedure(opts: {
   const browser = await chromium.launch();
   const page: Page = await browser.newPage();
   const steps: Step[] = [];
+  /** Conditions the procedure puts on a step, kept aside until the conclusions
+   *  are known — the path a failed condition takes is a conclusion, and those
+   *  are named at the end. */
+  const guards = new Map<string, Array<{ value: string; is: string; than: string; of: { name: string; label: string } }>>();
   const turns: Turn[] = [];
   const questions: string[] = [];
 
@@ -284,8 +344,25 @@ export async function authorFromProcedure(opts: {
         continue;
       }
 
+      // Conditions are checked against what has actually been read, before the
+      // act is kept. A condition naming a value no step produces is not a
+      // condition — and an act kept without the condition the procedure put on
+      // it is worse than no act at all.
+      const conditions = p.onlyIf ?? [];
+      const readSoFar = new Map(steps.flatMap((x) => (x.kind === 'read' ? [[x.produces.name, x.produces]] : [])));
+      const unknown = conditions.filter((c) => !readSoFar.has(c.value));
+      if (unknown.length > 0) {
+        turns.push(record('rejected',
+          `it conditioned this on ${unknown.map((c) => `"${c.value}"`).join(', ')}, which no earlier step reads`));
+        questions.push(`The procedure conditions "${made.summary}" on ${unknown.map((c) => c.value).join(', ')}, and no step reads that. What should be read first?`);
+        continue;
+      }
+
       steps.push(made);
-      turns.push(record('kept', `step ${steps.length}: ${made.summary}`));
+      if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)! })));
+      turns.push(record('kept', conditions.length > 0
+        ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
+        : `step ${steps.length}: ${made.summary}`));
 
       // Do it, so the next turn sees the page the next step would meet.
       lastActMoved = p.act === 'activate';
@@ -312,6 +389,13 @@ export async function authorFromProcedure(opts: {
   if (!steps.some((s) => s.kind === 'end')) {
     const produced = steps.flatMap((s) => (s.kind === 'read' ? [s.produces] : []));
     const published = produced.map((v) => v.name);
+
+    // Where a guarded step is, everything from it onwards happens only if the
+    // conditions hold. The conditions are collected in the order they were
+    // imposed; one branch each, and any that fails leaves the guarded path.
+    const guardedAt = steps.findIndex((x) => guards.has(x.id));
+    const allConditions = guardedAt === -1 ? []
+      : steps.slice(guardedAt).flatMap((x) => guards.get(x.id) ?? []);
 
     const answered = await model.propose(
       {
@@ -350,7 +434,50 @@ export async function authorFromProcedure(opts: {
       : absent && absent === found ? 'it gave both conclusions the same name, which names neither'
       : null;
 
-    if (refusal || !said || !said.whenAbsent || !separator || !absent) {
+    if (allConditions.length > 0) {
+      // The procedure conditions an act, so the workflow has two ways to
+      // finish: the conditions held, or one of them did not. Orbit puts a
+      // branch in front of the guarded steps for each condition; the model
+      // named the two conclusions and supplied the comparisons.
+      const prefix = steps.slice(0, guardedAt);
+      const guarded = steps.slice(guardedAt);
+
+      const passEnd: Step = { id: crypto.randomUUID(), kind: 'end',
+        summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
+        outcome: found || 'unnamed', publishes: published };
+      const failEnd: Step = { id: crypto.randomUUID(), kind: 'end',
+        summary: said?.whenAbsent?.label || 'Finish — this conclusion has no name yet',
+        outcome: absent || 'unnamedOtherwise', publishes: published };
+
+      const ids = allConditions.map(() => crypto.randomUUID());
+      const branches: Step[] = allConditions.map((c, i) => ({
+        id: ids[i]!, kind: 'branch',
+        summary: `Is ${c.of.label} ${readable(c.is)} ${c.than}?`,
+        when: comparisonFor(c),
+        // Each condition passes to the next; the last passes to the act it
+        // guards. Any that fails leaves the guarded path entirely, which is
+        // what "only when" means.
+        ifTrue: i + 1 < ids.length ? ids[i + 1]! : guarded[0]!.id,
+        ifFalse: failEnd.id,
+      }));
+
+      steps.length = 0;
+      steps.push(...prefix, ...branches, ...guarded, passEnd, failEnd);
+
+      turns.push(record(refusal ? 'rejected' : 'kept',
+        `${allConditions.length} condition${allConditions.length === 1 ? '' : 's'} guard ${guarded.length} step${guarded.length === 1 ? '' : 's'}: `
+        + allConditions.map((c) => `${c.value} ${readable(c.is)} ${c.than}`).join(' and ')));
+
+      if (!found || !absent) {
+        questions.push('What are the two ways this finishes called? A run reports the conclusion by name, and nothing may invent one.');
+      }
+      // Orbit watched one path. Where the procedure says to *do* something on
+      // the other — decline the file, send it back — it has not seen that act
+      // and will not guess at it.
+      if (guarded.some((x) => x.kind === 'activate' && x.changesARecord)) {
+        questions.push('When the conditions do not hold, this reports the conclusion and takes no action. If something must be done instead, say what, and it can be recorded.');
+      }
+    } else if (refusal || !said || !said.whenAbsent || !separator || !absent) {
       // One ending. Either the procedure has one, or the model's account of the
       // second did not hold — and a rejected answer still leaves a workflow
       // that works, with a question against it.
@@ -422,6 +549,33 @@ function regionFor(element: Seen): { label: string; binding: unknown } {
   };
 }
 
+/** How a condition reads to a person, in the words the procedure used. */
+function readable(is: string): string {
+  return is === 'isMoreThan' ? 'above' : is === 'isAtLeast' ? 'at least'
+    : is === 'isLessThan' ? 'below' : is === 'isAtMost' ? 'at most'
+    : is === 'isNot' ? 'not' : 'exactly';
+}
+
+/**
+ * A condition becomes a comparison of a declared type.
+ *
+ * The type is settled by what the threshold is, not by what the read declared
+ * — a read declares `text` because that is what a screen gives, and "700" is
+ * the author saying they mean a number. A threshold that is not a number can
+ * only be compared for equality, so an ordering operator against one is a
+ * condition Orbit cannot carry out and does not pretend to.
+ */
+function comparisonFor(c: { value: string; is: string; than: string }): Extract<Step, { kind: 'branch' }>['when'] {
+  const n = asNumber(c.than);
+  const left = { from: 'step' as const, value: c.value };
+  if (n !== null) {
+    return { of: 'number', operator: c.is as 'isMoreThan',
+      left, right: { from: 'literal', literal: { type: 'number', number: n } } };
+  }
+  return { of: 'text', operator: c.is === 'isNot' ? 'isNot' : 'is',
+    left, right: { from: 'literal', literal: { type: 'text', text: c.than } } };
+}
+
 /** A proposal becomes a step, with Orbit's binding rather than the model's. */
 function makeStep(p: Proposal, element: Seen): Step | null {
   const id = crypto.randomUUID();
@@ -433,8 +587,13 @@ function makeStep(p: Proposal, element: Seen): Step | null {
       into: target, value: { from: 'input', value: p.value }, sensitive: false };
   }
   if (p.act === 'activate') {
+    // Only something pressable can commit anything, so a claim about a field
+    // or a value is discarded rather than trusted. Orbit verifies; the model
+    // maps.
+    const commits = p.changesARecord === true
+      && (element.what === 'button' || element.what === 'link');
     return { id, kind: 'activate', summary: element.name, control: target,
-      then: { describe: 'the page moves on' }, changesARecord: false };
+      then: { describe: 'the page moves on' }, changesARecord: commits };
   }
   if (p.act === 'read') {
     if (!p.value) return null;

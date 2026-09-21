@@ -13,6 +13,7 @@ import type { ErrorKind, Step } from '@orbit/contract';
 import type { PoolClient } from 'pg';
 import { describeRefusal, type Binding } from './binder.ts';
 import { capture } from './evidence.ts';
+import { decide } from './compare.ts';
 import type { Surface } from './surface.ts';
 
 export interface Halt { kind: ErrorKind; step: number; describe: string }
@@ -27,6 +28,28 @@ interface Ctx {
   inputs: Record<string, string>;
   /** The ending actually reached, which is not the last step in the list. */
   reached: string | null;
+}
+
+/**
+ * One side of a comparison, as text or absence.
+ *
+ * A literal is a constant in the published version; a step value is something
+ * a run produced; an input is what the run was started with. None of them is
+ * an expression, which is what keeps a comparison a fact rather than a small
+ * program.
+ */
+function resolveRef(ctx: Ctx, ref: { from: string; value?: string; literal?: unknown }): string | null {
+  if (ref.from === 'step') return ctx.values.get(ref.value ?? '') ?? null;
+  if (ref.from === 'input') return ctx.inputs[ref.value ?? ''] ?? null;
+  if (ref.from === 'literal') {
+    const l = ref.literal as { type: string; text?: string; number?: number; date?: string; yesNo?: boolean };
+    return l.type === 'text' ? l.text ?? null
+      : l.type === 'number' ? String(l.number)
+      : l.type === 'date' ? l.date ?? null
+      : l.type === 'yesNo' ? (l.yesNo ? 'yes' : 'no')
+      : null;
+  }
+  return null;
 }
 
 const binding = (step: Step): Binding | null => {
@@ -138,14 +161,19 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       await end('ok'); return 'ok';
     }
     case 'branch': {
-      const left = step.when.left.from === 'step' ? ctx.values.get(step.when.left.value) ?? null : null;
-      const took = step.when.of === 'absence'
-        ? (step.when.operator === 'isAbsent' ? left === null : left !== null)
-        : left !== null;
+      const decided = decide(step.when, (ref) => resolveRef(ctx, ref));
+      if (!decided.decided) {
+        // A comparison that cannot be decided stops the run. It used to fall
+        // through to "is the left side present", which answers a different
+        // question and answers it confidently.
+        const halt: Halt = { kind: decided.kind, step: position, describe: decided.describe };
+        await end('halted', halt); return halt;
+      }
+      const took = decided.held;
       // Both operands, exactly as they arrived (§10). A comparison that went
       // the wrong way is fixable only because these are here.
       await event(ctx, attemptId, 'branch.evaluated', {
-        left, operator: step.when.operator, right: null,
+        left: decided.left, operator: step.when.operator, right: decided.right,
         tookPath: took ? 'yes' : 'no',
       });
       await end('ok');
@@ -159,6 +187,25 @@ async function runStep(ctx: Ctx, step: Step, position: number,
         return halt;
       }
       return { goto: to };
+    }
+    case 'check': {
+      // §14: a check asserts a condition holds and stops the run when it does
+      // not, saying what was expected. Unlike a branch it has one way out, so
+      // the failure is the interesting half.
+      const decided = decide(step.that, (ref) => resolveRef(ctx, ref));
+      if (!decided.decided) {
+        const halt: Halt = { kind: decided.kind, step: position, describe: decided.describe };
+        await end('halted', halt); return halt;
+      }
+      await event(ctx, attemptId, 'check.evaluated', {
+        left: decided.left, operator: step.that.operator, right: decided.right,
+        held: decided.held,
+      });
+      if (!decided.held) {
+        const halt: Halt = { kind: 'checkFailed', step: position, describe: step.otherwise };
+        await end('halted', halt); return halt;
+      }
+      await end('ok'); return 'ok';
     }
     case 'end': {
       await event(ctx, attemptId, 'ended', { outcome: step.outcome });
