@@ -1,4 +1,5 @@
 import { pool } from './db.ts';
+import { evidenceRoot } from './artefacts.ts';
 
 /**
  * What is registered, what has been spent, and where this runs.
@@ -40,7 +41,7 @@ export async function readAdmin() {
       // runs in one (Decision 8).
       region: null,
       recordStore: 'postgres, local',
-      evidence: process.env['ORBIT_EVIDENCE_DIR'] ?? './data/evidence',
+      evidence: evidenceRoot,
       environments: 'One. Practice and live are not separated yet.',
       provider: process.env['ORBIT_MODEL_PROVIDER'] ?? null,
       model: process.env['ORBIT_MODEL'] ?? null,

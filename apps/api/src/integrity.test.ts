@@ -22,8 +22,9 @@ const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.en
 // from the repository root, so the test proved that a file it had just
 // written could not be found — which is a true statement about two different
 // directories and nothing about integrity.
-const root = resolve(process.env['ORBIT_EVIDENCE_DIR']
-  ?? join(import.meta.dirname, '..', '..', '..', 'data', 'evidence'));
+const anchor = join(import.meta.dirname, '..', '..', '..');
+const configured = process.env['ORBIT_EVIDENCE_DIR'];
+const root = configured ? resolve(anchor, configured) : join(anchor, 'data', 'evidence');
 let db: Client;
 let honest: string;
 let tampered: string;
