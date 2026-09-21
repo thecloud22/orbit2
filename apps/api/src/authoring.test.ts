@@ -10,7 +10,7 @@
 import { strict as assert } from 'node:assert';
 import { after, before, beforeEach, test } from 'node:test';
 import { Client } from 'pg';
-import { bringIn } from './authoring.ts';
+import { bringIn, finishRecording, startRecording } from './authoring.ts';
 import { migrate } from './migrate.ts';
 
 const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.env['USER']}@localhost/orbit2_test`;
@@ -92,4 +92,56 @@ test('a session cannot claim to have brought something in with nothing to show',
   await assert.rejects(
     () => db.query(`UPDATE authoring_session SET status = 'brought in' WHERE id = $1`, [id]),
     /authoring_session_says_what_came_of_it/);
+});
+
+// ── recording ─────────────────────────────────────────────────────────────
+
+test('a recording is queued with no procedure, because the demonstration is the description', async () => {
+  const result = await startRecording(db as never,
+    { name: 'Shown once', applicationId, startPath: '/pipeline' });
+  assert.equal(result.ok, true);
+
+  const { rows } = await db.query<{ status: string; captured: unknown[]; finish_requested_at: string | null }>(
+    `SELECT status, captured, finish_requested_at FROM recording_session WHERE id = $1`,
+    [result.ok === true ? result.id : '']);
+  assert.equal(rows[0]!.status, 'queued');
+  assert.deepEqual(rows[0]!.captured, [], 'nothing watched yet');
+  assert.equal(rows[0]!.finish_requested_at, null);
+});
+
+test('finishing is recorded rather than signalled, so it survives a restart', async () => {
+  // The screen and the browser are held by two processes. A signal between
+  // them would be lost if either restarted; a column is still there.
+  const started = await startRecording(db as never, { name: 'Shown once', applicationId, startPath: '/' });
+  const id = started.ok === true ? started.id : '';
+
+  assert.equal((await finishRecording(db as never, id)).ok, true);
+  const { rows } = await db.query<{ at: string | null }>(
+    `SELECT finish_requested_at AS at FROM recording_session WHERE id = $1`, [id]);
+  assert.ok(rows[0]!.at, 'the worker finds this and closes the browser');
+});
+
+test('finishing twice is refused, rather than quietly doing nothing', async () => {
+  const started = await startRecording(db as never, { name: 'Shown once', applicationId, startPath: '/' });
+  const id = started.ok === true ? started.id : '';
+  await finishRecording(db as never, id);
+
+  const again = await finishRecording(db as never, id);
+  assert.equal(again.ok, false);
+  assert.match(again.ok === false ? again.because : '', /already finished it/);
+});
+
+test('a recording against a retired application is refused like any other', async () => {
+  await db.query(`UPDATE application SET retired_at = now() WHERE id = $1`, [applicationId]);
+  const result = await startRecording(db as never, { name: 'Shown once', applicationId, startPath: '/' });
+  assert.equal(result.ok, false);
+  assert.match(result.ok === false ? result.because : '', /retired/);
+});
+
+test('a recording that captured nothing cannot claim to have brought something in', async () => {
+  const started = await startRecording(db as never, { name: 'Shown once', applicationId, startPath: '/' });
+  const id = started.ok === true ? started.id : '';
+  await assert.rejects(
+    () => db.query(`UPDATE recording_session SET status = 'brought in' WHERE id = $1`, [id]),
+    /recording_session_says_what_came_of_it/);
 });

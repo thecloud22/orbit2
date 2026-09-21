@@ -11,7 +11,7 @@
 import { strict as assert } from 'node:assert';
 import { after, before, test } from 'node:test';
 import { chromium, type Browser, type Page } from 'playwright';
-import { stepFor, WATCH, type Touched } from './record.ts';
+import { record, stepFor, WATCH, type Touched } from './record.ts';
 import type { Seen } from './snapshot.ts';
 
 let browser: Browser;
@@ -81,4 +81,45 @@ test('a click becomes an activate, and does not claim to know if it changes a re
   // proposes false and the author confirms — the same arrangement as every
   // other mapping, rather than a guess dressed as a fact.
   assert.equal(step.changesARecord, false);
+});
+
+test('a demonstration against the real application becomes steps', async () => {
+  // The one thing a recorder is hard to check is whether it actually captures,
+  // and it cannot be checked while the recorder owns the only reference to the
+  // window. So the page is handed in, and this test drives it the way a person
+  // would: type a loan number, press the button, read what came back.
+  const watched = await chromium.launch();
+  const page = await watched.newPage();
+
+  let stop: () => void = () => undefined;
+  const until = new Promise<void>((resolve) => { stop = resolve; });
+
+  const recording = record({
+    origin: 'http://localhost:4101',
+    startPath: '/pipeline',
+    until,
+    open: async () => ({ page, close: async () => undefined }),
+  });
+
+  // Give the recorder a moment to arm its listeners on the loaded page.
+  await page.waitForTimeout(1200);
+  await page.getByRole('textbox').first().fill('ML-26-04502');
+  await page.waitForTimeout(400);
+  await page.getByRole('button', { name: 'Open file' }).first().click();
+  await page.waitForTimeout(1200);
+
+  stop();
+  const result = await recording;
+  await watched.close();
+
+  assert.ok(result.touched >= 2, `both actions watched: ${result.touched}`);
+  const kinds = result.steps.map((s) => s.kind);
+  assert.equal(kinds[0], 'open', 'the recording starts where the person started');
+  assert.ok(kinds.includes('enter'), `the value typed in became a step: ${kinds.join(', ')}`);
+  assert.ok(kinds.includes('activate'), `the button pressed became a step: ${kinds.join(', ')}`);
+
+  // One recording is one path, and it cannot know what the ending is called.
+  assert.equal(result.steps.at(-1)?.kind, 'end');
+  assert.ok(result.questions.some((q) => /one way the procedure can end/.test(q)),
+    'and it says so rather than implying the other paths do not exist');
 });

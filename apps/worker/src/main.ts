@@ -10,7 +10,8 @@ import { step as stepSchema, type Step } from '@orbit/contract';
 import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
-import { authorAndStore } from './author-store.ts';
+import { authorAndStore, storeDraft } from './author-store.ts';
+import { record } from './record.ts';
 import { openBrowser } from './surface-browser.ts';
 import type { OpenSurface } from './surface.ts';
 
@@ -115,6 +116,106 @@ async function authorOne(sessionId: string) {
   }
 }
 
+/**
+ * A recording, claimed and driven by the person rather than by a model.
+ *
+ * The worker opens the browser and gets out of the way. Two things make this
+ * different from an authoring session: the steps are written back as they are
+ * captured, so the person watches their own actions arrive as steps rather
+ * than demonstrating a procedure on faith; and it ends when they say so, which
+ * arrives as a column because the screen and the browser are held by different
+ * processes.
+ *
+ * The lease is long. A person doing a job by hand takes as long as the job
+ * takes, and a sweep that reclaimed the session underneath them would close
+ * the browser mid-demonstration.
+ */
+async function claimRecording(): Promise<string | null> {
+  const { rows } = await pool.query<{ id: string }>(
+    `UPDATE recording_session SET status = 'recording',
+            claimed_by = $1, lease_expires_at = now() + interval '2 hours'
+      WHERE id = (SELECT id FROM recording_session
+                   WHERE status = 'queued'
+                     AND (lease_expires_at IS NULL OR lease_expires_at < now())
+                   ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1)
+      RETURNING id`, [worker]);
+  return rows[0]?.id ?? null;
+}
+
+async function recordOne(sessionId: string) {
+  const db = await pool.connect();
+  try {
+    const { rows: [s] } = await db.query<{ name: string; start_path: string; host: string }>(
+      `SELECT s.name, s.start_path, (r.addresses->0->>'host') AS host
+         FROM recording_session s
+         JOIN application_revision r ON r.application_id = s.application_id
+        WHERE s.id = $1 ORDER BY r.revision DESC LIMIT 1`, [sessionId]);
+    if (!s) return;
+
+    console.log(`  recording "${s.name}" against http://${s.host} — waiting for you to finish`);
+
+    // The person's own signal, read from the store. Polled rather than pushed
+    // for the same reason it is a column: two processes, either of which may
+    // restart, and a demonstration that could not be stopped afterwards would
+    // leave a browser open with nobody watching it.
+    const finished = new Promise<void>((resolve) => {
+      const timer = setInterval(async () => {
+        const { rows } = await pool.query<{ at: string | null }>(
+          `SELECT finish_requested_at AS at FROM recording_session WHERE id = $1`, [sessionId]);
+        if (rows[0]?.at) { clearInterval(timer); resolve(); }
+      }, 1000);
+    });
+
+    const recording = await record({
+      origin: `http://${s.host}`,
+      startPath: s.start_path,
+      until: finished,
+      onStep: (step) => {
+        console.log(`  captured: ${step.kind.padEnd(9)} ${step.summary}`);
+        // Written as it happens. A recorder that shows nothing until the end
+        // asks somebody to demonstrate a procedure and trust that it watched.
+        void pool.query(
+          `UPDATE recording_session SET captured = captured || $2::jsonb WHERE id = $1`,
+          [sessionId, JSON.stringify([{ kind: step.kind, summary: step.summary }])]);
+      },
+    });
+
+    const result = await storeDraft(db, { name: s.name, procedure: null }, {
+      steps: recording.steps,
+      questions: recording.questions,
+      turns: [],          // nothing was asked of a model: the person showed it
+      declaredInputs: declaredFrom(recording.steps),
+    });
+
+    if (result.stored === false) {
+      await db.query(
+        `UPDATE recording_session SET status = 'refused', refused = $2, ended_at = now() WHERE id = $1`,
+        [sessionId, JSON.stringify({ describe: result.describe, problems: result.problems })]);
+      console.log(`  refused: ${result.describe}`);
+      return;
+    }
+
+    await db.query(
+      `UPDATE recording_session SET status = 'brought in', workflow_id = $2, ended_at = now() WHERE id = $1`,
+      [sessionId, result.workflowId]);
+    console.log(`  brought in: ${recording.steps.length} steps from ${recording.touched} actions`);
+  } catch (error) {
+    await db.query(
+      `UPDATE recording_session SET status = 'refused', refused = $2, ended_at = now() WHERE id = $1`,
+      [sessionId, JSON.stringify({ describe: `The recording could not be kept: ${String(error)}` })]);
+    console.log(`  refused: ${String(error)}`);
+  } finally {
+    db.release();
+  }
+}
+
+/** The inputs a recording implies: one per value a step was given. */
+function declaredFrom(steps: Step[]) {
+  return [...new Set(steps.flatMap((s) =>
+    (s.kind === 'enter' && s.value.from === 'input' ? [s.value.value] : [])))]
+    .map((name) => ({ name, label: name, type: 'text' as const, required: true as const }));
+}
+
 async function runOne(runId: string) {
   const db = await pool.connect();
   try {
@@ -215,6 +316,9 @@ for (;;) {
 
   const sessionId = await claimAuthoring();
   if (sessionId) { await authorOne(sessionId); if (once) break; continue; }
+
+  const recordingId = await claimRecording();
+  if (recordingId) { await recordOne(recordingId); if (once) break; continue; }
 
   if (once) break;
   await new Promise((r) => setTimeout(r, 1000));

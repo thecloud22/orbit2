@@ -27,13 +27,15 @@
  */
 import type { Step } from '@orbit/contract';
 import { chromium, type Page } from 'playwright';
-import { snapshot, type Seen } from './snapshot.ts';
+import { COLLECT, shape, type Raw, type Seen } from './snapshot.ts';
 
 export interface Touched {
   kind: 'click' | 'change';
   /** Absent for anything the page marks as a secret. */
   value: string | null;
   sensitive: boolean;
+  /** Orbit's own collection of the page, taken at the instant of the act. */
+  seen?: Raw[];
 }
 
 export interface Recording {
@@ -50,10 +52,25 @@ export interface Recording {
  */
 export const WATCH = `
 (() => {
+  // Armed once per document. It is injected on load, again after the first
+  // navigation, and again on every one after that — because a server-rendered
+  // application replaces the document on every submit and a listener bound to
+  // the old one is gone. An application that navigates without replacing the
+  // document keeps its listeners, so without this guard they stack up and
+  // every action is recorded as many times as the page has moved.
+  if (window.__orbitWatching) return;
+  window.__orbitWatching = true;
+
+  const collect = () => ${COLLECT};
   const report = (kind, el, value, sensitive) => {
     document.querySelectorAll('[data-orbit-touched]').forEach((e) => e.removeAttribute('data-orbit-touched'));
     el.setAttribute('data-orbit-touched', '1');
-    window.__orbitTouched({ kind, value, sensitive });
+    // Orbit's own view of the page, taken here rather than a moment later.
+    // An application that navigates when you touch it — which is most of them
+    // — has already replaced this document by the time an asynchronous
+    // evaluate arrives, and every action was being lost to "execution context
+    // was destroyed". The collector is the same one; only the moment differs.
+    window.__orbitTouched({ kind, value, sensitive, seen: collect() });
   };
   document.addEventListener('click', (e) => {
     const el = e.target.closest('button, a, input[type=submit], input[type=button], [role=button]');
@@ -71,15 +88,30 @@ export const WATCH = `
 })()
 `;
 
+/**
+ * Where the browser the person drives comes from.
+ *
+ * Handed in so that a test can supply a page it is also holding — the one
+ * thing a recorder is hard to check is whether it actually captures, and it
+ * cannot be checked while the recorder owns the only reference to the window.
+ * The default is the real thing: a browser somebody can see and use.
+ */
+export type OpenForPerson = () => Promise<{ page: Page; close: () => Promise<void> }>;
+
+const aWindowTheyCanSee: OpenForPerson = async () => {
+  const browser = await chromium.launch({ headless: false });
+  return { page: await browser.newPage(), close: () => browser.close() };
+};
+
 export async function record(opts: {
   origin: string;
   startPath: string;
   /** Resolves when the person says they are finished. */
   until: Promise<void>;
   onStep?: (step: Step) => void;
+  open?: OpenForPerson;
 }): Promise<Recording> {
-  const browser = await chromium.launch({ headless: false });
-  const page: Page = await browser.newPage();
+  const { page, close } = await (opts.open ?? aWindowTheyCanSee)();
   const steps: Step[] = [];
   const questions: string[] = [];
   let touched = 0;
@@ -92,18 +124,17 @@ export async function record(opts: {
 
   await page.exposeFunction('__orbitTouched', async (event: Touched) => {
     touched += 1;
+    try {
     // Orbit derives the binding from its own view of the page. What the page
     // reported is a pointer to an element, never a description to be trusted.
-    const seen = await snapshot(page);
-    const marked = await page.locator('[data-orbit-touched]').first();
-    const name = await marked.evaluate((el): string => {
-      const input = el as unknown as { labels?: ArrayLike<{ textContent: string | null }>; value?: string };
-      const labelled = input.labels?.[0]?.textContent?.trim();
-      return labelled || el.getAttribute('aria-label') || input.value || el.textContent?.trim() || '';
-    }).catch(() => '');
+    const seen = shape(event.seen ?? []);
 
-    const element = seen.find((s) => s.name === name)
-      ?? seen.find((s) => s.labelledBy === name);
+    // The marked element, found by the marker rather than by a name computed
+    // from it. Matching by name was the bug: the name of a field that has just
+    // been filled in is the value that was typed into it, so the recorder
+    // looked for a control called "ML-26-04502" and found none — and quietly
+    // turned every demonstration into a list of questions.
+    const element = seen.find((s) => s.touched);
     if (!element) {
       questions.push(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not name on the page. It needs a name before this can publish.`);
       return;
@@ -111,6 +142,14 @@ export async function record(opts: {
 
     const step = stepFor(event, element);
     if (step) { steps.push(step); opts.onStep?.(step); }
+    } catch (error) {
+      // An action that could not be turned into a step is said, not dropped.
+      // It used to throw into the page-side callback and vanish, so a
+      // demonstration could be watched from end to end and produce nothing at
+      // all — with no question to say why, which is the worst way to fail:
+      // silently, and looking like the person did nothing.
+      questions.push(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not record: ${String(error)}`);
+    }
   });
 
   await page.addInitScript(WATCH);
@@ -120,7 +159,7 @@ export async function record(opts: {
   // document on every submit, and a listener bound to the old one is gone.
   page.on('framenavigated', () => { void page.evaluate(WATCH).catch(() => undefined); });
 
-  try { await opts.until; } finally { await page.close().catch(() => undefined); await browser.close(); }
+  try { await opts.until; } finally { await close().catch(() => undefined); }
 
   if (!steps.some((s) => s.kind === 'end')) {
     steps.push({ id: crypto.randomUUID(), kind: 'end',

@@ -94,6 +94,75 @@ export async function readSession(id: string) {
   return { session, turns };
 }
 
+/**
+ * Asking for a demonstration to be recorded.
+ *
+ * Less to validate than a written procedure, because there is no procedure to
+ * validate — the demonstration is the description. What is checked is the same
+ * as before: the application is registered and in service, and the agent has a
+ * name to be found by.
+ */
+export const recordingAskedFor = object({
+  name: z.string().trim().min(1, 'An agent needs a name.').max(160),
+  applicationId: z.uuid('Choose which application this runs against.'),
+  startPath: z.string().trim().min(1).max(2048).default('/'),
+});
+
+export async function startRecording(db: PoolClient, body: unknown): Promise<Queued> {
+  const asked = recordingAskedFor.safeParse(body);
+  if (!asked.success) {
+    return { ok: false, because: asked.error.issues
+      .map((i) => i.message || `${i.path.join('.')} is not right`).join(' ') };
+  }
+  const { name, applicationId, startPath } = asked.data;
+
+  const { rows: [app] } = await db.query<{ name: string; retired_at: string | null }>(
+    `SELECT name, retired_at FROM application WHERE id = $1`, [applicationId]);
+  if (!app) return { ok: false, because: 'There is no application registered with that reference.' };
+  if (app.retired_at) {
+    return { ok: false, because: `${app.name} has been retired, so nothing new can be brought in against it.` };
+  }
+
+  const { rows: [session] } = await db.query<{ id: string }>(
+    `INSERT INTO recording_session (name, application_id, start_path) VALUES ($1, $2, $3) RETURNING id`,
+    [name, applicationId, startPath]);
+
+  await db.query(
+    `INSERT INTO audit_entry (act, object_kind, object_id, changed)
+     VALUES ('procedure brought in', 'recording_session', $1, $2)`,
+    [session!.id, JSON.stringify({ name, application: app.name, by: 'demonstration' })]);
+
+  return { ok: true, id: session!.id };
+}
+
+/**
+ * The person saying they are finished.
+ *
+ * Recorded rather than signalled, because the screen and the browser are held
+ * by two processes and a signal between them would not survive either one
+ * restarting. The worker sees the column and closes the browser.
+ */
+export async function finishRecording(db: PoolClient, id: string): Promise<Queued> {
+  const { rows } = await db.query<{ status: string }>(
+    `UPDATE recording_session SET finish_requested_at = now()
+      WHERE id = $1 AND status IN ('queued', 'recording') AND finish_requested_at IS NULL
+      RETURNING status`, [id]);
+  if (rows.length === 0) {
+    return { ok: false, because: 'That recording is not running, or you have already finished it.' };
+  }
+  return { ok: true, id };
+}
+
+export async function readRecording(id: string) {
+  const { rows: [session] } = await pool.query(
+    `SELECT s.id, s.name, s.status, s.captured, s.finish_requested_at,
+            s.workflow_id, s.refused, s.queued_at, s.ended_at,
+            a.name AS application
+       FROM recording_session s JOIN application a ON a.id = s.application_id
+      WHERE s.id = $1`, [id]);
+  return session ?? null;
+}
+
 /** What may be brought in against, for a screen that has to offer a choice. */
 export async function listApplications() {
   const { rows } = await pool.query(

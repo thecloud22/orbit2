@@ -62,7 +62,8 @@ export async function authorAndStore(db: PoolClient, opts: {
  */
 export async function storeDraft(
   db: PoolClient,
-  opts: { name: string; procedure: string },
+  /** A recording has no written procedure: the demonstration is the description. */
+  opts: { name: string; procedure: string | null },
   draft: AuthoredDraft,
 ): Promise<Stored | NotStored> {
   // Validated before anything is written, and as a whole. Validating inside

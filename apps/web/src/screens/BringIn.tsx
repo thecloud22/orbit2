@@ -52,6 +52,7 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const [inputs, setInputs] = useState<Array<{ name: string; value: string }>>([{ name: '', value: '' }]);
   const [refused, setRefused] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [recordingId, setRecordingId] = useState<string | null>(null);
 
   const application = apps.state === 'loaded'
     ? apps.value.applications.find((a) => a.id === chosen) : undefined;
@@ -66,7 +67,16 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
     else setRefused(result.why);
   }
 
+  async function startRecording() {
+    setRefused(null);
+    const result = await send<{ id: string }>('/api/recordings',
+      { name, applicationId: chosen, startPath });
+    if (result.ok) setRecordingId(result.value.id);
+    else setRefused(result.why);
+  }
+
   if (sessionId) return <Working id={sessionId} go={go} onAbandon={() => setSessionId(null)} />;
+  if (recordingId) return <Demonstrating id={recordingId} go={go} onAbandon={() => setRecordingId(null)} />;
 
   return (
     <Page kicker="New agent" title="Bring in a procedure"
@@ -187,21 +197,24 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
         </>
       ) : (
         <Section title="Recording">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11, paddingBottom: 14 }}>
+            <span style={{ fontSize: 13, color: 'var(--ink-2)', width: 150 }}>Call this agent</span>
+            <input style={{ ...field, maxWidth: 420 }} value={name} aria-label="Name for this recording"
+              placeholder="Note rate lookup" onChange={(e) => setName(e.target.value)} />
+          </div>
           <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.65, color: 'var(--ink-2)', maxWidth: 700 }}>
             A browser opens and you do the job once. Orbit records what you touched and turns it into steps,
             deriving how to find each control again from what the page offers.
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <Action disabled why="Recording opens a browser you drive, so it runs where you are">
-              Start recording
-            </Action>
+            <Action disabled={!name.trim() || !chosen}
+              why={!chosen ? 'Choose which system it runs against' : 'Give the agent a name'}
+              onClick={() => void startRecording()}>Start recording</Action>
             <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
-              {/* Honest about why this one is still a command. Writing it out
-                  could move here because the browser is Orbit's; a recording
-                  is a browser the person drives, and a button on a web page
-                  cannot open one on their desk. */}
-              You drive this browser, so it opens where you are rather than where Orbit is:{' '}
-              <code style={{ fontFamily: 'var(--mono)' }}>node --experimental-strip-types src/record-cli.ts</code>
+              {/* Said rather than hidden. The browser opens where the worker
+                  runs, which is this machine today and will not be when Orbit
+                  runs on a server. */}
+              The browser opens on the machine running Orbit, which is this one.
             </span>
           </div>
           <Refusal title="Three things to know before you record" blockers={[
@@ -308,6 +321,99 @@ function Working({ id, go, onAbandon }: { id: string; go: (to: Route) => void; o
           </div>
         )}
       </Section>
+    </Page>
+  );
+}
+
+/**
+ * While the person is demonstrating.
+ *
+ * The screen has almost nothing to do: the work is happening in another window
+ * and the person is doing it. What it owes them is proof that Orbit is
+ * watching — each action appearing as a step the moment it is captured — and
+ * the one control the browser cannot give them, which is saying they are
+ * finished.
+ */
+function Demonstrating({ id, go, onAbandon }: { id: string; go: (to: Route) => void; onAbandon: () => void }) {
+  const [state, setState] = useState<{
+    name: string; status: string; application: string; workflow_id: string | null;
+    finish_requested_at: string | null; refused: { describe?: string } | null;
+    captured: Array<{ kind: string; summary: string }>;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    const poll = async () => {
+      const res = await fetch(`/api/recordings/${id}`).catch(() => null);
+      if (!live || !res?.ok) return;
+      const body = await res.json();
+      setState(body);
+      if (body.status === 'brought in' && body.workflow_id) go({ at: 'agent', id: body.workflow_id });
+    };
+    void poll();
+    const timer = setInterval(() => { void poll(); }, 1000);
+    return () => { live = false; clearInterval(timer); };
+  }, [id, go]);
+
+  const captured = state?.captured ?? [];
+  const finishing = Boolean(state?.finish_requested_at);
+
+  return (
+    <Page kicker="Recording" title={state?.name ?? 'Show it once'}
+      aside={<p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: 'var(--ink-2)', maxWidth: 520 }}>
+        {state?.status === 'queued' ? 'Waiting for a worker to open the browser.'
+          : finishing ? 'Closing the browser and turning what you did into a draft.'
+          : `A browser is open against ${state?.application}. Do the job the way you normally would.`}
+      </p>}
+      actions={
+        <Action disabled={busy || finishing || state?.status === 'queued'}
+          why={state?.status === 'queued' ? 'The browser is still opening' : 'Already finishing'}
+          onClick={async () => {
+            setBusy(true);
+            await fetch(`/api/recordings/${id}/finish`, { method: 'POST' });
+            setBusy(false);
+          }}>I have finished</Action>
+      }>
+
+      {state?.refused && (
+        <div style={{ paddingTop: 20 }}>
+          <Refusal tone="failed" title="The recording was not kept"
+            blockers={[state.refused.describe ?? 'No reason was recorded.']} />
+          <div style={{ paddingTop: 16 }}>
+            <Action kind="ghost" onClick={onAbandon}>Try again</Action>
+          </div>
+        </div>
+      )}
+
+      <Section title="What Orbit is watching"
+        note={captured.length === 0 ? 'nothing yet' : `${captured.length} step${captured.length === 1 ? '' : 's'}`}>
+        {captured.length === 0 ? (
+          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.6, maxWidth: 700 }}>
+            {state?.status === 'queued'
+              ? 'Queued. The browser opens in a moment.'
+              : 'Nothing captured yet. Press something, or fill a field in, and it will appear here.'}
+          </p>
+        ) : (
+          <div style={{ borderTop: '1px solid var(--ink)' }}>
+            {captured.map((c, i) => (
+              <div key={i} style={{ borderBottom: '1px solid var(--rule)', padding: '11px 0',
+                display: 'flex', gap: 13, alignItems: 'center' }}>
+                <span style={{ width: 18, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right' }}>{i + 1}</span>
+                <span style={{ width: 70, fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
+                  color: 'var(--running-ink)' }}>{c.kind}</span>
+                <span style={{ flexGrow: 1, fontSize: 13.5 }}>{c.summary}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Refusal title="Three things to know while you record" blockers={[
+        'A password is a keystroke. The field is remembered and the value never leaves the page.',
+        'This is one path. It shows the ending that happens; the others must be recorded or described, and a path reaching no conclusion cannot publish.',
+        'You are recording as yourself and the agent runs as the registered credential, so every control is checked again as that account before anything publishes.',
+      ]} />
     </Page>
   );
 }

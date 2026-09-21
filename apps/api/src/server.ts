@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { serveArtefact } from './artefacts.ts';
-import { listApplications, readSession } from './authoring.ts';
+import { listApplications, readRecording, readSession } from './authoring.ts';
 import { listRuns, readRun, readRunSteps } from './runs.ts';
 import { listWorkflows, readWorkflow } from './workflows.ts';
 import { testCases } from './activate.ts';
@@ -25,6 +25,12 @@ createServer(async (req, res) => {
       const [, , kind, id, verb] = url.pathname.split('/');
       const body = await readBody(req);
       const route = `${kind}/${verb}`;
+      if (kind === 'recordings' && !id) {
+        const r = await actions.startRecording(body); return json(res, r.status, r.body);
+      }
+      if (kind === 'recordings' && id && verb === 'finish') {
+        const r = await actions.finishRecording(id); return json(res, r.status, r.body);
+      }
       if (kind === 'authoring' && !id) {
         const r = await actions.bringIn(body); return json(res, r.status, r.body);
       }
@@ -56,6 +62,12 @@ createServer(async (req, res) => {
     if (url.pathname === '/api/audit') return json(res, 200, await readAudit());
     if (url.pathname === '/api/workflows') return json(res, 200, await listWorkflows());
     if (url.pathname === '/api/applications') return json(res, 200, await listApplications());
+    if (url.pathname.startsWith('/api/recordings/')) {
+      const session = await readRecording(url.pathname.slice('/api/recordings/'.length));
+      return session
+        ? json(res, 200, session)
+        : json(res, 404, { kind: 'nothingMatching', why: 'No recording with that reference.' });
+    }
     if (url.pathname.startsWith('/api/authoring/')) {
       const session = await readSession(url.pathname.slice('/api/authoring/'.length));
       return session

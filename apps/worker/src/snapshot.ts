@@ -31,6 +31,17 @@ export interface Seen {
    *  label can be corroborated against it — Decision 15 refuses the
    *  structural rung uncorroborated, and the tag is what is knowable here. */
   tag?: string;
+  /**
+   * This is the element the recorder marked as just acted on.
+   *
+   * The marker is a pointer, which is the whole reason it exists — a page can
+   * say anything about itself, so Orbit finds the element in its own snapshot
+   * rather than trusting a description. The recorder was matching by name
+   * instead, and the name it computed for a filled field was the value that
+   * had just been typed into it. It then looked for a control called
+   * "ML-26-04502" and of course found none.
+   */
+  touched?: boolean;
   /** For a grid cell: its row and its column heading. */
   row?: string;
   column?: string;
@@ -43,7 +54,7 @@ export interface Seen {
  * carry them for their own test suites; an application a customer runs will
  * not, and binding to one would make the binder look solved.
  */
-const COLLECT = `
+export const COLLECT = `
 (() => {
   const out = [];
   const text = (el) => (el.textContent || '').trim().replace(/\\s+/g, ' ');
@@ -85,6 +96,7 @@ const COLLECT = `
     if ((name || '').trim().length > 80) continue;
 
     out.push({
+      touched: el.hasAttribute('data-orbit-touched'),
       tag,
       type: el.type || null,
       what: tag === 'a' ? 'link' : (tag === 'button' || el.type === 'submit' ? 'button' : 'field'),
@@ -115,6 +127,7 @@ const COLLECT = `
     }
     const before = el.previousElementSibling;
     out.push({
+      touched: el.hasAttribute('data-orbit-touched'),
       tag: el.tagName.toLowerCase(), type: null, what: 'value', role: 'cell',
       name: value, formName: null,
       labelledBy: before && !before.querySelector('input,button,a') ? text(before) : null,
@@ -130,22 +143,24 @@ const COLLECT = `
     if (!before || before.children.length > 0) continue;
     const label = text(before), value = text(el);
     if (!label || !value || label.length > 60 || value.length > 60) continue;
-    out.push({ tag: 'div', type: null, what: 'value', role: 'text',
+    out.push({
+      touched: el.hasAttribute('data-orbit-touched'), tag: 'div', type: null, what: 'value', role: 'text',
       name: value, formName: null, labelledBy: label, row: null, column: null });
   }
 
   for (const el of document.querySelectorAll('h1, h2, h3')) {
     if (!visible(el)) continue;
-    out.push({ tag: el.tagName.toLowerCase(), type: null, what: 'heading',
+    out.push({
+      touched: el.hasAttribute('data-orbit-touched'), tag: el.tagName.toLowerCase(), type: null, what: 'heading',
       role: 'heading', name: text(el), formName: null, labelledBy: null, row: null, column: null });
   }
   return out;
 })()
 `;
 
-interface Raw {
+export interface Raw {
   tag: string; type: string | null; what: Seen['what']; role: string;
-  name: string; formName: string | null; labelledBy: string | null;
+  name: string; formName: string | null; labelledBy: string | null; touched?: boolean;
   row: string | null; column: string | null;
 }
 
@@ -173,7 +188,21 @@ function bindingFor(raw: Raw, seenNames: Map<string, number>): Binding {
 }
 
 export async function snapshot(page: Page | Frame): Promise<Seen[]> {
-  const raw = await page.evaluate(COLLECT) as Raw[];
+  return shape(await page.evaluate(COLLECT) as Raw[]);
+}
+
+/**
+ * The same shaping, applied to a collection made elsewhere.
+ *
+ * The recorder cannot collect from here: on an application that navigates when
+ * you touch it — which is most of them — the page is gone by the time an
+ * asynchronous evaluate arrives, and every action was being lost to
+ * "execution context was destroyed". So it runs COLLECT synchronously inside
+ * the event, and hands the result here. Orbit still derives the binding from
+ * its own view of the page; it just takes that view at the instant of the act
+ * rather than a moment later.
+ */
+export function shape(raw: Raw[]): Seen[] {
   const counts = new Map<string, number>();
   for (const r of raw) counts.set(r.name, (counts.get(r.name) ?? 0) + 1);
 
@@ -186,6 +215,7 @@ export async function snapshot(page: Page | Frame): Promise<Seen[]> {
       };
       if (r.labelledBy) seen.labelledBy = r.labelledBy;
       if (r.tag) seen.tag = r.tag;
+      if (r.touched) seen.touched = true;
       if (r.row) seen.row = r.row;
       if (r.column) seen.column = r.column;
       return seen;
