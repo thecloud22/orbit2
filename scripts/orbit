@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Start, stop and look at the four processes Orbit runs locally.
+# Start, stop and look at the five processes Orbit runs locally.
 #
-#   scripts/orbit start | stop | restart | status | logs [api|worker|web|portal]
+#   scripts/orbit start | stop | restart | status | logs [api|worker|web|portal|legacy]
 #
 # Written because doing it by hand went wrong twice in one afternoon, in two
 # ways worth encoding rather than remembering:
@@ -30,6 +30,11 @@ SERVICES=(
   "worker|0|apps/worker|node --experimental-strip-types --env-file=$ROOT/.env src/main.ts"
   "web|5173|apps/web|npx vite --port 5173 --strictPort"
   "portal|4101|demo/mortgage-portal|npx vite --port 4101 --strictPort"
+  # The hard case, and the one the binder is measured against: tables for
+  # layout, forms that POST and reload, and fields with no label, no
+  # aria-label and no name attribute. It was started by hand while that was
+  # being fixed, which meant it was only ever running for whoever remembered.
+  "legacy|3040|demo/legacy-portal|npx tsx src/main.ts"
 )
 
 field() { echo "$1" | cut -d'|' -f"$2"; }

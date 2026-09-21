@@ -132,12 +132,13 @@ Then:
 scripts/orbit start
 ```
 
-Four processes come up. `scripts/orbit status | stop | restart | logs <name>`.
+Five processes come up. `scripts/orbit status | stop | restart | logs <name>`.
 
 | | |
 |---|---|
 | `http://localhost:5173` | Orbit |
-| `http://localhost:4101` | Meridian Home Lending — the demo application Orbit is pointed at |
+| `http://localhost:4101` | Meridian Home Lending — the modern demo application |
+| `http://localhost:3040` | Northwind Service Desk — the legacy one, which is the hard case |
 | `http://localhost:4000` | the API |
 | — | the worker, which holds no port |
 
