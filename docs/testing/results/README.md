@@ -28,39 +28,24 @@ Three decisions, agreed before starting:
 
 ## Runs
 
-| Run | Suite | Stopped at | Defect | Fix |
-|---|---|---|---|---|
-| 1 | A | prompt 1 | 1 — every login page was ambiguous; the walk gave up in silence | `3e740e1` |
-| 2 | A | prompt 1 | 2 — the walk typed nothing into anything | `6a088ab` |
-| 3 | A | prompt 1 | 3 — the walk was never told which account it signs in as | `683a93b` |
-| 4 | A | prompt 1 | 4 — a rejected turn told the model nothing | `89cd42a` |
-| 5 | A | prompt 1 | 5 — "finished" and "gave up" recorded identically | `70d4028` |
-| 6 | A | prompt 1 | 6 — a read bound to a heading returned the page title | `448095f` |
-| 7 | A | prompt 1 (**at run time**, after a clean publish) | 7 — the ladder fell to its worst rung | `4d4cfc1` |
-| 8 | A | prompt 2 (**at run time**, after a clean publish) | 8 — a walk with no example typed nothing and said nothing | `b7c2c1d` |
-| 9 | A | paused at prompt 3 | two findings recorded, root cause not established | — |
+The suite starts as Section A and grows a section at a time. Every defect
+restarts it from prompt 1 of the suite as then defined.
 
-Prompt 1 first passed end to end in **Run 8**: published version 1, run
-`F29F16` **succeeded**, 5 steps all reached, conclusion `Pipeline loaded`.
-Prompt 2 passed in **Run 9**: 7 steps all reached, conclusion
-`Loan file opened`.
+| Runs | Suite | Outcome |
+|---|---|---|
+| 1–9 | A (1–4) | eight defects, one per run; prompts 1 and 2 passing by run 9 |
+| 10 | A | green — all four pass or refuse clearly |
+| 11–22 | A+B (1–14) | fifteen more defects |
+| 23 | A+B | green — see `run-23.md` |
+| 24– | A+B+C (1–23) | in progress |
 
-## Current status: paused, not green
+Defect-by-defect detail, with root cause, fix, commit and restart
+confirmation, is in `defects.md`. Per-run detail is in `run-NN.md`;
+screenshots under `run-NN/`.
 
-Prompts 1 and 2 pass end to end. Prompts 3 and 4 have documented findings that
-were not taken to root cause, so no fix was attempted and the suite was not
-restarted. See `run-09.md`.
-
-- **Prompt 3** searches for a loan number that does not exist and produces no
-  step that checks anything, ending `File Opened` — the opposite of what the
-  procedure describes. Whether the "no match" message is visible to the
-  snapshot is the open question, and it is the same class as prompt 1's count.
-- **Prompt 4** binds a read by the borrower's own name rather than by its
-  label, so the step reads whatever sits beside the name. Needs the loan page's
-  DOM examined to see whether the label/value pairing is off by one.
-
-Every defect and its root cause, fix, validation and restart confirmation is in
-`defects.md`. Per-run detail is in `run-NN.md`; screenshots in `run-NN/`.
+**23 defects found and fixed so far, across the first 14 of 50 prompts.**
+Unit tests went from 156 to 188 (`author.ts` and `snapshot.ts` had no test
+files at all before this; they have 22 and 9 now).
 
 ## What the suite has established so far
 
