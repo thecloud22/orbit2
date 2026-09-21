@@ -752,6 +752,21 @@ export async function authorFromProcedure(opts: {
         await page.getByRole(element.role as 'button', { name: element.name, exact: true }).first()
           .click().catch(() => undefined);
         await settleAfterActivating(page, wasAt);
+
+        // Arriving somewhere new clears it.
+        //
+        // "Lost the thread" means Orbit is not on the page the procedure
+        // describes, and moving is the only thing that can put it back. Left
+        // latched for the whole walk it punished a naming slip: test case 12
+        // began with the model asking for "UserID" where the field is "User
+        // ID", recovered on the very next turn, and then had its approval
+        // refused and its conclusion voided eight turns later.
+        //
+        // Cleared here rather than on any kept step, because typing into a
+        // field on the wrong page is not finding the right one. Test case 16
+        // still cannot commit: it never moves after asking for a page that was
+        // not there.
+        if (page.url() !== wasAt) lostTheThread = null;
       }
     }
 
