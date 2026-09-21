@@ -10,9 +10,13 @@ import { describeBlocker, type Step } from '@orbit/contract';
 import { checkForPublication } from './publish.ts';
 
 const ids = Array.from({ length: 9 }, () => crypto.randomUUID());
+// A read bound the way a real one is: by whatever labels the value, not by
+// the value. The role here was 'heading' — incidental fixture data, chosen
+// before a read bound to a heading was recognised as circular, and every
+// assertion in this file is about something else.
 const read = (i: number, value: string): Step => ({
   id: ids[i]!, kind: 'read', summary: `read ${value}`,
-  region: { label: value, binding: { strategy: 'roleAndName', role: 'heading', name: value } },
+  region: { label: value, binding: { strategy: 'roleAndName', role: 'cell', name: `${value} label` } },
   produces: { name: value, label: value, type: 'text', required: false },
 });
 const end = (i: number, outcome: string, publishes: string[] = []): Step =>
@@ -138,4 +142,23 @@ test('activating a control named by its own text is not circular, and is allowed
   };
   const blockers = checkForPublication([press, end(1, 'done')], declared(['done']));
   assert.equal(blockers.filter((b) => b.kind === 'readIsCircular').length, 0);
+});
+
+test('a read bound to a heading is circular, like a read bound to its own text', () => {
+  // `read Underwriting pipeline, into filesAwaitingDecision` can only ever
+  // produce "Underwriting pipeline": a heading is located by the words it
+  // contains, so the step returns the words it searched for. Authoring
+  // produced this for "note how many files are awaiting a decision" — the
+  // count sits in a sentence, and the heading was the nearest nameable thing.
+  const steps: Step[] = [
+    { id: 'a', kind: 'read', summary: 'the count',
+      region: { label: 'Underwriting pipeline',
+                binding: { strategy: 'roleAndName', role: 'heading', name: 'Underwriting pipeline' } },
+      produces: { name: 'filesAwaitingDecision', label: 'Files awaiting a decision', type: 'text', required: true } },
+    { id: 'b', kind: 'end', summary: 'done', outcome: 'loaded', publishes: [] },
+  ];
+  const blockers = checkForPublication(steps, { inputs: [], outcomes: ['loaded'], examples: {} });
+  const circular = blockers.find((b) => b.kind === 'readIsCircular');
+  assert.ok(circular, `expected readIsCircular, got ${blockers.map((b) => b.kind).join(', ')}`);
+  assert.equal(circular.kind === 'readIsCircular' && circular.looksFor, 'Underwriting pipeline');
 });

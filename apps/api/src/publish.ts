@@ -148,8 +148,15 @@ export function checkForPublication(
     // answer.
     if (step.kind === 'read') {
       const b = step.region.binding as { strategy?: string; role?: string; name?: string } | null;
+      // A heading belongs here too. It is located by the words it contains,
+      // so a read bound to one returns the words it searched for and nothing
+      // else — `read Underwriting pipeline, into filesAwaitingDecision` is a
+      // step that can only ever produce "Underwriting pipeline". Authoring
+      // produced exactly that for "note how many files are awaiting a
+      // decision", because the count is in a sentence the snapshot does not
+      // offer and the heading was the nearest thing the model could name.
       const byOwnText = b?.strategy === 'text'
-        || (b?.strategy === 'roleAndName' && b.role === 'text');
+        || (b?.strategy === 'roleAndName' && (b.role === 'text' || b.role === 'heading'));
       if (byOwnText && b?.name) {
         blockers.push({ kind: 'readIsCircular', step: at(index),
           value: step.produces.name, looksFor: b.name });

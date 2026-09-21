@@ -32,7 +32,10 @@ before(async () => {
   workflowId = w!.id;
 
   await step(1, 'read', { summary: 'the status',
-    region: { label: 'Status', binding: { strategy: 'roleAndName', role: 'heading', name: 'Status' } },
+    // Bound by what labels the value, not by a heading: a read bound to a
+    // heading returns the words it searched for, and the publish gate refuses
+    // it. The role here was incidental to everything this file asserts.
+    region: { label: 'Status', binding: { strategy: 'roleAndName', role: 'cell', name: 'Status' } },
     produces: { name: 'status', label: 'Status', type: 'text', required: false } });
   await step(2, 'end', { summary: 'found', outcome: 'found', publishes: ['status'] });
 });
