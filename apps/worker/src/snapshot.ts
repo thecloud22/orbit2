@@ -154,7 +154,14 @@ export const COLLECT = `
     const before = el.previousElementSibling;
     if (!before || before.children.length > 0) continue;
     const label = text(before), value = text(el);
-    if (!label || !value || label.length > 60 || value.length > 60) continue;
+    // A label is short; a value need not be. The ceiling was 60 characters on
+    // both, so a labelled paragraph — "INCOME ANALYST NOTE" over the analyst's
+    // actual note — was dropped for being long, and a procedure asking Orbit
+    // to read that note had nothing to name. The model then bound the read to
+    // the nearest heading instead, which the publish gate refuses as circular.
+    // The label stays short, because something long is not a label; the grid
+    // collector beside this one already allows 120 in a cell.
+    if (!label || !value || label.length > 60 || value.length > 300) continue;
 
     // Two elements side by side are a label and its value only when they are
     // the whole of what their parent says. Anything else the parent carries in

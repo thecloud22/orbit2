@@ -82,3 +82,22 @@ test('a pair is still found when the parent only holds whitespace between them',
   const pairs = await on('<div>\n  <div>Credit score</div>\n  <div>771</div>\n</div>');
   assert.deepEqual(pairs.map((p) => [p.labelledBy, p.name]), [['Credit score', '771']]);
 });
+
+test('a labelled value may be longer than its label', async () => {
+  // "INCOME ANALYST NOTE" over the analyst's actual note. The ceiling was 60
+  // characters on both the label and the value, so the note was dropped for
+  // being long — and a procedure asking Orbit to read it had nothing to name.
+  // The model bound the read to the nearest heading instead, which the publish
+  // gate refuses as circular, so the procedure could not be authored at all.
+  const note = 'Borrower is sole member of Whitfield Grounds & Landscape LLC, operating 3 years. '
+    + 'Income is materially seasonal and the analyst flagged the swing as unresolved.';
+  const pairs = await on(`<div><div>Income analyst note</div><div>${note}</div></div>`);
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0]!.labelledBy, 'Income analyst note');
+  assert.equal(pairs[0]!.name, note);
+});
+
+test('a label longer than a label is still not one', async () => {
+  const long = 'x'.repeat(61);
+  assert.deepEqual(await on(`<div><div>${long}</div><div>7</div></div>`), []);
+});
