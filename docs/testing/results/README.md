@@ -38,9 +38,26 @@ Three decisions, agreed before starting:
 | 6 | A | prompt 1 | 6 — a read bound to a heading returned the page title | `448095f` |
 | 7 | A | prompt 1 (**at run time**, after a clean publish) | 7 — the ladder fell to its worst rung | `4d4cfc1` |
 | 8 | A | prompt 2 (**at run time**, after a clean publish) | 8 — a walk with no example typed nothing and said nothing | `b7c2c1d` |
+| 9 | A | paused at prompt 3 | two findings recorded, root cause not established | — |
 
 Prompt 1 first passed end to end in **Run 8**: published version 1, run
 `F29F16` **succeeded**, 5 steps all reached, conclusion `Pipeline loaded`.
+Prompt 2 passed in **Run 9**: 7 steps all reached, conclusion
+`Loan file opened`.
+
+## Current status: paused, not green
+
+Prompts 1 and 2 pass end to end. Prompts 3 and 4 have documented findings that
+were not taken to root cause, so no fix was attempted and the suite was not
+restarted. See `run-09.md`.
+
+- **Prompt 3** searches for a loan number that does not exist and produces no
+  step that checks anything, ending `File Opened` — the opposite of what the
+  procedure describes. Whether the "no match" message is visible to the
+  snapshot is the open question, and it is the same class as prompt 1's count.
+- **Prompt 4** binds a read by the borrower's own name rather than by its
+  label, so the step reads whatever sits beside the name. Needs the loan page's
+  DOM examined to see whether the label/value pairing is off by one.
 
 Every defect and its root cause, fix, validation and restart confirmation is in
 `defects.md`. Per-run detail is in `run-NN.md`; screenshots in `run-NN/`.
