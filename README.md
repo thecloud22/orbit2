@@ -10,15 +10,18 @@ be sure it could not have done anything else.**
 
 ## Getting it running
 
-You need **Node 22.6 or newer**, **pnpm**, and a **PostgreSQL** server it can
-reach — installed, in a container, or remote. No postgres client is needed;
-Orbit creates and migrates its databases through the driver it already ships
-with. Then:
+You need **Node 22.6 or newer** and **pnpm**. A PostgreSQL too — but if you
+have not got one and Docker is running, setup starts the one in
+`docker-compose.yml`. No postgres client is needed either; Orbit creates and
+migrates its databases through the driver it already ships with.
+
+Two commands, and the second is the one you use every day:
 
 ```
 git clone git@github.com:thecloud22/orbit2.git
 cd orbit2
-pnpm run setup
+pnpm run setup        # once
+scripts/orbit start   # every time
 ```
 
 (`pnpm run setup`, not `pnpm setup` — pnpm has a built-in command by that name
@@ -29,17 +32,20 @@ Setup checks what is installed, writes `.env` from `.env.example`,
 installs the workspace and Chromium, creates `orbit2_dev` and `orbit2_test`,
 and runs the migrations on both. It is safe to run twice.
 
-**If your PostgreSQL is in a container**, do this first, because setup's first
-guess is one installed locally answering as you:
+Both commands make sure something is listening where `.env` says the database
+is. A server that already answers is left alone — a local PostgreSQL, or one
+in a data centre, is not something Orbit should start a container underneath.
+Only a machine with nothing there gets the container, and only if Docker is
+running.
 
-```
-cp .env.example .env
-```
+**If you already run PostgreSQL yourself**, setup's first guess is a local one
+answering as you. If that is wrong, edit the three `ORBIT_*DATABASE_URL` lines
+in `.env` and run setup again; `.env.example` shows what a containerised one
+looks like. If it cannot reach them it stops and says which address it tried.
 
-and set the three database lines to the role the image was started with —
-`.env.example` shows the shape. Then `pnpm run setup`. It creates and migrates
-whatever those URLs name; it no longer assumes a socket, a port or a role. If
-it cannot reach them it stops and says which URL it tried.
+**If port 5432 is already taken** by your own PostgreSQL and you want the
+container as well, set `ORBIT_PG_PORT` to something else and point those three
+URLs at it.
 
 It leaves two values in `.env` for you, because a setup script that invents a
 key is one somebody has to audit:

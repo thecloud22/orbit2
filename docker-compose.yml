@@ -1,0 +1,36 @@
+# A PostgreSQL for Orbit, for a machine that has not got one.
+#
+#   scripts/orbit start        brings this up if nothing already answers
+#   docker compose up -d db    the same thing, by hand
+#
+# It publishes a port and holds a named volume, and it creates no databases:
+# `pnpm run setup` makes orbit2_dev and orbit2_test from the maintenance
+# database, so which databases exist is decided in one place whether the
+# server is this container, a local install, or something in a data centre.
+services:
+  db:
+    image: postgres:18
+    container_name: orbit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${ORBIT_PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${ORBIT_PG_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    ports:
+      # 5432 is the usual clash: a machine with its own PostgreSQL already has
+      # this port. Set ORBIT_PG_PORT to something else and point the three
+      # ORBIT_*DATABASE_URL lines at it.
+      - "${ORBIT_PG_PORT:-5432}:5432"
+    volumes:
+      - orbit-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Started is not the same as accepting connections. Without this, setup
+      # runs against a server still replaying its write-ahead log and fails on
+      # the first statement.
+      test: ["CMD-SHELL", "pg_isready -U ${ORBIT_PG_USER:-postgres} -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  orbit-pgdata:

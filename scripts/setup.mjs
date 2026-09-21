@@ -120,6 +120,13 @@ if (run(PNPM, ['--filter', '@orbit/worker', 'exec', 'playwright', 'install', 'ch
 
 step('Databases');
 
+// Before creating any: something has to be listening. A machine with its own
+// postgres is left alone; one with nothing gets the container in
+// docker-compose.yml. Either way setup creates and migrates what .env names.
+if (run(process.execPath, [join(ROOT, 'scripts', 'database.mjs')], { stdio: 'inherit' }).status !== 0) {
+  die();
+}
+
 // Read from .env rather than assumed. Creating `orbit2_dev` and migrating
 // `postgres://<you>@localhost/...` works on exactly one kind of machine: a
 // postgres installed locally, on a socket, with a role named after you. One in

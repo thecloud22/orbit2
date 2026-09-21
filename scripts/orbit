@@ -37,6 +37,13 @@ SERVICES=(
   "legacy|3040|demo/legacy-portal|npx tsx src/main.ts"
 )
 
+# Postgres is not in that list because it is not one of ours to own: it may be
+# a local install, a container, or a server somewhere else. `start` makes sure
+# something answers where .env says it is, and `stop` leaves it running —
+# stopping a database that was already up before Orbit was is not this
+# script's business, and neither is one three other projects are using.
+ensure_database() { node "$ROOT/scripts/database.mjs"; }
+
 field() { echo "$1" | cut -d'|' -f"$2"; }
 
 # A port that answers anything at all. Orbit's API returns 404 at / and that is
@@ -102,6 +109,14 @@ stop_all() {
 start_all() {
   [ -f "$ROOT/.env" ] || echo "  no .env at the root — the worker will refuse to start"
 
+  # First, because every one of these either reads the database or serves a
+  # screen that does. Starting them against a database that is not there gives
+  # five processes that are running and an application that does not work.
+  if ! ensure_database; then
+    echo "  not starting the rest — see above"
+    return 1
+  fi
+
   for s in "${SERVICES[@]}"; do
     name=$(field "$s" 1); port=$(field "$s" 2)
     dir=$(field "$s" 3);  cmd=$(field "$s" 4)
@@ -124,6 +139,27 @@ start_all() {
 
 status() {
   echo
+  # Shown first, and shown whoever started it, because "the api is up" and
+  # "the application works" differ by exactly this line.
+  db=$(node -e '
+    const { existsSync } = require("node:fs");
+    const p = process.argv[1] + "/.env";
+    if (!existsSync(p)) { console.log("no .env"); process.exit(0); }
+    process.loadEnvFile(p);
+    const u = process.env.ORBIT_OWNER_DATABASE_URL;
+    if (!u) { console.log("not set in .env"); process.exit(0); }
+    const { hostname, port, pathname } = new URL(u);
+    console.log((hostname || "localhost") + ":" + (port || 5432) + pathname);
+  ' "$ROOT" 2>/dev/null)
+  host=${db%%:*}; rest=${db#*:}; dbport=${rest%%/*}
+  if [ -n "$dbport" ] && nc -z "$host" "$dbport" > /dev/null 2>&1; then
+    printf "  %-7s %s
+" "db" "$db"
+  else
+    printf "  %-7s DOWN      %s
+" "db" "$db"
+  fi
+
   for s in "${SERVICES[@]}"; do
     name=$(field "$s" 1); port=$(field "$s" 2)
     if [ "$port" = "0" ]; then
