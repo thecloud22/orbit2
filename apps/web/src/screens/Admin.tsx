@@ -5,7 +5,7 @@ import { send, useFetch } from '../fetching.ts';
 
 interface Application {
   id: string; name: string; surface: string; revision: number;
-  addresses: Array<{ host: string; pathPrefix: string }>; sign_in_as: string | null;
+  addresses: Array<{ host: string; pathPrefix: string; scheme?: string }>; sign_in_as: string | null;
   credential_name: string | null; credential_set: boolean; retired_at: string | null;
 }
 
@@ -67,7 +67,12 @@ export function AdminScreen() {
                   </div>
                   <span style={{ width: 260, fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink-2)',
                     wordBreak: 'break-all' }}>
-                    {a.addresses.map((h) => `${h.host}${h.pathPrefix}`).join(' ')}
+                    {/* The scheme is shown because it is now a thing that can
+                        differ. Registering an https system and being shown
+                        the bare host back leaves no way to tell whether it
+                        was understood — which is how it went unnoticed that
+                        it was being thrown away. */}
+                    {a.addresses.map((h) => `${h.scheme ?? 'http'}://${h.host}${h.pathPrefix}`).join(' ')}
                   </span>
                   <span style={{ width: 130, display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <span style={{ fontSize: 10, color: 'var(--ink-2)', textTransform: 'uppercase',
