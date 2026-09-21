@@ -6,7 +6,7 @@
  * about whether the configured model can hold the task.
  */
 import { z } from '@orbit/contract';
-import { modelFromEnvironment } from './index.ts';
+import { modelFromEnvironment, priceFor } from './index.ts';
 
 const proposal = z.object({
   control: z.string(),
@@ -28,7 +28,16 @@ const shape = {
 };
 
 const model = modelFromEnvironment();
-console.log(`provider=${model.provider} model=${model.model}\n`);
+console.log(`provider=${model.provider} model=${model.model}`);
+
+// Said before the call, not after. Whether a rate is held is the one thing
+// this can answer without spending anything, and finding out afterwards means
+// finding out from a session whose cost is already recorded as unknown.
+const rate = priceFor(model.model);
+console.log(rate
+  ? `rate: $${rate.in}/M in, $${rate.out}/M out\n`
+  : `rate: NONE HELD — every session on this model will record its cost as unknown.\n`
+    + `      Add it to PRICE in packages/model/src/index.ts.\n`);
 
 const answered = await model.propose(
   {
@@ -61,4 +70,5 @@ if (answered.value) {
 }
 console.log(`\n  answered by: ${answered.model}`);
 console.log(`  tokens: ${answered.tokensIn} in, ${answered.tokensOut} out`);
-console.log(`  cost: $${(answered.costMicros / 1e6).toFixed(6)}`);
+console.log(`  cost: ${answered.costUnknown ? 'not known — no rate held for this model'
+  : `$${(answered.costMicros / 1e6).toFixed(6)}`}`);

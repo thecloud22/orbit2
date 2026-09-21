@@ -72,8 +72,13 @@ page as structure, say which control an instruction means. It prints what came
 back, which model answered, and what it cost. A 200 from a provider says the
 key works and says nothing about whether the model can hold the task.
 
-No price is held for any Bedrock model, so the spend record reports the cost as
-unknown rather than putting a zero in it for something that was not free.
+Rates for the Claude, Nova and GPT models are held in `PRICE` in
+[`packages/model/src/index.ts`](packages/model/src/index.ts), on-demand and
+correct as at 2026-05, and a cross-region inference profile is priced as the
+model it routes to. `verify:model` prints the rate it will use *before* it
+spends anything, so a model with no rate held is something you find out in a
+second rather than from a finished agent whose cost reads as unknown. Adding
+one is a line in that table.
 
 `anthropic` as a provider has no adapter and refuses at start-up; an Anthropic
 model reached through Bedrock is the supported way to that.

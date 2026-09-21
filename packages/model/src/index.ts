@@ -45,11 +45,72 @@ export interface ModelProvider {
   propose<T>(asked: Asked, schema: z.ZodType<T>, shape: Record<string, unknown>): Promise<Answered<T>>;
 }
 
-/** Priced per million tokens. Used to meter, never to choose. */
+/**
+ * Priced per million tokens, in US dollars. Used to meter, never to choose.
+ *
+ * On-demand rates, taken from the providers' own pricing pages and correct as
+ * at 2026-05. They are hard-coded deliberately: a spend record must say what
+ * something cost when it was built, so a rate change must be a commit that
+ * shows up in a diff rather than a number that moves underneath old records.
+ *
+ * Two things they do not cover, and both would make a figure here too low.
+ * Batch and provisioned throughput are billed differently, and Orbit uses
+ * neither. And a Bedrock rate can differ by region for the same model — these
+ * are the common ones, so a figure from an unusual region is approximate.
+ *
+ * Checking one takes a minute against the AWS or OpenAI pricing page, and is
+ * worth doing before anybody bills a customer from these numbers.
+ *
+ * This is what is known, not what is available. A model absent from here is
+ * not refused — it is metered in tokens and its cost recorded as unknown,
+ * which is the one honest thing to say about a rate nobody holds. Adding one
+ * is a line, and `pnpm verify:model` says which case a model falls into
+ * before a session spends anything on it.
+ */
 const PRICE: Record<string, { in: number; out: number }> = {
+  // OpenAI, by the name ORBIT_MODEL holds.
   'gpt-4.1-nano': { in: 0.1, out: 0.4 },
   'gpt-4.1-mini': { in: 0.4, out: 1.6 },
+  'gpt-4.1': { in: 2, out: 8 },
+
+  // Anthropic through Bedrock, by model id with the version suffix dropped.
+  'anthropic.claude-opus-4-1-20250805-v1': { in: 15, out: 75 },
+  'anthropic.claude-opus-4-20250514-v1': { in: 15, out: 75 },
+  'anthropic.claude-sonnet-4-5-20250929-v1': { in: 3, out: 15 },
+  'anthropic.claude-sonnet-4-20250514-v1': { in: 3, out: 15 },
+  'anthropic.claude-haiku-4-5-20251001-v1': { in: 1, out: 5 },
+  'anthropic.claude-3-7-sonnet-20250219-v1': { in: 3, out: 15 },
+  'anthropic.claude-3-5-sonnet-20241022-v2': { in: 3, out: 15 },
+  'anthropic.claude-3-5-sonnet-20240620-v1': { in: 3, out: 15 },
+  'anthropic.claude-3-5-haiku-20241022-v1': { in: 0.8, out: 4 },
+  'anthropic.claude-3-opus-20240229-v1': { in: 15, out: 75 },
+  'anthropic.claude-3-sonnet-20240229-v1': { in: 3, out: 15 },
+  'anthropic.claude-3-haiku-20240307-v1': { in: 0.25, out: 1.25 },
+
+  // Amazon's own, through the same surface.
+  'amazon.nova-premier-v1': { in: 2.5, out: 12.5 },
+  'amazon.nova-pro-v1': { in: 0.8, out: 3.2 },
+  'amazon.nova-lite-v1': { in: 0.06, out: 0.24 },
+  'amazon.nova-micro-v1': { in: 0.035, out: 0.14 },
 };
+
+/** Region prefixes a cross-region inference profile puts in front of an id. */
+const ROUTED = /^(?:us|eu|apac|jp|au|ca|global|us-gov)\./;
+
+/**
+ * What a million tokens of this model costs, or nothing if no rate is held.
+ *
+ * A Bedrock id carries two things the rate does not depend on, and looking one
+ * up whole finds neither. The newer Claude models are reachable only through a
+ * cross-region inference profile, so the id an author must configure is
+ * `eu.anthropic.claude-sonnet-4-5-…` rather than `anthropic.claude-sonnet-4-5-…`
+ * — and every id ends in a `:0` revision that is not part of the product. Both
+ * were enough to miss the table entirely and report the cost as unknown for a
+ * model whose price is sitting in it.
+ */
+export function priceFor(model: string): { in: number; out: number } | undefined {
+  return PRICE[model] ?? PRICE[model.replace(ROUTED, '').replace(/:\d+$/, '')];
+}
 
 class OpenAIProvider implements ModelProvider {
   readonly provider = 'openai';
@@ -92,7 +153,7 @@ class OpenAIProvider implements ModelProvider {
 
     const tokensIn = body.usage?.prompt_tokens ?? 0;
     const tokensOut = body.usage?.completion_tokens ?? 0;
-    const price = PRICE[this.model];
+    const price = priceFor(this.model);
     const meta = {
       model: body.model, provider: this.provider, tokensIn, tokensOut,
       costMicros: price ? Math.round(tokensIn * price.in + tokensOut * price.out) : 0,
@@ -194,7 +255,7 @@ export class BedrockProvider implements ModelProvider {
 
     const tokensIn = out.usage?.inputTokens ?? 0;
     const tokensOut = out.usage?.outputTokens ?? 0;
-    const price = PRICE[this.model];
+    const price = priceFor(this.model);
     const meta = {
       model: this.model, provider: this.provider, tokensIn, tokensOut,
       costMicros: price ? Math.round(tokensIn * price.in + tokensOut * price.out) : 0,

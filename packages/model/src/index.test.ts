@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ConverseCommandOutput } from '@aws-sdk/client-bedrock-runtime';
 import { z } from '@orbit/contract';
-import { BedrockProvider, modelFromEnvironment } from './index.ts';
+import { BedrockProvider, modelFromEnvironment, priceFor } from './index.ts';
 
 const proposal = z.object({ control: z.string(), why: z.string() });
 const shape = {
@@ -61,6 +61,39 @@ test('an answer that matches the schema is kept, with what it cost in tokens', a
   assert.equal(answered.provider, 'bedrock');
   assert.equal(answered.tokensIn, 100);
   assert.equal(answered.tokensOut, 20);
+});
+
+test('an inference profile is priced as the model it routes to', () => {
+  // The id an author must configure for the newer Claude models. Looked up
+  // whole it matches nothing, and the cost of a real session reads as unknown.
+  assert.deepEqual(priceFor('eu.anthropic.claude-sonnet-4-5-20250929-v1:0'), { in: 3, out: 15 });
+  assert.deepEqual(priceFor('us.anthropic.claude-sonnet-4-5-20250929-v1:0'), { in: 3, out: 15 });
+  assert.deepEqual(priceFor('anthropic.claude-sonnet-4-5-20250929-v1:0'), { in: 3, out: 15 });
+  assert.deepEqual(priceFor('anthropic.claude-3-5-haiku-20241022-v1:0'), { in: 0.8, out: 4 });
+  assert.deepEqual(priceFor('apac.anthropic.claude-haiku-4-5-20251001-v1:0'), { in: 1, out: 5 });
+  assert.deepEqual(priceFor('us.amazon.nova-lite-v1:0'), { in: 0.06, out: 0.24 });
+});
+
+test('a model held under no rate at all is still unknown, not free', () => {
+  assert.equal(priceFor('meta.llama3-70b-instruct-v1:0'), undefined);
+  assert.equal(priceFor('mistral.mistral-large-2407-v1:0'), undefined);
+  // Not so eager that it prices something it has never heard of: stripping a
+  // prefix must not turn one model's id into another's.
+  assert.equal(priceFor('us.anthropic.claude-9-20301231-v1:0'), undefined);
+});
+
+test('a Bedrock session is costed in the record, not reported as nothing spent', async () => {
+  const fake = answering({
+    output: { message: { role: 'assistant', content: [{ toolUse: { toolUseId: 't', name: 'proposal', input: { control: 'a', why: 'b' } } }] } },
+    usage: { inputTokens: 10_000, outputTokens: 1_000, totalTokens: 11_000 },
+  });
+  const answered = await new BedrockProvider('eu.anthropic.claude-sonnet-4-5-20250929-v1:0', 'eu-west-1', fake.send)
+    .propose(asked, proposal, shape);
+
+  // 10000 in at $3/M plus 1000 out at $15/M is $0.045, and micro-dollars are
+  // what the record holds: tokens times dollars-per-million needs no scaling.
+  assert.equal(answered.costMicros, 45_000);
+  assert.equal(answered.costUnknown, undefined);
 });
 
 test('a model with no price held says so, rather than reporting nothing spent', async () => {
