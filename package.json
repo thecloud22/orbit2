@@ -4,10 +4,13 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "verify:model": "node --env-file=.env --experimental-strip-types packages/model/src/verify.ts",
     "dev": "pnpm -r --parallel dev"
   },
   "devDependencies": {

@@ -43,10 +43,40 @@ key is one somebody has to audit:
 | `OPENAI_API_KEY` | Needed to **bring a procedure in**. A published agent consults no model when it runs, so leave it blank and everything but authoring still works. |
 | `ORBIT_CREDENTIAL_KEY` | Encrypts the passwords of registered systems. Any long random string. It is not in the database, so a backup on its own decrypts nothing. |
 
-**OpenAI is the only provider with an adapter.** `.env` names three, and
-`anthropic` and `bedrock` refuse at start-up rather than half-working. Bringing
-a procedure in needs an OpenAI key; everything after that — publishing, running
-an agent, reading its evidence — consults no model and needs none.
+### The model
+
+Only **authoring** uses one. A published agent consults no model when it runs
+(Decision 6) and the worker executes with none of these set, so everything
+after publication works with nothing configured here.
+
+**OpenAI** is the default: set `OPENAI_API_KEY`.
+
+**Bedrock** instead, with no key at all:
+
+```
+ORBIT_MODEL_PROVIDER=bedrock
+ORBIT_MODEL=eu.anthropic.claude-sonnet-4-5-20250929-v1:0
+ORBIT_MODEL_REGION=eu-west-1
+```
+
+It authenticates through the ambient AWS credential chain — environment, shared
+config, SSO, or an instance role — so whether this machine may call it is a
+question only a real call can answer:
+
+```
+pnpm verify:model
+```
+
+That makes one call doing the shape of work authoring actually needs: read a
+page as structure, say which control an instruction means. It prints what came
+back, which model answered, and what it cost. A 200 from a provider says the
+key works and says nothing about whether the model can hold the task.
+
+No price is held for any Bedrock model, so the spend record reports the cost as
+unknown rather than putting a zero in it for something that was not free.
+
+`anthropic` as a provider has no adapter and refuses at start-up; an Anthropic
+model reached through Bedrock is the supported way to that.
 
 Then:
 
@@ -123,7 +153,7 @@ rather than taken and judged safe.
 ## Working on it
 
 ```
-pnpm test        # 200 tests: contract, api, worker
+pnpm test        # 209 tests: contract, model, api, worker
 pnpm typecheck
 ```
 
