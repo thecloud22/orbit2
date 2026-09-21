@@ -138,3 +138,54 @@ surface. Answering it once is better than four times.
 **What closing it takes.** `checkForPublication` would need to know the
 application's sign-in, which means `mint.ts` reading the registered
 applications before it checks rather than after, and a blocker kind.
+
+---
+
+## Fifteen defect fixes are held on `held/design-changes`, not on `main`
+
+**What.** Testing the fifty procedures in `docs/testing/testcases-01.md` through
+Write It Out found thirty defects. Fifteen were fixed with changes that add to
+the model's vocabulary, to the contract, or to what Orbit refuses — design
+decisions rather than defect fixes. They are complete, tested and pushed on
+`held/design-changes`, and deliberately not merged.
+
+**Why they are held.** They change the design, and the design is settled
+elsewhere: in `decisions.md`, in the functional specification, and in the
+step and value vocabularies the contract fixes. A defect fix makes the code do
+what it already meant to do. These make it mean something new, and that is not
+a call to make while chasing a test failure.
+
+**What is on the branch**, in four kinds:
+
+| Kind | Commits |
+|---|---|
+| New vocabulary for the model | the `open` act; the `contains` operator; the instruction that goes with `open` |
+| A new question put to the model | `CONCLUDE_GUARDED` — a conclusions call asked about the condition rather than about a missing value |
+| New refusals | repeated commits; contradictory conditions; thresholds compared as numbers; an act kept without its condition; a conclusion kept after its conditional part was dropped; committing after losing the thread; a conclusion from a walk that did not follow the procedure; a comparison decided in advance; a read bound to a heading; a refused second press being said |
+| Carried along | clearing the lost-thread latch, which fixes a regression in one of the above |
+
+**What `main` therefore still does**, each of these found and recorded in
+`docs/testing/results/defects.md`:
+
+- A conditional procedure can name its two endings the wrong way round. A run
+  reads a credit score of **762**, decides `below 620` correctly as false, and
+  reports **"Decline the loan due to low credit score"**. Roughly half the
+  conditional procedures in section B come out reversed.
+- An act whose condition Orbit could not carry is kept without it. A $396,000
+  file is referred to a senior underwriter on the strength of not being a
+  jumbo, because the loan-amount half of the condition vanished.
+- A walk that cannot reach the page a procedure names acts on the page it is
+  on. Prompt 16 approves a real loan and reports that the approval was refused.
+- Pressing something that commits can be recorded twice, so a run declines the
+  same file twice.
+
+**What closing it takes.** A decision on each of the four kinds, and then a
+merge. They are separable. The refusals are the ones whose absence is most
+costly and the least like new capability — they only make Orbit decline where
+it had been doing something — so they are the obvious first to take.
+
+**One design change is on `main` and was not reverted.** `2da372e` adds
+`{ from: 'account' }` and the `@orbit/credentials` package. It is a design
+change by the same standard, and it is also what stopped the worker typing an
+empty string into every password field (`pilot-readiness.md` item 1).
+Reverting it would reopen that, so it stays, flagged rather than undone.
