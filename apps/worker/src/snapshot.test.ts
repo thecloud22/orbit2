@@ -45,3 +45,40 @@ test('a name that is unique keeps the top rung', () => {
   assert.equal(seen[0]!.binding.strategy, 'roleAndName');
   assert.equal(seen[0]!.binding.role, 'textbox');
 });
+
+// ── what counts as a label and its value ─────────────────────────────────
+
+import { chromium } from 'playwright';
+import { snapshot } from './snapshot.ts';
+
+const on = async (html: string) => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  await page.setContent(`<!doctype html><body>${html}</body>`);
+  const seen = await snapshot(page);
+  await browser.close();
+  return seen.filter((s) => s.what === 'value' && s.labelledBy);
+};
+
+test('a label and its value are paired when they are the whole of their parent', async () => {
+  const pairs = await on('<div><div>Loan-to-value</div><div>64.04%</div></div>');
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0]!.labelledBy, 'Loan-to-value');
+  assert.equal(pairs[0]!.name, '64.04%');
+});
+
+test('two names inside a sentence are not a label and its value', async () => {
+  // The loan file's subtitle. The co-borrower was paired with the borrower as
+  // its label, so "read the borrower name" bound to "Adaeze Nwachukwu" and
+  // returned Chidi — the wrong person, under a step summary naming the right
+  // one. Nothing on the page labels a borrower, so the honest answer is that
+  // the page offers none and the procedure gets a question.
+  const pairs = await on(
+    '<p><span>Adaeze Nwachukwu</span> &amp; <span>Chidi Nwachukwu</span> &middot; 12 Iris Way, Salem OR</p>');
+  assert.deepEqual(pairs.map((p) => [p.labelledBy, p.name]), []);
+});
+
+test('a pair is still found when the parent only holds whitespace between them', async () => {
+  const pairs = await on('<div>\n  <div>Credit score</div>\n  <div>771</div>\n</div>');
+  assert.deepEqual(pairs.map((p) => [p.labelledBy, p.name]), [['Credit score', '771']]);
+});

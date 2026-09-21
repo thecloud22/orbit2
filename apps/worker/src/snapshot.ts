@@ -155,6 +155,27 @@ export const COLLECT = `
     if (!before || before.children.length > 0) continue;
     const label = text(before), value = text(el);
     if (!label || !value || label.length > 60 || value.length > 60) continue;
+
+    // Two elements side by side are a label and its value only when they are
+    // the whole of what their parent says. Anything else the parent carries in
+    // its own right — a separator, a conjunction, the rest of a sentence —
+    // means these are words inside prose, and the one before is not a label.
+    //
+    // The loan file's subtitle is a span holding the borrower, then " & ",
+    // then a span holding the co-borrower, then the address. The co-borrower
+    // was paired
+    // with the borrower as its label, so "read the borrower name" bound to
+    // "Adaeze Nwachukwu" and returned Chidi — the wrong person, on a step
+    // whose summary named the right one. The borrower itself, having no
+    // element before it, was offered as nothing at all.
+    //
+    // Excluding the pair means the page offers no borrower name, which is the
+    // truth: nothing on it labels one. A procedure asking for it now gets a
+    // question instead of somebody else's name.
+    const parent = el.parentElement;
+    if (!parent) continue;
+    const own = text(parent).replace(/\\s+/g, '');
+    if (own !== (label + value).replace(/\\s+/g, '')) continue;
     out.push({
       touched: el.hasAttribute('data-orbit-touched'), tag: 'div', type: null, what: 'value', role: 'text',
       name: value, formName: null, labelledBy: label, row: null, column: null });
