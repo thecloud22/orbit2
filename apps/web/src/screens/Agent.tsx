@@ -161,8 +161,8 @@ const field: React.CSSProperties = {
  * activation a gate on evidence produced from made-up input. They are asked
  * for, per declared input, per ending.
  */
-function Confirm({ draft, onDone, onCancel }: {
-  draft: Draft; onDone: (path: string, body: unknown) => Promise<void>; onCancel: () => void;
+function Confirm({ draft, onDone }: {
+  draft: Draft; onDone: (path: string, body: unknown) => Promise<void>;
 }) {
   const { workflow, steps, notes } = draft;
   const outstanding = notes.filter((n) => !n.resolved_at);
@@ -289,11 +289,9 @@ function Confirm({ draft, onDone, onCancel }: {
             })}>
             I attest this is the procedure
           </Action>
-          {/* What is missing is said by the Action itself. It used to be said
-              here as well, so the form told you twice. */}
-          <button type="button" onClick={onCancel}
-            style={{ font: 'inherit', fontSize: 13, color: 'var(--ink-2)', background: 'transparent',
-              border: 0, cursor: 'pointer' }}>Not yet</button>
+          {/* "Not yet" closed the form and left the draft exactly as it was,
+              which is what leaving the page does. A control that does nothing
+              is one more thing to read. */}
         </div>
       </div>
     </Section>
@@ -414,7 +412,6 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const [refused, setRefused] = useState<string[] | null>(null);
   const [editRefusal, setEditRefusal] = useState<string | null>(null);
   const [adding, setAdding] = useState({ kind: 'read' as string, after: 0 });
-  const [confirming, setConfirming] = useState(false);
   const [opened, setOpened] = useState<Record<string, boolean>>({});
   const [proving, setProving] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
@@ -475,10 +472,6 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
         : published ? 'Published' : workflow.confirmed_at ? 'Confirmed' : 'Draft'}
       title={workflow.name}
       actions={<>
-        {!workflow.confirmed_at && (
-          <Action kind="ghost" disabled={confirming} why="The form is open below"
-            onClick={() => setConfirming(true)}>Confirm the procedure</Action>
-        )}
         {workflow.confirmed_at && !published && (
           <Action disabled={busy} onClick={() => void act(`/api/workflows/${id}/publish`)}>Publish a version</Action>
         )}
@@ -499,16 +492,12 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
         <Proving versionId={liveOrLatest!} onDone={() => { setProving(false); setRefresh((n) => n + 1); }} />
       )}
 
-      {confirming && (
-        <Confirm draft={draft.value}
-          onDone={async (path, body) => { await act(path, body); setConfirming(false); }}
-          onCancel={() => setConfirming(false)} />
-      )}
-
-      {!confirming && outstanding.length > 0 && (
-        <Refusal title={outstanding.length === 1 ? 'One thing is outstanding' : `${outstanding.length} things are outstanding`}
-          blockers={outstanding.map((n) => n.body)} />
-      )}
+      {/* Confirming was two acts: a button in the header that revealed the
+          form, and the attestation at the foot of it. The first decided
+          nothing — it could not be declined, it had no consequence, and
+          pressing it was the only way to see what was being asked. So the form
+          is simply here, until it has been used. */}
+      {!workflow.confirmed_at && <Confirm draft={draft.value} onDone={act} />}
 
       {workflow.procedure && (
         <Section title="What was written">
