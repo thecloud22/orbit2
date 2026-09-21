@@ -805,9 +805,31 @@ export async function authorFromProcedure(opts: {
         return false;
       });
 
+    // An act is kept with the condition the procedure put on it, or it is not
+    // kept.
+    //
+    // Dropping a condition and keeping the act it governed leaves a runnable
+    // agent that acts on half a rule. Test case 14 — "if the loan amount
+    // exceeds the limit AND the program is not jumbo, refer the file" — lost
+    // the amount condition and referred a $396,000 file on the strength of it
+    // not being a jumbo. That is worse than refusing: the questions say
+    // something is missing, and the steps say the procedure was understood.
+    //
+    // This is the rule the walk already applies to a condition naming a value
+    // no step reads. It belongs here too, for the same reason and in the same
+    // words: an act kept without its condition is worse than no act at all.
+    const anyDropped = buildable.length !== allConditions.length;
+    if (anyDropped && guardedAt !== -1) {
+      questions.push(asQuestion(
+        'Orbit could not carry every condition this procedure puts on its actions, so it has not kept the'
+        + ' actions those conditions governed. What is below is the part it could follow. The questions above'
+        + ' say what it could not.'));
+      steps.length = guardedAt;
+    }
+
     // No condition survived, so there is nothing to branch on and the workflow
     // has one ending like any unguarded one.
-    const isGuarded = buildable.length > 0;
+    const isGuarded = buildable.length > 0 && !anyDropped;
     const asksAbout = isGuarded
       ? ['THE CONDITIONS, all of which must hold for the guarded steps to happen:',
          ...buildable.map((c) => `- ${c.of.label} ${readable(c.is)} ${c.than}`), '',
