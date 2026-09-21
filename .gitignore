@@ -36,3 +36,11 @@ node_modules/
 # Anything a run wrote. Evidence is a product feature, not source.
 /data/
 var/
+
+# Screenshots from the test runs. The written record in docs/testing/results/
+# is the evidence that is meant to last — a defect, its cause, the commit that
+# fixed it. The pictures are how it was seen on the day, 2,405 of them and
+# 320MB, and a repository somebody has to clone before they can install this
+# should not carry them.
+docs/testing/results/run-*/
+
