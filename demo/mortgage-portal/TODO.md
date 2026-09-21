@@ -125,3 +125,13 @@ pipeline/underwriting/login flow and off each other's nav -- reachable from
       DTI > 50% block finding is now explicitly labeled and IDed as the
       ability-to-repay maximum, rather than a generically named "program
       maximum".
+
+**Documents**
+
+- [x] **Loan summary PDF** — a "PDF" button on every row of the real
+      `/pipeline` table (`src/lib/loanSummaryPdf.ts`, via `jspdf`). Generates
+      and downloads an actual PDF file client-side from that loan's own
+      figures -- no demo portal in this repository has triggered a file
+      download before, and a recorded workflow that reads a value off a
+      downloaded document is a different capability than reading one off a
+      page.

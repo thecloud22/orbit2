@@ -35,7 +35,8 @@ const GROUPS: readonly FeatureGroup[] = [
       {
         id: 'pipeline',
         label: 'Pipeline',
-        description: 'The queue of files awaiting a decision, and lookup by loan number.',
+        description:
+          'The queue of files awaiting a decision, lookup by loan number, and a "PDF" button per row that downloads a real, generated loan summary.',
         href: '/pipeline',
       },
       {
