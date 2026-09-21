@@ -184,7 +184,15 @@ export const COLLECT = `
     const own = text(parent).replace(/\\s+/g, '');
     if (own !== (label + value).replace(/\\s+/g, '')) continue;
     out.push({
-      touched: el.hasAttribute('data-orbit-touched'), tag: 'div', type: null, what: 'value', role: 'text',
+      // Its real tag. This said 'div' whatever it found, for a selector that
+      // matches div, span and p alike — so a binding corroborated on the tag
+      // and the run looked for a <div> that was a <p>. It halted with
+      // "Income analyst note could not be identified: found a <p>, expected a
+      // <div>", after publication had passed. A snapshot that describes the
+      // page inaccurately is worse than one that describes less of it: every
+      // rung of the ladder is built on what this says.
+      touched: el.hasAttribute('data-orbit-touched'), tag: el.tagName.toLowerCase(),
+      type: null, what: 'value', role: 'text',
       name: value, formName: null, labelledBy: label, row: null, column: null });
   }
 

@@ -101,3 +101,15 @@ test('a label longer than a label is still not one', async () => {
   const long = 'x'.repeat(61);
   assert.deepEqual(await on(`<div><div>${long}</div><div>7</div></div>`), []);
 });
+
+test('a value reports the tag it actually has', async () => {
+  // This said 'div' whatever it found, for a selector matching div, span and
+  // p alike. A read of a labelled paragraph corroborated on the tag, and the
+  // run halted with "found a <p>, expected a <div>" — after publication had
+  // passed. Every rung of the ladder is built on what the snapshot says, so a
+  // snapshot that describes the page inaccurately is worse than one that
+  // describes less of it.
+  const pairs = await on('<div><p>Income analyst note</p><p>Seasonal, unresolved on a single-year view.</p></div>');
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0]!.tag, 'p');
+});
