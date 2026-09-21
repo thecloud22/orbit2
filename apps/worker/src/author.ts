@@ -42,6 +42,64 @@ const proposal = z.object({
 });
 type Proposal = z.infer<typeof proposal>;
 
+/**
+ * What the procedure's conclusions are called, asked once at the end.
+ *
+ * The walk maps the work; it cannot map the conclusions, because a conclusion
+ * is a business fact and not something on a page. Orbit used to add a single
+ * unnamed ending and ask a person what to call it — which was honest, and left
+ * every authored workflow with one outcome no matter what the text said.
+ *
+ * A procedure that says "if the file is there, record the rate; if there is no
+ * such file, say so" has two conclusions, and Decision 14 item 2 already makes
+ * the difference expressible: a `read` that may legitimately find nothing
+ * produces *absent*, and a branch may test for that. So the one thing Orbit
+ * needs is which value's absence separates the two, and what each side is
+ * called — a naming task, which is a mapping task, which is the model's job.
+ *
+ * Orbit builds the branch. The model never supplies a step, an id or an
+ * operator; it supplies names and points at a value it has already produced,
+ * and every part of that is checked before anything is built.
+ */
+const conclusions = z.object({
+  /** The conclusion reached when the work completed as expected. */
+  whenFound: z.object({ outcome: z.string(), label: z.string() }),
+  /** The other conclusion, if the procedure describes one. Null when the text
+   *  admits only one way to finish — which is a real answer, not a failure. */
+  whenAbsent: z.object({ outcome: z.string(), label: z.string() }).nullable(),
+  /** Which produced value being absent means the second conclusion. Null when
+   *  there is no second conclusion. */
+  absenceOf: z.string().nullable(),
+  why: z.string(),
+});
+type Conclusions = z.infer<typeof conclusions>;
+
+const conclusionsShape = {
+  type: 'object',
+  properties: {
+    whenFound: { type: 'object',
+      properties: { outcome: { type: 'string' }, label: { type: 'string' } },
+      required: ['outcome', 'label'], additionalProperties: false },
+    whenAbsent: { type: ['object', 'null'],
+      properties: { outcome: { type: 'string' }, label: { type: 'string' } },
+      required: ['outcome', 'label'], additionalProperties: false },
+    absenceOf: { type: ['string', 'null'] },
+    why: { type: 'string' },
+  },
+  required: ['whenFound', 'whenAbsent', 'absenceOf', 'why'],
+  additionalProperties: false,
+};
+
+const CONCLUDE = [
+  'You are naming the ways a business procedure can finish.',
+  'An outcome is a short camelCase name; a label is how it reads to a person.',
+  'If the procedure describes only one way to finish, set whenAbsent and absenceOf to null.',
+  'If it describes a second way that happens when something is NOT there — no such file,',
+  'no matching record — name it, and set absenceOf to the value whose absence means it.',
+  'absenceOf must be one of the values the steps already produce. Do not invent one.',
+  'A second conclusion is not a failure. "There is no such file" is a correct result.',
+].join('\n');
+
 const shape = {
   type: 'object',
   properties: {
@@ -252,12 +310,81 @@ export async function authorFromProcedure(opts: {
   // conclusion — which is exactly the kind of plausible interpretation the
   // product refuses to publish.
   if (!steps.some((s) => s.kind === 'end')) {
-    steps.push({
-      id: crypto.randomUUID(), kind: 'end',
-      summary: 'Finish — this conclusion has no name yet',
-      outcome: 'unnamed', publishes: [],
+    const produced = steps.flatMap((s) => (s.kind === 'read' ? [s.produces] : []));
+    const published = produced.map((v) => v.name);
+
+    const answered = await model.propose(
+      {
+        purpose: 'name the conclusions',
+        instruction: CONCLUDE,
+        shown: [`PROCEDURE:\n${procedure}`, '',
+                'THE STEPS THAT WERE MAPPED:',
+                ...steps.map((s, i) => `${i + 1}. ${s.kind} — ${s.summary}`), '',
+                `VALUES PRODUCED: ${produced.map((v) => `${v.name}${v.required ? '' : ' (may be absent)'}`).join(', ') || 'none'}`,
+                '', 'How can this procedure finish?'].join('\n'),
+      },
+      conclusions, conclusionsShape,
+    );
+    const turn = turns.length + 1;
+    const said = answered.value;
+    const record = (verdict: Turn['verdict'], why: string): Turn => ({
+      turn, shown: { page: 'the mapped steps', elements: steps.length, asking: 'How can this procedure finish?' },
+      answered: said as unknown as Proposal, verdict, why,
+      model: answered.model, provider: answered.provider,
+      tokensIn: answered.tokensIn, tokensOut: answered.tokensOut, costMicros: answered.costMicros,
     });
-    questions.push('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.');
+
+    // Every part of the answer is checked before a step is built from it. The
+    // model named things; it did not get to decide whether they hold together.
+    const found = said ? normaliseName(said.whenFound.outcome) : '';
+    const absent = said?.whenAbsent ? normaliseName(said.whenAbsent.outcome) : null;
+    const separator = said?.absenceOf ? produced.find((v) => v.name === said.absenceOf) : undefined;
+
+    const refusal =
+      !said ? (answered.refusedBecause ?? 'the model gave no answer')
+      : !found ? 'it did not name the conclusion the procedure reaches when the work is done'
+      : said.whenAbsent && !absent ? 'it described a second conclusion without naming it'
+      : said.whenAbsent && !said.absenceOf ? 'it described a second conclusion without saying what distinguishes it'
+      : said.absenceOf && !separator ? `it named "${said.absenceOf}", which no step produces`
+      : separator && separator.required ? `"${separator.name}" is always present, so its absence cannot separate two conclusions`
+      : absent && absent === found ? 'it gave both conclusions the same name, which names neither'
+      : null;
+
+    if (refusal || !said || !said.whenAbsent || !separator || !absent) {
+      // One ending. Either the procedure has one, or the model's account of the
+      // second did not hold — and a rejected answer still leaves a workflow
+      // that works, with a question against it.
+      steps.push({ id: crypto.randomUUID(), kind: 'end',
+        summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
+        outcome: found || 'unnamed', publishes: published });
+      if (refusal) {
+        turns.push(record('rejected', refusal));
+        questions.push(`Orbit could not use the second conclusion it was offered, because ${refusal}. Is there more than one way this finishes?`);
+      } else {
+        turns.push(record('kept', `one conclusion: ${found}`));
+      }
+      if (!found) {
+        questions.push('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.');
+      }
+    } else {
+      // Two conclusions, separated by whether a value the steps already produce
+      // was there. Orbit writes the branch and both endings; the model supplied
+      // four words and pointed at a value.
+      const foundEnd: Step = { id: crypto.randomUUID(), kind: 'end',
+        summary: said.whenFound.label, outcome: found, publishes: published };
+      const absentEnd: Step = { id: crypto.randomUUID(), kind: 'end',
+        summary: said.whenAbsent.label, outcome: absent,
+        // Nothing is published on this path: the value it is defined by is the
+        // one that was not there.
+        publishes: published.filter((v) => v !== separator.name) };
+      steps.push({
+        id: crypto.randomUUID(), kind: 'branch',
+        summary: `Did ${separator.label} turn out to be there?`,
+        when: { of: 'absence', operator: 'isNotAbsent', left: { from: 'step', value: separator.name } },
+        ifTrue: foundEnd.id, ifFalse: absentEnd.id,
+      }, foundEnd, absentEnd);
+      turns.push(record('kept', `two conclusions, separated by whether ${separator.name} was there: ${found} / ${absent}`));
+    }
   }
 
   const declaredInputs = [...new Set(
