@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { serveArtefact } from './artefacts.ts';
+import { listApplications, readSession } from './authoring.ts';
 import { listRuns, readRun, readRunSteps } from './runs.ts';
 import { listWorkflows, readWorkflow } from './workflows.ts';
 import { testCases } from './activate.ts';
@@ -24,6 +25,9 @@ createServer(async (req, res) => {
       const [, , kind, id, verb] = url.pathname.split('/');
       const body = await readBody(req);
       const route = `${kind}/${verb}`;
+      if (kind === 'authoring' && !id) {
+        const r = await actions.bringIn(body); return json(res, r.status, r.body);
+      }
       if (kind === 'workflows' && id) {
         if (verb === 'confirm') { const r = await actions.confirm(id, body); return json(res, r.status, r.body); }
         if (verb === 'publish') { const r = await actions.publish(id); return json(res, r.status, r.body); }
@@ -51,6 +55,13 @@ createServer(async (req, res) => {
     if (url.pathname === '/api/admin') return json(res, 200, await readAdmin());
     if (url.pathname === '/api/audit') return json(res, 200, await readAudit());
     if (url.pathname === '/api/workflows') return json(res, 200, await listWorkflows());
+    if (url.pathname === '/api/applications') return json(res, 200, await listApplications());
+    if (url.pathname.startsWith('/api/authoring/')) {
+      const session = await readSession(url.pathname.slice('/api/authoring/'.length));
+      return session
+        ? json(res, 200, session)
+        : json(res, 404, { kind: 'nothingMatching', why: 'No authoring session with that reference.' });
+    }
 
     const workflow = /^\/api\/workflows\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (workflow) {

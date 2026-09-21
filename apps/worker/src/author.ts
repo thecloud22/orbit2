@@ -102,9 +102,16 @@ const conclusions = z.object({
   /** The other conclusion, if the procedure describes one. Null when the text
    *  admits only one way to finish — which is a real answer, not a failure. */
   whenAbsent: z.object({ outcome: z.string(), label: z.string() }).nullable(),
-  /** Which produced value being absent means the second conclusion. Null when
-   *  there is no second conclusion. */
-  absenceOf: z.string().nullable(),
+  /**
+   * Which produced value being absent means the second conclusion.
+   *
+   * Named for what it holds rather than for what it is for. It was
+   * `absenceOf`, which reads as "the absence of <the second conclusion>", and
+   * the model answered it with an outcome name almost every time — a field
+   * name is the strongest hint a schema gives, and that one pointed the wrong
+   * way.
+   */
+  missingValue: z.string().nullable(),
   why: z.string(),
 });
 type Conclusions = z.infer<typeof conclusions>;
@@ -118,20 +125,23 @@ const conclusionsShape = {
     whenAbsent: { type: ['object', 'null'],
       properties: { outcome: { type: 'string' }, label: { type: 'string' } },
       required: ['outcome', 'label'], additionalProperties: false },
-    absenceOf: { type: ['string', 'null'] },
+    missingValue: { type: ['string', 'null'] },
     why: { type: 'string' },
   },
-  required: ['whenFound', 'whenAbsent', 'absenceOf', 'why'],
+  required: ['whenFound', 'whenAbsent', 'missingValue', 'why'],
   additionalProperties: false,
 };
 
 const CONCLUDE = [
   'You are naming the ways a business procedure can finish.',
   'An outcome is a short camelCase name; a label is how it reads to a person.',
-  'If the procedure describes only one way to finish, set whenAbsent and absenceOf to null.',
+  'If the procedure describes only one way to finish, set whenAbsent and missingValue to null.',
   'If it describes a second way that happens when something is NOT there — no such file,',
-  'no matching record — name it, and set absenceOf to the value whose absence means it.',
-  'absenceOf must be one of the values the steps already produce. Do not invent one.',
+  'no matching record — name that conclusion in whenAbsent.',
+  '',
+  'missingValue is NOT an outcome name. It is the name of one of the values listed under',
+  'VALUES PRODUCED below — the one that would be missing when the second conclusion happens.',
+  'Copy it exactly from that list. If none of them would be missing, set it to null.',
   'A second conclusion is not a failure. "There is no such file" is a correct result.',
 ].join('\n');
 
@@ -422,14 +432,15 @@ export async function authorFromProcedure(opts: {
     // model named things; it did not get to decide whether they hold together.
     const found = said ? normaliseName(said.whenFound.outcome) : '';
     const absent = said?.whenAbsent ? normaliseName(said.whenAbsent.outcome) : null;
-    const separator = said?.absenceOf ? produced.find((v) => v.name === said.absenceOf) : undefined;
+    const separator = said?.missingValue ? produced.find((v) => v.name === said.missingValue) : undefined;
 
     const refusal =
       !said ? (answered.refusedBecause ?? 'the model gave no answer')
       : !found ? 'it did not name the conclusion the procedure reaches when the work is done'
       : said.whenAbsent && !absent ? 'it described a second conclusion without naming it'
-      : said.whenAbsent && !said.absenceOf ? 'it described a second conclusion without saying what distinguishes it'
-      : said.absenceOf && !separator ? `it named "${said.absenceOf}", which no step produces`
+      : said.whenAbsent && !said.missingValue ? 'it described a second conclusion without saying what distinguishes it'
+      : said.missingValue && !separator
+        ? `it named "${said.missingValue}" as the value that would be missing, and no step produces a value by that name`
       : separator && separator.required ? `"${separator.name}" is always present, so its absence cannot separate two conclusions`
       : absent && absent === found ? 'it gave both conclusions the same name, which names neither'
       : null;

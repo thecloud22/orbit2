@@ -9,6 +9,8 @@ import { Pool } from 'pg';
 import { step as stepSchema, type Step } from '@orbit/contract';
 import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
+import { modelFromEnvironment } from '@orbit/model';
+import { authorAndStore } from './author-store.ts';
 import { openBrowser } from './surface-browser.ts';
 import type { OpenSurface } from './surface.ts';
 
@@ -41,6 +43,76 @@ async function claimOne(): Promise<string | null> {
                    ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1)
       RETURNING id`, [worker]);
   return rows[0]?.id ?? null;
+}
+
+/**
+ * An authoring session, claimed the same way a run is.
+ *
+ * It lives here rather than in the API because Decision 2 puts the browser in
+ * the worker, and the alternative — a second browser behind the API — is the
+ * thing that decision exists to prevent.
+ */
+async function claimAuthoring(): Promise<string | null> {
+  const { rows } = await pool.query<{ id: string }>(
+    `UPDATE authoring_session SET status = 'running',
+            claimed_by = $1, lease_expires_at = now() + interval '10 minutes'
+      WHERE id = (SELECT id FROM authoring_session
+                   WHERE status = 'queued'
+                     AND (lease_expires_at IS NULL OR lease_expires_at < now())
+                   ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1)
+      RETURNING id`, [worker]);
+  return rows[0]?.id ?? null;
+}
+
+async function authorOne(sessionId: string) {
+  const db = await pool.connect();
+  try {
+    const { rows: [s] } = await db.query<{
+      name: string; procedure: string; application_id: string; start_path: string;
+      inputs: Record<string, string>; host: string;
+    }>(`SELECT s.name, s.procedure, s.application_id, s.start_path, s.inputs,
+               (r.addresses->0->>'host') AS host
+          FROM authoring_session s
+          JOIN application_revision r ON r.application_id = s.application_id
+         WHERE s.id = $1
+         ORDER BY r.revision DESC LIMIT 1`, [sessionId]);
+    if (!s) return;
+
+    console.log(`  bringing in "${s.name}" against http://${s.host}`);
+    const result = await authorAndStore(db, {
+      name: s.name,
+      procedure: s.procedure,
+      applicationId: s.application_id,
+      origin: `http://${s.host}`,
+      startPath: s.start_path,
+      inputs: s.inputs,
+      model: modelFromEnvironment(),
+    });
+
+    if (result.stored === false) {
+      // Criterion 2: nothing was stored, and the reason is carried back rather
+      // than logged where the person who asked will never see it.
+      await db.query(
+        `UPDATE authoring_session SET status = 'refused', refused = $2, ended_at = now() WHERE id = $1`,
+        [sessionId, JSON.stringify({ describe: result.describe, problems: result.problems })]);
+      console.log(`  refused: ${result.describe}`);
+      return;
+    }
+
+    await db.query(
+      `UPDATE authoring_session SET status = 'brought in', workflow_id = $2, ended_at = now() WHERE id = $1`,
+      [sessionId, result.workflowId]);
+    console.log(`  brought in: ${result.draft.steps.length} steps, ${result.draft.turns.length} turns`);
+  } catch (error) {
+    // A walk that threw is a refusal with a reason, not a session left looking
+    // busy until its lease expires.
+    await db.query(
+      `UPDATE authoring_session SET status = 'refused', refused = $2, ended_at = now() WHERE id = $1`,
+      [sessionId, JSON.stringify({ describe: `Orbit could not work through this: ${String(error)}` })]);
+    console.log(`  refused: ${String(error)}`);
+  } finally {
+    db.release();
+  }
 }
 
 async function runOne(runId: string) {
@@ -135,10 +207,16 @@ const sweeping = setInterval(() => { void sweep(); }, 30_000);
 sweeping.unref();
 
 for (;;) {
+  // Runs first. An authoring session is somebody waiting at a screen, but a
+  // run is an agent that was already allowed to start, and letting authoring
+  // hold one up would make the queue answer to whoever asked most recently.
   const runId = await claimOne();
-  if (runId) await runOne(runId);
-  else if (once) break;
-  if (once && runId) break;
-  if (!runId) await new Promise((r) => setTimeout(r, 1000));
+  if (runId) { await runOne(runId); if (once) break; continue; }
+
+  const sessionId = await claimAuthoring();
+  if (sessionId) { await authorOne(sessionId); if (once) break; continue; }
+
+  if (once) break;
+  await new Promise((r) => setTimeout(r, 1000));
 }
 await pool.end();

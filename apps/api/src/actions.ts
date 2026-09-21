@@ -12,6 +12,7 @@ import { pool } from './db.ts';
 import { activate, mayStart, pause, queueTests, resume } from './activate.ts';
 import { confirm, confirmation } from './confirm.ts';
 import { mintVersion } from './mint.ts';
+import { bringIn } from './authoring.ts';
 import { cancelRun, retryRun, rerun } from './control.ts';
 import { deleteStep, editStep, insertStep, moveStep } from './edit.ts';
 import { describeBlocker } from '@orbit/contract';
@@ -139,6 +140,12 @@ export const actions = {
   async retryRun(reference: string) {
     const result = await inTransaction((db) => retryRun(db, reference));
     return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  /** §5's first way in, asked for from the screen rather than a terminal. */
+  async bringIn(body: unknown) {
+    const result = await inTransaction((db) => bringIn(db, body));
+    return result.ok ? { status: 202, body: result } : { status: 422, body: { why: result.because } };
   },
 
   async rerun(reference: string) {
