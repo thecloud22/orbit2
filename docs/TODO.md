@@ -248,3 +248,22 @@ well. Either:
 
 The second is smaller and keeps §4 intact. Both need `declared_inputs` to stop
 being write-once.
+
+---
+
+## Adding a step produces a draft that cannot be published
+
+**What.** The control that adds a step is hidden. It inserted one deliberately
+unfinished and then offered no way to say what it reads — nothing in the
+product calls `editStep` — so publication refused the draft from then on.
+
+**Why it is not a small fix.** A step needs a binding, and Orbit derives
+bindings from its own view of the page (Decision 15). An author typing one is
+the single thing the locator ladder exists to prevent, so the page has to be
+looked at.
+
+**What closing it takes.** `docs/step-editing.md`, which also records two
+defects found alongside: a hand-added `end` passes confirmation marked complete
+and is then refused at publication, because `confirm.ts` sets `complete`
+without re-parsing; and the draft screen prints `undefined (undefined)` for an
+unconfigured step, one of a family of four.
