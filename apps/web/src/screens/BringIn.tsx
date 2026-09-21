@@ -54,6 +54,19 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [recordingId, setRecordingId] = useState<string | null>(null);
 
+  /**
+   * Only what can actually be chosen.
+   *
+   * Retired applications were listed greyed out, on the argument that a screen
+   * which silently drops what you are looking for cannot explain why it is
+   * missing. That argument belongs on an admin screen. This is a picker: an
+   * option nobody may pick is not an explanation, it is something to read past
+   * on the way to the ones that work. Retirement stays visible where it is
+   * managed, and the API still returns them for that.
+   */
+  const inService = apps.state === 'loaded'
+    ? apps.value.applications.filter((a) => !a.retired_at) : [];
+
   const ready = Boolean(name.trim()) && procedure.trim().length >= 20 && Boolean(chosen);
   const application = apps.state === 'loaded'
     ? apps.value.applications.find((a) => a.id === chosen) : undefined;
@@ -99,35 +112,45 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
           </div>
         ) : (
           <>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 780 }}>
-              {apps.value.applications.map((a) => (
-                <label key={a.id}
-                  style={{ display: 'flex', gap: 12, alignItems: 'flex-start', cursor: a.retired_at ? 'not-allowed' : 'pointer',
-                    border: `1px solid ${chosen === a.id ? 'var(--primary)' : 'var(--rule)'}`,
-                    background: chosen === a.id ? 'var(--failed-wash)' : 'var(--panel)',
-                    borderRadius: 5, padding: '13px 15px', opacity: a.retired_at ? 0.55 : 1 }}>
-                  <input type="radio" name="application" value={a.id} checked={chosen === a.id}
-                    disabled={Boolean(a.retired_at)}
-                    onChange={() => { setChosen(a.id); setStartPath(a.addresses[0]?.pathPrefix ?? '/'); }}
-                    style={{ marginTop: 3 }} />
-                  <span style={{ flexGrow: 1, minWidth: 0 }}>
-                    <span style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600 }}>{a.name}</span>
-                      <span style={{ fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}>{a.surface}</span>
-                      {a.retired_at && <span style={{ fontSize: 12, color: 'var(--attention-ink)' }}>retired</span>}
+            {inService.length === 0 ? (
+              /* Every registered application is retired. Said here rather than
+                 shown as an empty list, because "there is nothing" and "there
+                 is nothing you may still use" are different facts and only one
+                 of them tells you what to do about it. */
+              <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.6, maxWidth: 700 }}>
+                {apps.value.applications.length === 0
+                  ? 'No application has been registered yet. One has to exist before anything can be pointed at it.'
+                  : 'Every registered application has been retired. Nothing new can be brought in until one is in service.'}
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 780 }}>
+                {inService.map((a) => (
+                  <label key={a.id}
+                    style={{ display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer',
+                      border: `1px solid ${chosen === a.id ? 'var(--primary)' : 'var(--rule)'}`,
+                      background: chosen === a.id ? 'var(--failed-wash)' : 'var(--panel)',
+                      borderRadius: 5, padding: '13px 15px' }}>
+                    <input type="radio" name="application" value={a.id} checked={chosen === a.id}
+                      onChange={() => { setChosen(a.id); setStartPath(a.addresses[0]?.pathPrefix ?? '/'); }}
+                      style={{ marginTop: 3 }} />
+                    <span style={{ flexGrow: 1, minWidth: 0 }}>
+                      <span style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
+                        <span style={{ fontSize: 14, fontWeight: 600 }}>{a.name}</span>
+                        <span style={{ fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}>{a.surface}</span>
+                      </span>
+                      <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-2)', marginTop: 4 }}>
+                        {/* The hosts are the containment. §7: a version reaches
+                            the addresses its application recorded and nothing
+                            else, so they are shown before anything is pointed
+                            at them rather than buried in an admin screen. */}
+                        {a.addresses.map((x) => x.host).join(', ') || 'no address recorded'}
+                        {a.sign_in_as ? ` · signs in as ${a.sign_in_as}` : ' · no sign-in recorded'}
+                      </span>
                     </span>
-                    <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-2)', marginTop: 4 }}>
-                      {/* The hosts are the containment. §7: a version reaches
-                          the addresses its application recorded and nothing
-                          else, so they are shown before anything is pointed
-                          at them rather than buried in an admin screen. */}
-                      {a.addresses.map((x) => x.host).join(', ') || 'no address recorded'}
-                      {a.sign_in_as ? ` · signs in as ${a.sign_in_as}` : ' · no sign-in recorded'}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
+                  </label>
+                ))}
+              </div>
+            )}
             {application && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 11, paddingTop: 14 }}>
                 <span style={{ fontSize: 13, color: 'var(--ink-2)', width: 150 }}>Start at</span>
