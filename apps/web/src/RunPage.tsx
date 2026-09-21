@@ -246,19 +246,7 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
         </div>
       </section>
 
-      <div style={{ paddingTop: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 11 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>What it saw at this step</h2>
-          {attempts[selected] && (
-            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
-              step {attempts[selected]!.step_position}, {attempts[selected]!.step_kind}, attempt {attempts[selected]!.attempt}
-            </span>
-          )}
-        </div>
-        <EvidencePanel artefacts={stepArtefacts.filter((a) => a.attempt_id === attempts[selected]?.id)} />
-      </div>
-
-      <div style={{ display: 'flex', gap: 30, paddingTop: 26, marginTop: 26, borderTop: '1px solid var(--rule)' }}>
+      <div style={{ display: 'flex', gap: 30, paddingTop: 20 }}>
         <div style={{ width: 486, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 11 }}>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>What it did, in order</h2>
@@ -299,9 +287,15 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
         </div>
 
         <div style={{ flexGrow: 1, borderLeft: '1px solid var(--rule)', paddingLeft: 30, minWidth: 0 }}>
-          <StepDetail attempt={attempts[selected]}
-            step={attempts[selected] ? stepAt(attempts[selected]!.step_position) : undefined}
-            events={events.filter((e) => e.attempt_id === attempts[selected]?.id)} />
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 11 }}>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>What it saw at this step</h2>
+          </div>
+          <EvidencePanel artefacts={stepArtefacts.filter((a) => a.attempt_id === attempts[selected]?.id)} />
+          <div style={{ paddingTop: 22 }}>
+            <StepDetail attempt={attempts[selected]}
+              step={attempts[selected] ? stepAt(attempts[selected]!.step_position) : undefined}
+              events={events.filter((e) => e.attempt_id === attempts[selected]?.id)} />
+          </div>
           {withheld.map((a) => (
             <div key={a.id} style={{ marginTop: 18, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)',
               borderRadius: 5, padding: '13px 15px' }}>
