@@ -28,7 +28,7 @@
 import type { Step } from '@orbit/contract';
 import { chromium, type Page } from 'playwright';
 import { asQuestion, asRisk, type Note } from './note.ts';
-import { asValueName, COLLECT, shape, type Raw, type Seen } from './snapshot.ts';
+import { asValueName, COLLECT, nameControls, shape, type Raw, type Seen } from './snapshot.ts';
 
 export interface Touched {
   kind: 'click' | 'change';
@@ -174,9 +174,26 @@ export async function record(opts: {
   await page.addInitScript(WATCH);
   await page.goto(`${opts.origin}${opts.startPath}`, { waitUntil: 'domcontentloaded' });
   await page.evaluate(WATCH);
+
+  /**
+   * Ask Playwright what everything is called, before anybody touches it.
+   *
+   * It cannot be asked afterwards. A click on this kind of application
+   * navigates, and by the time anything asynchronous runs the document is the
+   * next one — asking then times out, which was measured rather than assumed.
+   * So the names are on the elements before the person acts, and the click
+   * handler reads them off the element it marked, synchronously, in the same
+   * breath as marking it.
+   */
+  const nameEverything = () => nameControls(page).catch(() => 0);
+  await nameEverything();
+
   // Re-arm after every navigation: a server-rendered application replaces the
-  // document on every submit, and a listener bound to the old one is gone.
-  page.on('framenavigated', () => { void page.evaluate(WATCH).catch(() => undefined); });
+  // document on every submit, and a listener bound to the old one is gone —
+  // and so are the names, which belonged to elements that no longer exist.
+  page.on('framenavigated', () => {
+    void page.evaluate(WATCH).then(nameEverything).catch(() => undefined);
+  });
 
   try { await opts.until; } finally { await close().catch(() => undefined); }
 

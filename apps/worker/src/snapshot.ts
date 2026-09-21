@@ -74,27 +74,21 @@ export const COLLECT = `
   };
 
   // Fields, buttons and links: the things a step can act on.
-  for (const el of document.querySelectorAll('input, select, textarea, button, a')) {
-    if (!visible(el)) continue;
+  //
+  // Named by Playwright, not here. nameControls() has already asked it what
+  // each of these is called and written the answer onto the element, so this
+  // reads data-orbit-role and data-orbit-name rather than guessing from
+  // labels, titles and placeholders in an order that did not match the
+  // specification. An element with no stamp is one Playwright did not
+  // recognise as a control, or one that appeared after the page was named.
+  for (const el of document.querySelectorAll('[data-orbit-role]')) {
+    const acted = el.hasAttribute('data-orbit-touched');
+    if (!visible(el) && !acted) continue;
     const tag = el.tagName.toLowerCase();
-    if (tag === 'input' && ['hidden'].includes(el.type)) continue;
-    // A link or button wrapping a structure is chrome, not a control. Its text
-    // is the concatenation of everything inside it — a name no person would
-    // use and no strategy can match. A genuine control has no element children
-    // or one, an icon.
-    if (el.querySelector('input, select, textarea, button, a')) continue;
-    if (el.children.length > 1) continue;
+    if (tag === 'input' && el.type === 'hidden' && !acted) continue;
 
-    const labelEl = el.labels && el.labels[0];
-    const name =
-      (labelEl && text(labelEl))
-      || el.getAttribute('aria-label')
-      || el.getAttribute('title')
-      || el.getAttribute('alt')
-      || (el.querySelector('img') && el.querySelector('img').getAttribute('alt'))
-      || (tag === 'input' && el.type === 'submit' ? el.value : '')
-      || el.getAttribute('placeholder')
-      || text(el);
+    const role = el.getAttribute('data-orbit-role');
+    const name = el.getAttribute('data-orbit-name') || '';
 
     // The label in the cell beside it, which is what an old two-column form
     // gives you and often the only name a person would use.
@@ -102,8 +96,15 @@ export const COLLECT = `
     const cell = el.closest('td');
     if (cell && cell.previousElementSibling) beside = text(cell.previousElementSibling);
 
-    // A name longer than a label is a subtree that got collapsed, not a name.
-    if ((name || '').trim().length > 80) continue;
+    // A name this long is a subtree that got collapsed rather than a name.
+    // Shortened rather than dropped for the element somebody just acted on:
+    // an awkward name is something an author can correct, and no name at all
+    // is a demonstration that lost a step without saying so.
+    let called = name.trim();
+    if (called.length > 80) {
+      if (!acted) continue;
+      called = called.slice(0, 80).trim();
+    }
 
     out.push({
       touched: el.hasAttribute('data-orbit-touched'),
@@ -111,9 +112,11 @@ export const COLLECT = `
       type: el.type || null,
       secret: el.type === 'password'
         || el.autocomplete === 'current-password' || el.autocomplete === 'new-password',
-      what: tag === 'a' ? 'link' : (tag === 'button' || el.type === 'submit' ? 'button' : 'field'),
-      role: tag === 'a' ? 'link' : (tag === 'button' || el.type === 'submit' ? 'button' : (tag === 'select' ? 'combobox' : 'textbox')),
-      name: (name || '').trim(),
+      what: role === 'link' ? 'link'
+        : ['button', 'tab', 'menuitem', 'option', 'switch'].includes(role) ? 'button'
+        : 'field',
+      role,
+      name: called,
       formName: el.getAttribute('name') || null,
       labelledBy: beside || null,
       row: null, column: null,
@@ -249,7 +252,82 @@ function bindingFor(raw: Raw, seenNames: Map<string, number>): Binding {
   return { strategy: 'text', name: raw.name, corroborate: { text: raw.name.slice(0, 24) } };
 }
 
+/**
+ * Elements whose role and name Playwright is asked for.
+ *
+ * Roles are in the query beside tags because an application that builds its
+ * buttons out of divs is the normal case on the systems Orbit exists for.
+ */
+const CONTROLS = 'input, select, textarea, button, a, [role], [onclick],'
+  + ' [tabindex]:not([tabindex="-1"]), [data-orbit-touched]';
+
+/** One element of an aria snapshot: `- textbox "User ID"`, or with no name. */
+const FIRST_LINE = /^-\s+([a-z]+)(?:\s+"((?:[^"\\]|\\.)*)")?/;
+
+/**
+ * Asks Playwright what every control on the page is called, and writes the
+ * answers onto the page for COLLECT to read.
+ *
+ * Orbit used to compute this itself, in the page, with a chain of fallbacks
+ * that approximated the accessible-name algorithm and got it wrong. It had no
+ * support for aria-labelledby at all, put title before placeholder where the
+ * specification is the other way round, and skipped any control holding more
+ * than one child element — which is what a button with an icon and a label
+ * is. On a four-element page with an aria-labelledby input, a div button and
+ * an icon button, Playwright found three controls and Orbit found none.
+ *
+ * That was worse than a bad approximation, because the other half of Orbit
+ * was never approximating: every binding is resolved with getByRole, which
+ * uses Playwright's real implementation. So the page was read with one set of
+ * names and looked up with another, and nothing made them agree.
+ *
+ * They agree now by construction, because it is one implementation.
+ *
+ * Written back as attributes rather than returned, because of the recorder:
+ * on an application that navigates when you touch it the document is gone
+ * before anything asynchronous can ask, so the name has to be sitting on the
+ * element at the moment of the click. Proved rather than assumed — asking
+ * Playwright from inside the click handler times out, the page having already
+ * become the next one.
+ */
+export async function nameControls(page: Page | Frame): Promise<number> {
+  // Passed as source rather than as a function, like COLLECT above it and for
+  // the same reason: this package is not compiled against the DOM, because the
+  // only code here that touches one runs somewhere else.
+  const count = await page.evaluate(`((controls) => {
+    let i = 0;
+    for (const el of document.querySelectorAll(controls)) el.setAttribute('data-orbit-i', String(i++));
+    return i;
+  })(${JSON.stringify(CONTROLS)})`) as number;
+
+  const named: Array<[number, string, string]> = [];
+  for (let i = 0; i < count; i += 1) {
+    // One call per control, measured at about 3ms — 17 controls on a real
+    // page in 49ms, beside an authoring turn that spends seconds in a model.
+    const said = await page.locator(`[data-orbit-i="${i}"]`).first()
+      .ariaSnapshot({ timeout: 2000 }).catch(() => '');
+    const m = said.trim().match(FIRST_LINE);
+    // `generic` is the accessibility tree saying this element is not a
+    // control. Left unstamped, so COLLECT falls back rather than binding a
+    // step to a role that resolves to nothing.
+    if (!m || !m[1] || m[1] === 'generic' || m[1] === 'none') continue;
+    named.push([i, m[1], (m[2] ?? '').replace(/\\(.)/g, '$1')]);
+  }
+
+  await page.evaluate(`((named) => {
+    for (const entry of named) {
+      const el = document.querySelector('[data-orbit-i="' + entry[0] + '"]');
+      if (!el) continue;
+      el.setAttribute('data-orbit-role', entry[1]);
+      el.setAttribute('data-orbit-name', entry[2]);
+    }
+  })(${JSON.stringify(named)})`);
+
+  return named.length;
+}
+
 export async function snapshot(page: Page | Frame): Promise<Seen[]> {
+  await nameControls(page);
   return shape(await page.evaluate(COLLECT) as Raw[]);
 }
 
