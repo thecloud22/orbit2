@@ -49,15 +49,9 @@ else
 fi
 
 if command -v psql > /dev/null 2>&1; then
-  if psql postgres -X -t -c 'select 1' > /dev/null 2>&1; then
-    ok "postgres, and it answers as $(whoami)"
-  else
-    no "postgres is installed but will not answer as $(whoami)"
-    note "Orbit connects over a local socket as you. Start the server, or create your role."
-    missing=1
-  fi
+  ok "psql $(psql --version | awk '{print $3}')"
 else
-  no "postgres is not installed"; missing=1
+  no "the postgres client (psql) is not installed"; missing=1
 fi
 
 [ "$missing" -eq 1 ] && { printf '\nInstall what is missing above, then run this again.\n'; exit 1; }
@@ -78,6 +72,20 @@ else
   note "Two values are deliberately blank and only you can fill them:"
   note "  OPENAI_API_KEY        — needed to bring a procedure in. A run needs none."
   note "  ORBIT_CREDENTIAL_KEY  — encrypts registered passwords. Any long random string."
+  # It guessed a postgres running locally as you, because that is what it can
+  # see from here. If it is in a container it is a different role over TCP, and
+  # the next step will fail against a URL nobody has looked at.
+  guessed=$(node --env-file="$ROOT/.env" -e \
+    'const u = new URL(process.env.ORBIT_OWNER_DATABASE_URL); u.pathname = "/postgres"; console.log(u.toString())')
+  if ! psql "$guessed" -X -t -c 'select 1' > /dev/null 2>&1; then
+    printf '\n'
+    no "no postgres answered at the URLs just written"
+    note "They assume one installed locally, listening as $(whoami). If yours is"
+    note "in a container it is a different role over TCP — set the three"
+    note "ORBIT_*DATABASE_URL lines in .env, then run this again. .env.example"
+    note "shows what a containerised one looks like."
+    exit 1
+  fi
 fi
 
 step "Dependencies"
@@ -94,16 +102,40 @@ fi
 
 step "Databases"
 
-# Named here rather than parsed out of .env: a setup script that infers which
-# database to create from a URL it did not write is one that creates the wrong
-# one on the day somebody edits that URL.
-for db in orbit2_dev orbit2_test; do
-  if psql -lqt 2>/dev/null | cut -d'|' -f1 | grep -qw "$db"; then
+# Taken from .env rather than assumed.
+#
+# This used to run `createdb orbit2_dev` and migrate
+# `postgres://$(whoami)@localhost/...`, which works on exactly one kind of
+# machine: postgres installed locally, listening on a socket, with a role named
+# after you. A postgres in a container has none of those — the role is whatever
+# the image was started with, it answers over TCP, and `whoami` means nothing
+# inside it. So the URLs in .env are the truth, and this reads them.
+urls=$(node --env-file="$ROOT/.env" -e '
+  const need = ["ORBIT_OWNER_DATABASE_URL", "ORBIT_TEST_DATABASE_URL"];
+  for (const k of need) if (!process.env[k]) { console.error(`${k} is not set in .env`); process.exit(1); }
+  for (const k of need) {
+    const u = new URL(process.env[k]);
+    // The maintenance database, to create the others from.
+    const admin = new URL(u); admin.pathname = "/postgres";
+    console.log([u.pathname.slice(1), admin.toString()].join("\t"));
+  }
+') || { no "could not read the database URLs from .env"; printf '%s\n' "$urls"; exit 1; }
+
+while IFS=$'\t' read -r db admin; do
+  if psql "$admin" -X -t -c "select 1 from pg_database where datname = '$db'" 2>/dev/null | grep -q 1; then
     ok "$db is already there"
   else
-    createdb "$db" 2>/dev/null && ok "$db created" || { no "could not create $db"; exit 1; }
+    if psql "$admin" -X -q -c "CREATE DATABASE \"$db\"" > /dev/null 2>&1; then
+      ok "$db created"
+    else
+      no "could not create $db"
+      note "It connected to ${admin%%\?*}, from ORBIT_OWNER_DATABASE_URL in .env."
+      note "Check that URL names a server that is up and a role that may create a database."
+      exit 1
+    fi
   fi
-done
+done <<< "$urls"
+
 
 step "Schema"
 
@@ -111,14 +143,15 @@ step "Schema"
 # which migration 0001 creates and which holds INSERT and SELECT on the
 # immutable tables and nothing else — that is what makes a published version
 # impossible to rewrite, and it only works if migrations are not run as it.
-for db in orbit2_dev orbit2_test; do
-  out=$(cd "$ROOT/apps/api" && node --experimental-strip-types src/migrate.ts \
-        "postgres://$(whoami)@localhost/$db" 2>&1)
+for var in ORBIT_OWNER_DATABASE_URL ORBIT_TEST_DATABASE_URL; do
+  url=$(node --env-file="$ROOT/.env" -p "process.env.$var")
+  name=$(node -p "new URL('$url').pathname.slice(1)")
+  out=$(cd "$ROOT/apps/api" && node --experimental-strip-types src/migrate.ts "$url" 2>&1)
   if [ $? -eq 0 ]; then
     count=$(printf '%s' "$out" | grep -c '\.sql' || true)
-    ok "$db — $( [ "$count" -gt 0 ] && echo "$count migrations applied" || echo 'already up to date' )"
+    ok "$name — $( [ "$count" -gt 0 ] && echo "$count migrations applied" || echo 'already up to date' )"
   else
-    no "$db — migrations failed"; printf '%s\n' "$out" | tail -5; exit 1
+    no "$name — migrations failed"; printf '%s\n' "$out" | tail -5; exit 1
   fi
 done
 

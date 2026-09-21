@@ -10,8 +10,8 @@ be sure it could not have done anything else.**
 
 ## Getting it running
 
-You need **Node 22.6 or newer**, **pnpm**, and **PostgreSQL** running locally
-and willing to answer as you over a socket. Then:
+You need **Node 22.6 or newer**, **pnpm**, the **psql** client, and a
+**PostgreSQL** server it can reach. Then:
 
 ```
 git clone git@github.com:thecloud22/orbit2.git
@@ -23,6 +23,18 @@ scripts/setup
 installs the workspace and Chromium, creates `orbit2_dev` and `orbit2_test`,
 and runs the migrations on both. It is safe to run twice.
 
+**If your PostgreSQL is in a container**, do this first, because setup's first
+guess is one installed locally answering as you:
+
+```
+cp .env.example .env
+```
+
+and set the three database lines to the role the image was started with —
+`.env.example` shows the shape. Then `scripts/setup`. It creates and migrates
+whatever those URLs name; it no longer assumes a socket, a port or a role. If
+it cannot reach them it stops and says which URL it tried.
+
 It leaves two values in `.env` for you, because a setup script that invents a
 key is one somebody has to audit:
 
@@ -30,6 +42,11 @@ key is one somebody has to audit:
 |---|---|
 | `OPENAI_API_KEY` | Needed to **bring a procedure in**. A published agent consults no model when it runs, so leave it blank and everything but authoring still works. |
 | `ORBIT_CREDENTIAL_KEY` | Encrypts the passwords of registered systems. Any long random string. It is not in the database, so a backup on its own decrypts nothing. |
+
+**OpenAI is the only provider with an adapter.** `.env` names three, and
+`anthropic` and `bedrock` refuse at start-up rather than half-working. Bringing
+a procedure in needs an OpenAI key; everything after that — publishing, running
+an agent, reading its evidence — consults no model and needs none.
 
 Then:
 
@@ -110,7 +127,8 @@ pnpm test        # 200 tests: contract, api, worker
 pnpm typecheck
 ```
 
-Tests need `orbit2_test`, which `scripts/setup` creates. Some drive a real
+Tests need `orbit2_test`, which `scripts/setup` creates from
+`ORBIT_TEST_DATABASE_URL`. Some drive a real
 Chromium and some need the demo portal running on 4101; those skip themselves
 with a reason rather than passing quietly when the thing they test is absent.
 
