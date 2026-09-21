@@ -113,12 +113,29 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
   // default, it is a false statement on the record.
   const mayChangeRecords = steps.some((s) => !unfinishedStep(s) && 'changesARecord' in s && s.changesARecord);
 
-  await db.query(
+  const { rows: [minted] } = await db.query<{ id: string }>(
     `INSERT INTO workflow_version
        (workflow_id, version, body, digest, outcomes, declared_inputs, applications, may_change_records)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
     [workflowId, version, JSON.stringify(body), digest,
      JSON.stringify(outcomes), JSON.stringify(inputs), JSON.stringify(apps), mayChangeRecords]);
+
+  // Publishing makes it the live version.
+  //
+  // There used to be a further act: a version was published, then every
+  // conclusion it declared had to be reached by a real run, and only then
+  // could it be activated. That gate is off by decision — four stages where
+  // the fourth reads as a separate phase of the workflow confused more than
+  // it protected. Publication is now the commitment.
+  //
+  // What is no longer enforced, said plainly so nobody has to rediscover it:
+  // a version can be started against a real system without any conclusion it
+  // declares ever having been reached by a run. The machinery that proved it
+  // is still here — `testCases`, `queueTests` and `activate` are untouched —
+  // so restoring the gate is putting this line back, not rebuilding anything.
+  await db.query(
+    `UPDATE workflow SET live_version_id = $2, updated_at = now() WHERE id = $1`,
+    [workflowId, minted!.id]);
 
   await db.query(
     `INSERT INTO audit_entry (act, object_kind, object_id, changed)

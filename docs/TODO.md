@@ -44,6 +44,31 @@ judgement made while building the editor and it was the wrong one.
 
 ---
 
+## Activation is off: a version can run without any conclusion being proved
+
+**What.** §4 had an agent unable to touch a real system until every conclusion
+it declares had been reached by a real run. Publication now sets
+`workflow.live_version_id` directly, so a published version is runnable
+immediately.
+
+**Why it is off.** Four stages, where the fourth read as another phase of the
+workflow rather than as the check it was. It was also unreachable in practice
+for a long time — the control said "Test and activate" and navigated to a
+list — which is what made it look like a dead end rather than a gate.
+
+**What is no longer enforced.** A version can be started against a real system
+with no evidence that any path through it works. On a procedure with two
+conclusions, one of which the available data cannot reach, that used to be an
+unresolvable block; it is now simply unproved and runnable.
+
+**What closing it takes.** One line in `mint.ts` — the `UPDATE workflow SET
+live_version_id` — and restoring `Active` to the stage rail. Nothing was
+deleted: `testCases`, `queueTests` and `activate` are untouched, and the panel
+that proves each conclusion is still reachable from the agent page under
+"Test it". Restoring the gate is putting a line back, not rebuilding anything.
+
+---
+
 ## The digest does not cover what a version is permitted to do
 
 **What.** `mintVersion` digests the body — the steps. `may_change_records` is a

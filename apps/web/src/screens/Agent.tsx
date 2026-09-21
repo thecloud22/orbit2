@@ -456,7 +456,8 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
 
   return (
     <Page
-      kicker={live ? 'Active' : published ? 'Published, not yet activated' : workflow.confirmed_at ? 'Confirmed' : 'Draft'}
+      kicker={workflow.paused_at ? 'Paused'
+        : published ? 'Published' : workflow.confirmed_at ? 'Confirmed' : 'Draft'}
       title={workflow.name}
       actions={<>
         {!workflow.confirmed_at && (
@@ -466,13 +467,15 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
         {workflow.confirmed_at && !published && (
           <Action disabled={busy} onClick={() => void act(`/api/workflows/${id}/publish`)}>Publish a version</Action>
         )}
-        {published && !live && (
-          <Action disabled={busy} onClick={() => setProving(true)}>Test and activate</Action>
+        {published && (
+          <Action kind="ghost" disabled={busy} onClick={() => setProving((v) => !v)}>
+            {proving ? 'Hide the tests' : 'Test it'}
+          </Action>
         )}
         {live && <Action onClick={() => go({ at: 'start', version: workflow.live_version_id! })}>Start a run</Action>}
       </>}
     >
-      <Stages confirmed={Boolean(workflow.confirmed_at)} published={published} live={live}
+      <Stages confirmed={Boolean(workflow.confirmed_at)} published={published}
         outstanding={outstanding.length} />
 
       {refused && <Refusal title="Nothing was changed" blockers={refused} />}
@@ -648,8 +651,8 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
  * is not available says why rather than disappearing — §2's rule that a
  * control you cannot use is shown with its reason, never hidden.
  */
-function Stages({ confirmed, published, live, outstanding }: {
-  confirmed: boolean; published: boolean; live: boolean; outstanding: number;
+function Stages({ confirmed, published, outstanding }: {
+  confirmed: boolean; published: boolean; outstanding: number;
 }) {
   // Four stages, each one a fact the store holds: the workflow exists, it was
   // attested to, a version was minted, a version is live.
@@ -660,6 +663,15 @@ function Stages({ confirmed, published, live, outstanding }: {
   // instruction on the bring-in page, which is where a thing you do belongs,
   // and the count it carried is now the reason confirmation is blocked, which
   // is what §4 asks for: the status, and what is stopping the next act.
+  // Three stages, and publishing is the last of them: a published version is
+  // runnable. There was a fourth — a version had to have every conclusion it
+  // declares reached by a real run before it could be activated — and it is
+  // off by decision. As a stage it read as another phase of the workflow
+  // rather than as the check it was, and confused more than it protected.
+  //
+  // Testing did not go away, only the gate: the panel that proves each
+  // conclusion is still reachable from here, it just no longer stands between
+  // a version and its first run.
   const stages = [
     { name: 'Recorded', done: true, why: '' },
     { name: 'Confirmed', done: confirmed,
@@ -667,7 +679,6 @@ function Stages({ confirmed, published, live, outstanding }: {
         ? `${outstanding} ${outstanding === 1 ? 'question' : 'questions'} to answer first`
         : 'nobody has attested to it yet' },
     { name: 'Published', done: published, why: 'confirm it first' },
-    { name: 'Active', done: live, why: 'every ending must be proved by a run' },
   ];
   return (
     <div style={{ display: 'flex', gap: 0, paddingTop: 20 }}>
