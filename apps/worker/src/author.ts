@@ -720,8 +720,8 @@ export async function authorFromProcedure(opts: {
   // conclusion — which is exactly the kind of plausible interpretation the
   // product refuses to publish.
   if (!steps.some((s) => s.kind === 'end')) {
-    const produced = steps.flatMap((s) => (s.kind === 'read' ? [s.produces] : []));
-    const published = produced.map((v) => v.name);
+    let produced = steps.flatMap((s) => (s.kind === 'read' ? [s.produces] : []));
+    let published = produced.map((v) => v.name);
 
     // Where a guarded step is, everything from it onwards happens only if the
     // conditions hold. The conditions are collected in the order they were
@@ -833,6 +833,12 @@ export async function authorFromProcedure(opts: {
         + ' actions those conditions governed. What is below is the part it could follow. The questions above'
         + ' say what it could not.'));
       steps.length = guardedAt;
+      // What is left produces less than the whole walk did, and an ending that
+      // publishes a value no surviving step reads is refused at publication —
+      // "Step 8 uses loanProgram, which no step produces" — about a step Orbit
+      // had just emptied.
+      produced = steps.flatMap((x) => (x.kind === 'read' ? [x.produces] : []));
+      published = produced.map((v) => v.name);
     }
 
     // No condition survived, so there is nothing to branch on and the workflow
@@ -961,16 +967,26 @@ export async function authorFromProcedure(opts: {
       // One ending. Either the procedure has one, or the model's account of the
       // second did not hold — and a rejected answer still leaves a workflow
       // that works, with a question against it.
+      //
+      // Where the conditional part was dropped, the model's name for the
+      // conclusion is not used. It names what the procedure meant to conclude,
+      // and these steps no longer conclude it: test case 11, which now only
+      // reads the reserve months, was ending "Reserves under 6 months" against
+      // a file holding 26. A conclusion asserting a business fact the steps
+      // never establish is the worst thing this can produce, so there is no
+      // name and the author is asked for one.
       steps.push({ id: crypto.randomUUID(), kind: 'end',
-        summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
-        outcome: found || 'unnamed', publishes: published });
+        summary: anyDropped
+          ? 'Finish — what this concludes has to be said, now the conditional part is not here'
+          : (said?.whenFound.label || 'Finish — this conclusion has no name yet'),
+        outcome: anyDropped ? 'unnamed' : (found || 'unnamed'), publishes: published });
       if (refusal) {
         turns.push(record('rejected', refusal));
         questions.push(asQuestion(`Orbit could not use the second conclusion it was offered, because ${refusal}. Is there more than one way this finishes?`));
       } else {
         turns.push(record('kept', `one conclusion: ${found}`));
       }
-      if (!found) {
+      if (!found || anyDropped) {
         questions.push(asQuestion('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.'));
       }
     } else {
