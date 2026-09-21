@@ -130,16 +130,21 @@ pipeline/underwriting/login flow and off each other's nav -- reachable from
 
 - [x] **Loan summary PDF** — a "PDF" button on every row of the real
       `/pipeline` table (`src/lib/loanSummaryPdf.ts`, via `jspdf`). Generates
-      and downloads an actual PDF file client-side from that loan's own
-      figures -- no demo portal in this repository has triggered a file
-      download before, and a recorded workflow that reads a value off a
-      downloaded document is a different capability than reading one off a
+      a real PDF client-side from that loan's own figures and opens it
+      inline, in a new tab (`window.open(doc.output('bloburl'))`), rather
+      than saving it to disk -- no demo portal in this repository has
+      produced a PDF before, and a recorded workflow that reads a value off
+      a rendered document is a different capability than reading one off a
       page.
-- [x] **Loan file PDF, form-styled** — a "Download PDF" button on the real
+- [x] **Loan file PDF, form-styled** — a "View PDF" button on the real
       `/underwriting?loan=` file review page itself (`src/lib/loanFilePdf.ts`).
       Everything the screen shows -- underwriting summary, borrower &
       employment, property & program, the decision banner and attached
       conditions if any -- laid out as bordered, labelled boxes rather than
       run-together text, the way a printed form reads. Reflects the page's
       own live state at the moment of the click: a decision made or a
-      condition attached before downloading shows up in the PDF.
+      condition attached before viewing shows up in the PDF. Opens inline
+      the same way. (A headless Chromium without a PDF-viewer plugin --
+      Playwright's bundled browser, for instance -- still surfaces a blob
+      PDF navigation as a download; that's the environment, not this code,
+      which hands the browser a proper `application/pdf` blob either way.)

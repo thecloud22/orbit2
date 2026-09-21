@@ -200,5 +200,5 @@ export function openLoanFilePdf(
   doc.setTextColor(150);
   doc.text('Meridian Home Lending -- training instance, not a real loan document.', MARGIN_X, 285);
 
-  doc.save(`${loan.loanNumber}-file.pdf`);
+  window.open(doc.output('bloburl'), '_blank');
 }

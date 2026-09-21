@@ -36,14 +36,14 @@ const GROUPS: readonly FeatureGroup[] = [
         id: 'pipeline',
         label: 'Pipeline',
         description:
-          'The queue of files awaiting a decision, lookup by loan number, and a "PDF" button per row that downloads a real, generated loan summary.',
+          'The queue of files awaiting a decision, lookup by loan number, and a "PDF" button per row that opens a real, generated loan summary inline in a new tab.',
         href: '/pipeline',
       },
       {
         id: 'underwriting',
         label: 'File review',
         description:
-          'The underwriting summary, conditions, and decision for a single file, plus a "Download PDF" button that renders the whole file as a form-styled document.',
+          'The underwriting summary, conditions, and decision for a single file, plus a "View PDF" button that opens the whole file as a form-styled document inline.',
         href: `/underwriting?loan=${SAMPLE_LOAN}`,
       },
     ],

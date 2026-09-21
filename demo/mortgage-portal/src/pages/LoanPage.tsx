@@ -14,7 +14,7 @@ import {
   PROPERTY_LABELS,
   type Loan,
 } from '../data/loans';
-import { downloadLoanFilePdf } from '../lib/loanFilePdf';
+import { openLoanFilePdf } from '../lib/loanFilePdf';
 
 /**
  * One loan file, as an underwriter sees it.
@@ -138,9 +138,9 @@ function LoanFile({ loan }: { loan: Loan }) {
           <div className="text-right text-xs text-slate-500">
             <button
               className="mb-2 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-sky-400 hover:bg-sky-50"
-              data-testid="download-file-pdf-button"
+              data-testid="view-file-pdf-button"
               onClick={() =>
-                downloadLoanFilePdf(
+                openLoanFilePdf(
                   loan,
                   decision === null ? null : DECISION_LABELS[decision],
                   conditions.map(
@@ -150,7 +150,7 @@ function LoanFile({ loan }: { loan: Loan }) {
               }
               type="button"
             >
-              Download PDF
+              View PDF
             </button>
             <div>
               Submitted <span className="font-mono">{loan.submittedOn}</span>

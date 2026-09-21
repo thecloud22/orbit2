@@ -9,7 +9,7 @@ import {
   PROGRAM_LABELS,
   STATUS_LABELS,
 } from '../data/loans';
-import { downloadLoanSummaryPdf } from '../lib/loanSummaryPdf';
+import { openLoanSummaryPdf } from '../lib/loanSummaryPdf';
 
 /** The queue an underwriter opens a file from, plus the lookup by loan number. */
 export function PipelinePage() {
@@ -136,8 +136,8 @@ export function PipelinePage() {
                   <td className="px-4 py-2.5 text-right">
                     <button
                       className="rounded border border-slate-300 px-2.5 py-1 text-xs text-slate-700 transition-colors hover:border-sky-400 hover:bg-sky-50"
-                      data-testid={`download-pdf-${loan.loanNumber}`}
-                      onClick={() => downloadLoanSummaryPdf(loan)}
+                      data-testid={`view-pdf-${loan.loanNumber}`}
+                      onClick={() => openLoanSummaryPdf(loan)}
                       type="button"
                     >
                       PDF
