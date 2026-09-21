@@ -15,6 +15,7 @@ import { mintVersion } from './mint.ts';
 import { bringIn, finishRecording, startRecording } from './authoring.ts';
 import { cancelRun, retryRun, rerun } from './control.ts';
 import { deleteStep, editStep, insertStep, moveStep } from './edit.ts';
+import { editApplication, registerApplication } from './applications.ts';
 import { describeBlocker } from '@orbit/contract';
 
 export async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -162,5 +163,17 @@ export const actions = {
   async rerun(reference: string) {
     const result = await inTransaction((db) => rerun(db, reference));
     return result.ok ? { status: 201, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  /** Admin: what an agent can reach is registered here first (Decision 5). */
+  async registerApplication(body: unknown) {
+    const result = await inTransaction((db) => registerApplication(db, body));
+    return result.ok ? { status: 201, body: result } : { status: 422, body: { why: result.because } };
+  },
+
+  async editApplication(applicationId: string, body: unknown) {
+    const result = await inTransaction((db) => editApplication(db, applicationId, body));
+    if (result.ok) return { status: 200, body: result };
+    return { status: result.notFound ? 404 : 422, body: { why: result.because } };
   },
 };

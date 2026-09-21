@@ -10,8 +10,8 @@ import { pool } from './db.ts';
 export async function readAdmin() {
   const { rows: applications } = await pool.query(
     `SELECT DISTINCT ON (a.id)
-            a.id, a.name, a.surface, a.retired_at,
-            r.revision, r.addresses, r.sign_in_as, r.credential_name,
+            a.id, a.name, a.surface, a.owner_note, a.retired_at,
+            r.revision, r.addresses, r.sign_in_as, r.credential_name, r.formats,
             (c.name IS NOT NULL) AS credential_set
        FROM application a
        JOIN application_revision r ON r.application_id = a.id

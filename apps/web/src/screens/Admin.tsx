@@ -1,11 +1,17 @@
-import { Page, Section } from '../Page.tsx';
+import { useState } from 'react';
+import { Action, Page, Refusal, Section } from '../Page.tsx';
 import { Chip, EmptyState, Row } from '../ui.tsx';
-import { useFetch } from '../fetching.ts';
+import { send, useFetch } from '../fetching.ts';
+
+interface Application {
+  id: string; name: string; surface: string; owner_note: string | null; revision: number;
+  addresses: Array<{ host: string; pathPrefix: string }>; sign_in_as: string | null;
+  credential_name: string | null; credential_set: boolean; retired_at: string | null;
+  formats: { date?: string; thousands?: string; decimal?: string };
+}
 
 interface Admin {
-  applications: Array<{ id: string; name: string; surface: string; revision: number;
-    addresses: Array<{ host: string; pathPrefix: string }>; sign_in_as: string | null;
-    credential_name: string | null; credential_set: boolean; retired_at: string | null }>;
+  applications: Application[];
   spend: { building: string; running: string; calls: string; model: string | null };
   perAgent: Array<{ id: string; name: string; cost_micros: string; calls: number }>;
   deployment: { runsOn: string; region: string | null; recordStore: string; evidence: string;
@@ -15,38 +21,65 @@ interface Admin {
 const money = (micros: string) => `$${(Number(micros) / 1e6).toFixed(6)}`;
 
 export function AdminScreen() {
-  const admin = useFetch<Admin>('/api/admin');
+  const [refresh, setRefresh] = useState(0);
+  const admin = useFetch<Admin>(`/api/admin?r=${refresh}`);
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   if (admin.state === 'empty') {
     return <Page title="Admin"><div style={{ marginTop: 18, border: '1px solid var(--rule)',
       borderRadius: 6, background: 'var(--panel)' }}><EmptyState of={admin.of} /></div></Page>;
   }
   const { applications, spend, perAgent, deployment } = admin.value;
 
+  const onRegistered = () => { setAdding(false); setRefresh((n) => n + 1); };
+  const onEdited = () => { setEditingId(null); setRefresh((n) => n + 1); };
+
   return (
     <Page title="Admin"
       aside={<p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: 'var(--ink-2)', maxWidth: 560 }}>
         Everything an agent can reach is registered here first. An author picks from this list and cannot add to it.
       </p>}>
-      <Section title="Applications">
+      <Section title="Applications"
+        right={<Action kind="ghost" onClick={() => { setEditingId(null); setAdding((v) => !v); }}>
+          {adding ? 'Cancel' : 'Register an application'}
+        </Action>}>
+        {adding && (
+          <div style={{ marginBottom: 18, border: '1px solid var(--rule)', borderRadius: 6,
+            background: 'var(--panel)', padding: '18px 20px' }}>
+            <ApplicationForm mode="register" onDone={onRegistered} onCancel={() => setAdding(false)} />
+          </div>
+        )}
         <div style={{ borderTop: '1px solid var(--ink)' }}>
           {applications.map((a, i) => (
             <div key={a.id} style={{ borderBottom: i === applications.length - 1 ? 'none' : '1px solid var(--rule)',
-              padding: '14px 0', display: 'flex', gap: 18, alignItems: 'flex-start' }}>
-              <div style={{ width: 180 }}>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{a.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>{a.surface}, revision {a.revision}</div>
-              </div>
-              <span style={{ width: 300, fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink-2)',
-                wordBreak: 'break-all' }}>
-                {a.addresses.map((h) => `${h.host}${h.pathPrefix}`).join(' ')}
-              </span>
-              <span style={{ width: 130, fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-2)' }}>
-                {a.sign_in_as ?? '—'}</span>
-              <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{a.credential_name ?? '—'}</span>
-                <Chip state={a.credential_set ? 'ok' : 'failed'}>
-                  {a.credential_set ? 'Set by the deployment' : 'Not set. Runs are refused.'}</Chip>
-              </div>
+              padding: '14px 0' }}>
+              {editingId === a.id ? (
+                <div style={{ border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel-2)',
+                  padding: '18px 20px' }}>
+                  <ApplicationForm mode="edit" application={a} onDone={onEdited} onCancel={() => setEditingId(null)} />
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
+                  <div style={{ width: 180 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{a.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>{a.surface}, revision {a.revision}</div>
+                    {a.retired_at && <div style={{ fontSize: 12, color: 'var(--attention-ink)' }}>retired</div>}
+                  </div>
+                  <span style={{ width: 260, fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink-2)',
+                    wordBreak: 'break-all' }}>
+                    {a.addresses.map((h) => `${h.host}${h.pathPrefix}`).join(' ')}
+                  </span>
+                  <span style={{ width: 130, fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-2)' }}>
+                    {a.sign_in_as ?? '—'}</span>
+                  <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{a.credential_name ?? '—'}</span>
+                    <Chip state={a.credential_set ? 'ok' : 'failed'}>
+                      {a.credential_set ? 'Set by the deployment' : 'Not set. Runs are refused.'}</Chip>
+                  </div>
+                  <Action kind="ghost" onClick={() => { setAdding(false); setEditingId(a.id); }}>Edit</Action>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -102,6 +135,163 @@ export function AdminScreen() {
         </p>
       </div>
     </Page>
+  );
+}
+
+const field: React.CSSProperties = {
+  font: 'inherit', fontSize: 13.5, padding: '8px 10px', width: '100%', boxSizing: 'border-box',
+  border: '1px solid var(--rule-2)', borderRadius: 4, background: 'var(--panel)', color: 'var(--ink)',
+};
+const label: React.CSSProperties = { fontSize: 12.5, color: 'var(--ink-2)', width: 130, flexShrink: 0 };
+
+/**
+ * Registering an application and editing one share a form, because they share
+ * everything but two things: registering asks for a surface and edits an
+ * empty slate, editing does neither. Decision 5 fixes the surface the moment
+ * an application is registered — it decides which step kinds and locator
+ * rules apply — so an edit never offers to change it.
+ */
+function ApplicationForm({ mode, application, onDone, onCancel }: {
+  mode: 'register' | 'edit'; application?: Application; onDone: () => void; onCancel: () => void;
+}) {
+  const [name, setName] = useState(application?.name ?? '');
+  const [surface, setSurface] = useState<'browser' | 'terminal'>(
+    (application?.surface as 'browser' | 'terminal') ?? 'browser');
+  const [ownerNote, setOwnerNote] = useState(application?.owner_note ?? '');
+  const [addresses, setAddresses] = useState(
+    application?.addresses.length ? application.addresses.map((a) => ({ ...a })) : [{ host: '', pathPrefix: '/' }]);
+  const [signInAs, setSignInAs] = useState(application?.sign_in_as ?? '');
+  const [credentialName, setCredentialName] = useState(application?.credential_name ?? '');
+  const [dateFormat, setDateFormat] = useState(application?.formats.date ?? '');
+  const [thousands, setThousands] = useState(application?.formats.thousands ?? '');
+  const [decimal, setDecimal] = useState(application?.formats.decimal ?? '');
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+
+  const usableAddresses = addresses.filter((a) => a.host.trim());
+  const ready = name.trim().length > 0 && usableAddresses.length > 0;
+
+  async function submit() {
+    setBusy(true); setRefused(null);
+    const formats: Record<string, string> = {};
+    if (dateFormat.trim()) formats['date'] = dateFormat.trim();
+    if (thousands.trim()) formats['thousands'] = thousands.trim();
+    if (decimal.trim()) formats['decimal'] = decimal.trim();
+    const body = {
+      name: name.trim(),
+      ...(mode === 'register' ? { surface } : {}),
+      ...(ownerNote.trim() ? { ownerNote: ownerNote.trim() } : {}),
+      addresses: usableAddresses.map((a) => ({ host: a.host.trim(), pathPrefix: a.pathPrefix.trim() || '/' })),
+      ...(signInAs.trim() ? { signInAs: signInAs.trim() } : {}),
+      ...(credentialName.trim() ? { credentialName: credentialName.trim() } : {}),
+      ...(Object.keys(formats).length ? { formats } : {}),
+    };
+    const result = mode === 'register'
+      ? await send('/api/applications', body)
+      : await send(`/api/applications/${application!.id}/edit`, body);
+    setBusy(false);
+    if (result.ok) onDone();
+    else setRefused(result.why);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 640 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+        <span style={label}>Name</span>
+        <input style={field} value={name} onChange={(e) => setName(e.target.value)}
+          aria-label="Application name" placeholder="Loan Servicing Portal" />
+      </div>
+
+      {mode === 'register' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+          <span style={label}>Surface</span>
+          <div style={{ display: 'flex', gap: 16 }}>
+            {(['browser', 'terminal'] as const).map((s) => (
+              <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <input type="radio" name="surface" checked={surface === s} onChange={() => setSurface(s)} />
+                {s}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      {mode === 'edit' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+          <span style={label}>Surface</span>
+          <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+            {application!.surface} — fixed when it was registered
+          </span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+        <span style={label}>Owner note</span>
+        <input style={field} value={ownerNote} onChange={(e) => setOwnerNote(e.target.value)}
+          aria-label="Owner note" placeholder="Optional — who to ask about this system" />
+      </div>
+
+      <div style={{ display: 'flex', gap: 11 }}>
+        <span style={{ ...label, paddingTop: 8 }}>Addresses</span>
+        <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
+          {addresses.map((a, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8 }}>
+              <input style={{ ...field, maxWidth: 220 }} value={a.host} placeholder="portal.example.internal:443"
+                aria-label={`Host ${i + 1}`}
+                onChange={(e) => setAddresses((v) => v.map((x, j) => j === i ? { ...x, host: e.target.value } : x))} />
+              <input style={{ ...field, maxWidth: 140 }} value={a.pathPrefix} placeholder="/"
+                aria-label={`Path prefix ${i + 1}`}
+                onChange={(e) => setAddresses((v) => v.map((x, j) => j === i ? { ...x, pathPrefix: e.target.value } : x))} />
+              {addresses.length > 1 && (
+                <button type="button" onClick={() => setAddresses((v) => v.filter((_, j) => j !== i))}
+                  style={{ font: 'inherit', fontSize: 12, color: 'var(--ink-2)', background: 'transparent',
+                    border: 0, cursor: 'pointer' }}>remove</button>
+              )}
+              {i === addresses.length - 1 && (
+                <button type="button" onClick={() => setAddresses((v) => [...v, { host: '', pathPrefix: '/' }])}
+                  style={{ font: 'inherit', fontSize: 12, color: 'var(--ink-2)', background: 'transparent',
+                    border: 0, cursor: 'pointer' }}>another</button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+        <span style={label}>Signs in as</span>
+        <input style={{ ...field, maxWidth: 260 }} value={signInAs} onChange={(e) => setSignInAs(e.target.value)}
+          aria-label="Signs in as" placeholder="svc_account" />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+        <span style={label}>Credential name</span>
+        <input style={{ ...field, maxWidth: 260 }} value={credentialName} onChange={(e) => setCredentialName(e.target.value)}
+          aria-label="Credential name" placeholder="PORTAL_PASSWORD" />
+      </div>
+
+      <div style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
+        <span style={label}>How it writes numbers</span>
+        <input style={{ ...field, maxWidth: 130 }} value={dateFormat} onChange={(e) => setDateFormat(e.target.value)}
+          aria-label="Date format" placeholder="date, e.g. MMM d, yyyy" />
+        <input style={{ ...field, maxWidth: 70 }} value={thousands} onChange={(e) => setThousands(e.target.value)}
+          aria-label="Thousands separator" placeholder="," />
+        <input style={{ ...field, maxWidth: 70 }} value={decimal} onChange={(e) => setDecimal(e.target.value)}
+          aria-label="Decimal separator" placeholder="." />
+      </div>
+
+      <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5, maxWidth: 560 }}>
+        There is no field for the credential's value here. Orbit records what it is called; the deployment
+        holds what it is.
+      </p>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 4 }}>
+        <Action disabled={!ready || busy}
+          why={!name.trim() ? 'Give it a name' : 'It needs at least one address'}
+          onClick={() => void submit()}>
+          {mode === 'register' ? 'Register' : 'Save'}
+        </Action>
+        <Action kind="ghost" onClick={onCancel}>Cancel</Action>
+      </div>
+      {refused && <Refusal title={mode === 'register' ? 'Not registered' : 'Not saved'} blockers={[refused]} />}
+    </div>
   );
 }
 

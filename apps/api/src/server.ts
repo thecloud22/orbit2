@@ -34,6 +34,12 @@ createServer(async (req, res) => {
       if (kind === 'authoring' && !id) {
         const r = await actions.bringIn(body); return json(res, r.status, r.body);
       }
+      if (kind === 'applications' && !id) {
+        const r = await actions.registerApplication(body); return json(res, r.status, r.body);
+      }
+      if (kind === 'applications' && id && verb === 'edit') {
+        const r = await actions.editApplication(id, body); return json(res, r.status, r.body);
+      }
       if (kind === 'workflows' && id) {
         if (verb === 'confirm') { const r = await actions.confirm(id, body); return json(res, r.status, r.body); }
         if (verb === 'publish') { const r = await actions.publish(id); return json(res, r.status, r.body); }
