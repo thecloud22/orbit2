@@ -23,6 +23,25 @@ interface Turn { turn: number; model: string; verdict: string; why: string;
 
 const summary = (d: Record<string, unknown>) => String(d['summary'] ?? '');
 
+/**
+ * Which side of a branch each step sits on.
+ *
+ * Without this the two endings of a branch read as steps 6 and 7 — one after
+ * the other — when reaching either means never reaching the other. A list is
+ * the right shape for a procedure that is mostly a sequence, but it has to
+ * stop lying at the point where the sequence forks.
+ */
+function sidesOf(steps: Draft['steps']): Map<string, 'yes' | 'no'> {
+  const side = new Map<string, 'yes' | 'no'>();
+  for (const s of steps) {
+    if (s.kind !== 'branch') continue;
+    const d = s.declares as { ifTrue?: string; ifFalse?: string };
+    if (d.ifTrue) side.set(d.ifTrue, 'yes');
+    if (d.ifFalse) side.set(d.ifFalse, 'no');
+  }
+  return side;
+}
+
 /** Decision 14's ten. Offered in the order a procedure tends to use them. */
 const KINDS = ['open', 'enter', 'activate', 'read', 'collect', 'check', 'branch', 'forEach', 'handOff', 'end'] as const;
 
@@ -65,6 +84,7 @@ function Confirm({ draft, onDone, onCancel }: {
 }) {
   const { workflow, steps, notes } = draft;
   const outstanding = notes.filter((n) => !n.resolved_at);
+  const sides = sidesOf(steps);
   const endings = steps.filter((s) => s.kind === 'end');
   const inputs = workflow.declared_inputs ?? [];
 
@@ -201,6 +221,7 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
 
   const { workflow, steps, notes, versions, authoring } = draft.value;
   const outstanding = notes.filter((n) => !n.resolved_at);
+  const sides = sidesOf(steps);
   const published = versions.length > 0;
   const live = Boolean(workflow.live_version_id);
 
@@ -286,6 +307,12 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
               <span style={{ width: 18, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right' }}>{s.position}</span>
               <span style={{ width: 70, fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
                 color: 'var(--running-ink)' }}>{s.kind}</span>
+              {sides.get(s.id) && (
+                <span style={{ fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)',
+                  border: '1px solid var(--rule-2)', borderRadius: 3, padding: '1px 6px', flexShrink: 0 }}>
+                  if {sides.get(s.id)}
+                </span>
+              )}
               <span style={{ flexGrow: 1, fontSize: 13.5 }}>{summary(s.declares)}</span>
               {strategy(s.declares) && <span style={{ fontSize: 11.5, color: 'var(--ink-2)',
                 fontFamily: 'var(--mono)' }}>by {strategy(s.declares)}</span>}
