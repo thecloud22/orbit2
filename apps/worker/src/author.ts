@@ -781,8 +781,16 @@ export async function authorFromProcedure(opts: {
         + ' below. Say where in the procedure that value should be read.'));
     }
 
+    // The same threshold, whichever way it was written. Test case 13 produced
+    // "Loan-to-value at most 80%" and "Loan-to-value above 80" — one number,
+    // two strings — so the contradiction went unseen, all three conditions
+    // were chained, and a file at 72.73% failed "above 80" and was declined.
+    const sameThreshold = (a: string, b: string) => {
+      const x = asNumber(a), y = asNumber(b);
+      return x !== null && y !== null ? x === y : a.trim() === b.trim();
+    };
     const contradicted = allConditions.filter((c) => allConditions.some((o) =>
-      o.value === c.value && o.than === c.than && (OPPOSITES[c.is] ?? []).includes(o.is)));
+      o.value === c.value && sameThreshold(o.than, c.than) && (OPPOSITES[c.is] ?? []).includes(o.is)));
     if (contradicted.length > 0) {
       const one = contradicted[0]!;
       questions.push(asQuestion(
