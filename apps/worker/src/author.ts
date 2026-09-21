@@ -691,8 +691,25 @@ export async function authorFromProcedure(opts: {
     // conditions hold. The conditions are collected in the order they were
     // imposed; one branch each, and any that fails leaves the guarded path.
     const guardedAt = steps.findIndex((x) => guards.has(x.id));
-    const allConditions = guardedAt === -1 ? []
-      : steps.slice(guardedAt).flatMap((x) => guards.get(x.id) ?? []);
+
+    // One branch per distinct condition, not one per guarded step.
+    //
+    // A procedure that says "if the loan-to-value is over 80%, attach PMI
+    // before approving" puts the same condition on both acts, so both carried
+    // it and two identical branches were chained in front of them: the run
+    // evaluated the same comparison twice and wrote the same decision to the
+    // record twice, which reads as two checks rather than one. Different
+    // conditions on the same value — at least this, at most that — are not
+    // duplicates and both survive; only an exact repeat is dropped.
+    const seenConditions = new Set<string>();
+    const allConditions = (guardedAt === -1 ? []
+      : steps.slice(guardedAt).flatMap((x) => guards.get(x.id) ?? []))
+      .filter((c) => {
+        const key = `${c.value}|${c.is}|${c.than}`;
+        if (seenConditions.has(key)) return false;
+        seenConditions.add(key);
+        return true;
+      });
 
     const answered = await model.propose(
       {
