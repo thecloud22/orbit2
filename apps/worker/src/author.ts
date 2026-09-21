@@ -24,6 +24,69 @@ import { asNumber } from './compare.ts';
 import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
 
 /**
+ * What the walk types into a field, taken from the step it just built.
+ *
+ * It used to be `inputs[p.value] ?? ''` — the author's example values, looked
+ * up by whatever the model called the value. Three of the four kinds of thing
+ * a step can carry are not in that map and never could be, so all three typed
+ * an empty string:
+ *
+ *   A password. There is no example for one and there must not be, so the
+ *   sign-in typed nothing into a required field, the browser refused the
+ *   submit, and the walk sat on the login page for every remaining turn —
+ *   mapping the rest of the procedure against a page it had never left.
+ *
+ *   The registered account, for the same reason.
+ *
+ *   A literal. A procedure naming the record it works on — "open the file
+ *   ML-26-04502" — was looked up as `inputs["ML-26-04502"]`, so the loan
+ *   number was never typed and the walk never reached the file.
+ *
+ * The step already says where its value comes from, and a walk that types what
+ * the run will type is the only kind whose bindings mean anything. The
+ * password is used here and nowhere else: what the step carries is the
+ * credential's name.
+ */
+function toType(
+  value: Extract<Step, { kind: 'enter' }>['value'],
+  opts: { inputs: Record<string, string>; signsInAs?: string | null; signsInWith?: string | null },
+): string {
+  if (value.from === 'input') return opts.inputs[value.value] ?? '';
+  if (value.from === 'account') return opts.signsInAs ?? '';
+  if (value.from === 'secret') return opts.signsInWith ?? '';
+  if (value.from === 'literal') {
+    const l = value.literal;
+    return l.type === 'text' ? l.text
+      : l.type === 'number' ? String(l.number)
+      : l.type === 'date' ? l.date
+      : l.type === 'yesNo' ? (l.yesNo ? 'yes' : 'no')
+      : '';
+  }
+  return '';
+}
+
+/**
+ * Wait for the navigation a click causes, not for the document it is leaving.
+ *
+ * `waitForLoadState('domcontentloaded')` asks about the *current* document,
+ * which has already loaded — so it returned at once, before the click's
+ * navigation had begun, and the next turn mapped against the page the walk had
+ * just left. On the portal's login page, whose submit handler assigns
+ * `window.location.href`, that meant a turn read the brand block off `/login`
+ * and called it "the pipeline has loaded": kept as a step, no question raised,
+ * and a draft declaring a conclusion it had never reached.
+ *
+ * The ceiling is what tells a click that navigates apart from one that only
+ * redraws. Nothing distinguishes them in advance, and waiting on an address
+ * that will never change has to end somewhere. Two seconds is long enough for
+ * a local application and short enough that a dozen turns do not stall on it.
+ */
+export async function settleAfterActivating(page: Page, wasAt: string): Promise<void> {
+  await page.waitForURL((u) => u.toString() !== wasAt, { timeout: 2000 }).catch(() => undefined);
+  await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+}
+
+/**
  * Whether an act could possibly have meant this element.
  *
  * Used twice, and the order matters. It narrows the candidates *before* they
@@ -273,6 +336,10 @@ export async function authorFromProcedure(opts: {
   /** The account the registry says this application signs in as. A field
    *  given exactly this value is the sign-in, not something a run supplies. */
   signsInAs?: string | null;
+  /** The registered password, for typing into the page during the walk and
+   *  nothing else. It never reaches a step, a note, a turn or the store — the
+   *  step a password field produces names the credential (§2). */
+  signsInWith?: string | null;
   model: ModelProvider;
   maxTurns?: number;
 }): Promise<AuthoredDraft> {
@@ -459,14 +526,15 @@ export async function authorFromProcedure(opts: {
 
       // Do it, so the next turn sees the page the next step would meet.
       lastActMoved = p.act === 'activate';
-      if (p.act === 'enter') {
+      if (p.act === 'enter' && made.kind === 'enter') {
         await page.getByRole(element.role as 'textbox', { name: element.name, exact: true })
           .or(page.locator(`[name="${element.binding.name ?? ''}"]`)).first()
-          .fill(inputs[p.value ?? ''] ?? '').catch(() => undefined);
+          .fill(toType(made.value, opts)).catch(() => undefined);
       } else if (p.act === 'activate') {
+        const wasAt = page.url();
         await page.getByRole(element.role as 'button', { name: element.name, exact: true }).first()
           .click().catch(() => undefined);
-        await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+        await settleAfterActivating(page, wasAt);
       }
     }
 
@@ -782,4 +850,5 @@ function makeStep(p: Proposal, element: Seen, procedure: string,
 }
 
 /** Reached by tests only: the rules worth pinning without driving a browser. */
-export const forTest = { valueToEnter };
+export const forTest = {
+  toType, valueToEnter };
