@@ -81,7 +81,7 @@ export async function bringIn(db: PoolClient, body: unknown): Promise<Queued> {
  */
 export async function readSession(id: string) {
   const { rows: [session] } = await pool.query(
-    `SELECT s.id, s.name, s.status, s.workflow_id, s.refused, s.queued_at, s.ended_at,
+    `SELECT s.id, s.name, s.status, s.workflow_id, s.refused, s.queued_at, s.ended_at, s.captured,
             a.name AS application
        FROM authoring_session s JOIN application a ON a.id = s.application_id
       WHERE s.id = $1`, [id]);
@@ -91,7 +91,12 @@ export async function readSession(id: string) {
     `SELECT turn, verdict, why, model, shown FROM model_call
       WHERE workflow_id = $1 ORDER BY turn`, [session.workflow_id]);
 
-  return { session, turns };
+  // While the walk is running there is no draft yet, so no model calls to read
+  // — they are written in the transaction that stores the draft, because a
+  // reading that does not hold together keeps none of itself. What the session
+  // appended as it went is what the screen has to go on until then.
+  const { captured, ...rest } = session as { captured?: unknown[] };
+  return { session: rest, turns: turns.length > 0 ? turns : (captured ?? []) };
 }
 
 /**

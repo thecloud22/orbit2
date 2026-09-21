@@ -80,6 +80,12 @@ async function authorOne(sessionId: string) {
     if (!s) return;
 
     console.log(`  bringing in "${s.name}" against http://${s.host}`);
+    // One write at a time, in the order the turns happened — the same
+    // arrangement the recorder uses, and for the same reason: these fire from
+    // a callback, and two that arrived together could otherwise land either
+    // way round.
+    let appending: Promise<unknown> = Promise.resolve();
+
     const result = await authorAndStore(db, {
       name: s.name,
       procedure: s.procedure,
@@ -88,7 +94,16 @@ async function authorOne(sessionId: string) {
       startPath: s.start_path,
       inputs: s.inputs,
       model: modelFromEnvironment(),
+      onTurn: (t) => {
+        console.log(`  turn ${t.turn} ${t.verdict}: ${t.why}`);
+        appending = appending.then(() => pool.query(
+          `UPDATE authoring_session SET captured = captured || $2::jsonb WHERE id = $1`,
+          [sessionId, JSON.stringify([{ turn: t.turn, verdict: t.verdict, why: t.why }])]));
+      },
     });
+
+    // Every append landed before the session is finished with.
+    await appending;
 
     if (result.stored === false) {
       // Criterion 2: nothing was stored, and the reason is carried back rather

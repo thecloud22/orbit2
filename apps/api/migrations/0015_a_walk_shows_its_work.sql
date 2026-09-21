@@ -1,0 +1,14 @@
+-- What the walk has done so far, while it is still doing it.
+--
+-- The bring-in screen says "Each turn appears as it is recorded", and none of
+-- them did. Model calls are written in the transaction that stores the draft —
+-- which is right, because acceptance criterion 2 says a reading that does not
+-- hold together keeps none of itself, and a turn is part of that reading. So
+-- until the walk was over there was nothing to read, and the screen showed
+-- "Opening the application." for a minute and then jumped to a finished draft.
+--
+-- This is the same arrangement the recorder already has: progress is appended
+-- as it happens and is not the record. If the draft is refused, the turns are
+-- handed back in the refusal and none of this is kept either — it belongs to
+-- the session, which is thrown away with it.
+ALTER TABLE authoring_session ADD COLUMN captured jsonb NOT NULL DEFAULT '[]'::jsonb;

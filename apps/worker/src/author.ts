@@ -345,6 +345,9 @@ export async function authorFromProcedure(opts: {
    *  step a password field produces names the credential (§2). */
   signsInWith?: string | null;
   model: ModelProvider;
+  /** Each turn as it is recorded, so the screen can show the walk happening
+   *  rather than a blank page and a finished draft. */
+  onTurn?: (turn: Turn) => void;
   maxTurns?: number;
 }): Promise<AuthoredDraft> {
   const { procedure, origin, startPath, inputs, model } = opts;
@@ -363,6 +366,9 @@ export async function authorFromProcedure(opts: {
   const guards = new Map<string, Array<{ value: string; is: string; than: string;
     of: { name: string; label: string; type: string } }>>();
   const turns: Turn[] = [];
+  // Every turn goes through here, so what the screen is shown while the walk
+  // runs cannot drift from what is stored when it finishes.
+  const noteTurn = (t: Turn) => { turns.push(t); opts.onTurn?.(t); };
   const questions: Note[] = [];
 
   // How many turns in a row the page has looked the same. A session that keeps
@@ -456,7 +462,7 @@ export async function authorFromProcedure(opts: {
         // Not an error. A call that produced nothing usable is recorded,
         // metered and retried — and it is kept, because a record that drops
         // its own failures is not a record.
-        turns.push(record('discarded', answered.refusedBecause ?? 'no answer'));
+        noteTurn(record('discarded', answered.refusedBecause ?? 'no answer'));
         continue;
       }
 
@@ -477,7 +483,7 @@ export async function authorFromProcedure(opts: {
             + ' reported finished straight afterwards. Check the steps below against everything you wrote:'
             + ' something it asks for may have no step.'));
         }
-        turns.push(record('kept', 'the model said the procedure is finished'));
+        noteTurn(record('kept', 'the model said the procedure is finished'));
         break;
       }
 
@@ -488,7 +494,7 @@ export async function authorFromProcedure(opts: {
         // which reads to an author like a bug in Orbit rather than what it
         // is: the line's format is `kind — name`, and only the name was
         // asked for.
-        turns.push(record('rejected',
+        noteTurn(record('rejected',
           `it gave "${(p.element ?? '').trim() || 'nothing'}" as the element, which is a kind of thing rather than the name of one`));
         continue;
       }
@@ -513,20 +519,20 @@ export async function authorFromProcedure(opts: {
         // The name was on the page, on something this act cannot touch. Said
         // as the mismatch it is rather than as "not on the page", which would
         // send an author looking for a control that is sitting right there.
-        turns.push(record('rejected', mismatchOf(p.act, carrying[0]!)));
+        noteTurn(record('rejected', mismatchOf(p.act, carrying[0]!)));
         continue;
       }
       if (named.length === 0) {
         // It named something it was not shown. Rejected, not retried into
         // existence: the session's record is evidence either way.
-        turns.push(record('rejected', `named "${wanted}", which was not on the page`));
+        noteTurn(record('rejected', `named "${wanted}", which was not on the page`));
         questions.push(asQuestion(`At turn ${turn} the page did not offer what the procedure asked for.`));
         continue;
       }
       if (named.length > 1) {
         // Two things on the page carry that name, so it identifies neither —
         // the same refusal the publish gate makes, made earlier.
-        turns.push(record('rejected', `"${wanted}" is on the page ${named.length} times, so it names neither`));
+        noteTurn(record('rejected', `"${wanted}" is on the page ${named.length} times, so it names neither`));
         continue;
       }
       const element = named[0]!;
@@ -536,7 +542,7 @@ export async function authorFromProcedure(opts: {
       // reaching past what it was offered, and Orbit is the one that knows
       // which is which.
       if (!couldMean(p.act, element)) {
-        turns.push(record('rejected', mismatchOf(p.act, element)));
+        noteTurn(record('rejected', mismatchOf(p.act, element)));
         continue;
       }
 
@@ -546,7 +552,7 @@ export async function authorFromProcedure(opts: {
         const why = element.secret
           ? `"${element.labelledBy ?? element.name}" takes a password and no credential is registered for this application`
           : `${p.act} needs a value and "${p.value ?? ''}" is neither a name nor anything the procedure says`;
-        turns.push(record('rejected', why));
+        noteTurn(record('rejected', why));
         if (element.secret) {
           questions.push(asQuestion(
             `This procedure signs in, and no credential is registered for the application. `
@@ -589,7 +595,7 @@ export async function authorFromProcedure(opts: {
       const readSoFar = new Map(steps.flatMap((x) => (x.kind === 'read' ? [[x.produces.name, x.produces]] : [])));
       const unknown = conditions.filter((c) => !readSoFar.has(c.value));
       if (unknown.length > 0) {
-        turns.push(record('rejected',
+        noteTurn(record('rejected',
           `it conditioned this on ${unknown.map((c) => `"${c.value}"`).join(', ')}, which no earlier step reads`));
         questions.push(asQuestion(`The procedure conditions "${made.summary}" on ${unknown.map((c) => c.value).join(', ')}, and no step reads that. What should be read first?`));
         continue;
@@ -617,7 +623,7 @@ export async function authorFromProcedure(opts: {
 
       steps.push(made);
       if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)! })));
-      turns.push(record('kept', conditions.length > 0
+      noteTurn(record('kept', conditions.length > 0
         ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
         : `step ${steps.length}: ${made.summary}`));
 
@@ -778,7 +784,7 @@ export async function authorFromProcedure(opts: {
       steps.length = 0;
       steps.push(...prefix, ...branches, ...guarded, passEnd, failEnd);
 
-      turns.push(record(refusal ? 'rejected' : 'kept',
+      noteTurn(record(refusal ? 'rejected' : 'kept',
         `${allConditions.length} condition${allConditions.length === 1 ? '' : 's'} guard ${guarded.length} step${guarded.length === 1 ? '' : 's'}: `
         + allConditions.map((c) => `${c.value} ${readable(c.is)} ${c.than}`).join(' and ')));
 
@@ -799,10 +805,10 @@ export async function authorFromProcedure(opts: {
         summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
         outcome: found || 'unnamed', publishes: published });
       if (refusal) {
-        turns.push(record('rejected', refusal));
+        noteTurn(record('rejected', refusal));
         questions.push(asQuestion(`Orbit could not use the second conclusion it was offered, because ${refusal}. Is there more than one way this finishes?`));
       } else {
-        turns.push(record('kept', `one conclusion: ${found}`));
+        noteTurn(record('kept', `one conclusion: ${found}`));
       }
       if (!found) {
         questions.push(asQuestion('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.'));
@@ -824,7 +830,7 @@ export async function authorFromProcedure(opts: {
         when: { of: 'absence', operator: 'isNotAbsent', left: { from: 'step', value: separator.name } },
         ifTrue: foundEnd.id, ifFalse: absentEnd.id,
       }, foundEnd, absentEnd);
-      turns.push(record('kept', `two conclusions, separated by whether ${separator.name} was there: ${found} / ${absent}`));
+      noteTurn(record('kept', `two conclusions, separated by whether ${separator.name} was there: ${found} / ${absent}`));
     }
   }
 

@@ -15,7 +15,7 @@ import type { PoolClient } from 'pg';
 import { step as stepSchema } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
 import { readCredential } from '@orbit/credentials';
-import { authorFromProcedure, type AuthoredDraft } from './author.ts';
+import { authorFromProcedure, type AuthoredDraft, type Turn } from './author.ts';
 
 export interface Stored { stored: true; workflowId: string; draft: AuthoredDraft }
 
@@ -49,6 +49,8 @@ export async function authorAndStore(db: PoolClient, opts: {
   startPath: string;
   inputs: Record<string, string>;
   model: ModelProvider;
+  /** Each turn as it lands, for whoever is watching the screen. */
+  onTurn?: (turn: Turn) => void;
 }): Promise<Stored | NotStored> {
   // The sign-in the registry holds: what the application calls its password,
   // and the account it signs in as. Both so a sign-in step can refer to what
@@ -69,6 +71,7 @@ export async function authorAndStore(db: PoolClient, opts: {
     : null;
 
   return storeDraft(db, opts, await authorFromProcedure({ ...opts,
+    ...(opts.onTurn ? { onTurn: opts.onTurn } : {}),
     credentialName: registered?.credential_name ?? null,
     signsInAs: registered?.sign_in_as ?? null,
     signsInWith }));

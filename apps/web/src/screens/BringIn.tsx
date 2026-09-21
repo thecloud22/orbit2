@@ -33,8 +33,10 @@ interface Application {
 interface Session {
   session: { id: string; name: string; status: string; workflow_id: string | null;
              refused: { describe?: string } | null; application: string };
+  // `shown` arrives with the stored model call. A turn appended while the
+  // walk is still running carries what happened and nothing else.
   turns: Array<{ turn: number; verdict: string; why: string;
-                 shown: { page?: string; elements?: number } }>;
+                 shown?: { page?: string; elements?: number } }>;
 }
 
 /** A URL as a person reads it: the part that says which screen. */
@@ -333,27 +335,61 @@ function Working({ id, go, onAbandon }: { id: string; go: (to: Route) => void; o
       )}
 
       <Section title="What it is doing"
-        note={state ? `${state.turns.length} turn${state.turns.length === 1 ? '' : 's'}` : 'starting'}>
-        {!state || state.turns.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)' }}>
-            {status === 'queued' ? 'Queued.' : 'Opening the application.'}
-          </p>
-        ) : (
-          <div style={{ borderTop: '1px solid var(--ink)' }}>
-            {state.turns.map((t) => (
-              <div key={t.turn} style={{ borderBottom: '1px solid var(--rule)', padding: '12px 0',
-                display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-                <span style={{ width: 18, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right', paddingTop: 2 }}>{t.turn}</span>
-                <span style={{ width: 82, flexShrink: 0, fontSize: 12, fontFamily: 'var(--mono)',
-                  color: t.verdict === 'kept' ? 'var(--ok-ink)' : 'var(--failed-ink)' }}>{t.verdict}</span>
-                <span style={{ flexGrow: 1, fontSize: 13.5 }}>{t.why}</span>
+        note={state && state.turns.length > 0
+          ? `${state.turns.length} turn${state.turns.length === 1 ? '' : 's'}`
+          : 'starting'}>
+        <div style={{ borderTop: state && state.turns.length > 0 ? '1px solid var(--ink)' : 0 }}>
+          {(state?.turns ?? []).map((t) => (
+            <div key={t.turn} style={{ borderBottom: '1px solid var(--rule)', padding: '12px 0',
+              display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              <span style={{ width: 18, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right', paddingTop: 2 }}>{t.turn}</span>
+              <span style={{ width: 82, flexShrink: 0, fontSize: 12, fontFamily: 'var(--mono)',
+                color: t.verdict === 'kept' ? 'var(--ok-ink)' : 'var(--failed-ink)' }}>{t.verdict}</span>
+              <span style={{ flexGrow: 1, fontSize: 13.5 }}>{t.why}</span>
+              {/* A turn appended while the walk runs carries what happened and
+                  nothing else. The count of elements arrives with the stored
+                  model call, once there is a draft to hang it from. */}
+              {t.shown?.elements !== undefined && (
                 <span style={{ fontSize: 11.5, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>
                   {t.shown.elements} elements
                 </span>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+            </div>
+          ))}
+
+          {/* What it is doing *now*. Without this the screen showed the last
+              thing that finished and gave no sign whether anything was still
+              happening — a slow walk and a dead one looked identical. */}
+          {(status === 'queued' || status === 'running') && (
+            <div className="orbit-working" style={{ padding: '13px 0', display: 'flex', gap: 14,
+              alignItems: 'baseline', borderBottom: '1px solid var(--rule)' }}>
+              <span style={{ width: 18 }} />
+              <span style={{ width: 82, flexShrink: 0, fontSize: 12, fontFamily: 'var(--mono)',
+                color: 'var(--running-ink)' }}>working</span>
+              <span style={{ flexGrow: 1, fontSize: 13.5, color: 'var(--ink-2)' }}>
+                {status === 'queued' ? 'Waiting for a worker to pick this up'
+                  : (state?.turns.length ?? 0) === 0 ? 'Opening the application and reading the page'
+                  : 'Working out the next thing to do'}
+                <span style={{ fontFamily: 'var(--mono)' }}>
+                  <span className="orbit-dot">.</span>
+                  <span className="orbit-dot">.</span>
+                  <span className="orbit-dot">.</span>
+                </span>
+              </span>
+            </div>
+          )}
+
+          {status === 'brought in' && (
+            <div style={{ padding: '13px 0', display: 'flex', gap: 14, alignItems: 'baseline' }}>
+              <span style={{ width: 18 }} />
+              <span style={{ width: 82, flexShrink: 0, fontSize: 12, fontFamily: 'var(--mono)',
+                color: 'var(--ok-ink)' }}>done</span>
+              <span style={{ flexGrow: 1, fontSize: 13.5, color: 'var(--ink-2)' }}>
+                The walk is finished. Opening the draft.
+              </span>
+            </div>
+          )}
+        </div>
       </Section>
     </Page>
   );
