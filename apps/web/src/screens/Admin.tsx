@@ -69,8 +69,12 @@ export function AdminScreen() {
                     wordBreak: 'break-all' }}>
                     {a.addresses.map((h) => `${h.host}${h.pathPrefix}`).join(' ')}
                   </span>
-                  <span style={{ width: 130, fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-2)' }}>
-                    {a.sign_in_as ?? '—'}</span>
+                  <span style={{ width: 130, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontSize: 10, color: 'var(--ink-2)', textTransform: 'uppercase',
+                      letterSpacing: '0.02em' }}>Signs in as</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-2)' }}>
+                      {a.sign_in_as ?? '—'}</span>
+                  </span>
                   <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{a.credential_name ?? '—'}</span>
                     <Chip state={a.credential_set ? 'ok' : 'failed'}>
@@ -162,6 +166,7 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
   const [signInAs, setSignInAs] = useState(application?.sign_in_as ?? '');
   const [credentialName, setCredentialName] = useState(application?.credential_name ?? '');
   const [credentialValue, setCredentialValue] = useState('');
+  const [showCredentialValue, setShowCredentialValue] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
 
@@ -254,10 +259,15 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
         <span style={label}>Credential value</span>
-        <input type="password" style={{ ...field, maxWidth: 260 }} value={credentialValue}
-          onChange={(e) => setCredentialValue(e.target.value)} autoComplete="new-password"
+        <input type={showCredentialValue ? 'text' : 'password'} style={{ ...field, maxWidth: 260 }}
+          value={credentialValue} onChange={(e) => setCredentialValue(e.target.value)} autoComplete="new-password"
           aria-label="Credential value"
           placeholder={mode === 'edit' && application?.credential_set ? 'Leave blank to keep the current value' : ''} />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-2)' }}>
+          <input type="checkbox" checked={showCredentialValue}
+            onChange={(e) => setShowCredentialValue(e.target.checked)} />
+          show
+        </label>
       </div>
 
       <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5, maxWidth: 560 }}>
