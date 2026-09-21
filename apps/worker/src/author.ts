@@ -118,7 +118,7 @@ export async function settleAfterActivating(page: Page, wasAt: string): Promise<
  *
  * Decision 12 is untouched: two buttons called "Sign in" remain a refusal.
  */
-export function couldMean(act: 'enter' | 'activate' | 'read' | 'done', s: Pick<Seen, 'what'>): boolean {
+export function couldMean(act: 'enter' | 'activate' | 'read' | 'open' | 'done', s: Pick<Seen, 'what'>): boolean {
   return act === 'enter' ? s.what === 'field'
     : act === 'activate' ? s.what === 'button' || s.what === 'link'
     : act === 'read' ? s.what === 'value' || s.what === 'heading'
@@ -138,7 +138,7 @@ export function mismatchOf(act: string, it: Pick<Seen, 'what' | 'name'>): string
  * because no field accepts one.
  */
 const proposal = z.object({
-  act: z.enum(['enter', 'activate', 'read', 'done']),
+  act: z.enum(['enter', 'activate', 'read', 'open', 'done']),
   /** The element's name, exactly as it appeared in the list it was shown.
    *  A name rather than an index: the model reasons about names, and asking
    *  it to carry a number alongside is an indirection Orbit introduced and
@@ -291,7 +291,7 @@ const CONCLUDE_GUARDED = [
 const shape = {
   type: 'object',
   properties: {
-    act: { type: 'string', enum: ['enter', 'activate', 'read', 'done'] },
+    act: { type: 'string', enum: ['enter', 'activate', 'read', 'open', 'done'] },
     element: { type: ['string', 'null'] },
     value: { type: ['string', 'null'] },
     optional: { type: ['boolean', 'null'] },
@@ -364,6 +364,8 @@ const INSTRUCTION = [
   '            Orbit binds a read to whatever labels the value, not to the value, so that the',
   '            step reads what the page says now rather than checking it still says what it said.',
   '            optional=true if the procedure says this may legitimately not be there.',
+  'act=open    the procedure says to go to a different page — a named screen, a form, a report —',
+  '            and no link to it is on this one. element=the page as the procedure calls it.',
   'act=done    the procedure is finished, or the page does not show what comes next.',
   '',
   'Each line of the page is:   kind — name',
@@ -518,6 +520,32 @@ export async function authorFromProcedure(opts: {
       }
 
       const p = answered.value;
+      // A page this walk cannot go to.
+      //
+      // Orbit opens the page the author starts it at and follows links from
+      // there. It does not go to an address of its own: the registered host is
+      // the containment, and a model that may name a place to go is a model
+      // that decides where the agent acts.
+      //
+      // Without a way to say so, a procedure that names another page — "open
+      // the session-expiry page", "open the decline page for loan X" — was
+      // answered with whatever was on the page Orbit happened to be on. Test
+      // case 16 approved a real loan and reported that the approval had been
+      // refused. Saying it plainly costs a turn and tells the author the one
+      // thing that fixes it: this is what the "Start at" box on the bring-in
+      // screen is for.
+      if (p.act === 'open') {
+        const wants = normaliseName(p.element ?? '') || 'another page';
+        lostTheThread ??= wants;
+        turns.push(record('rejected',
+          `it asked to go to "${wants}", and Orbit follows links rather than going to an address of its own`));
+        questions.push(asQuestion(
+          `This procedure says to open "${wants}", and nothing on the page Orbit reached links to it. Orbit`
+          + ' opens the page you start it at and follows links from there — it does not choose an address.'
+          + ` Start this agent at "${wants}" instead, or say how to reach it from here by clicking.`));
+        continue;
+      }
+
       if (p.act === 'done') {
         finished = true;
         // Finished, or gave up? The difference is whether the last thing it
