@@ -1,6 +1,21 @@
 # Editing a step
 
-What it takes to make a hand-added step configurable. Not done; planned.
+What it takes to make a hand-added step configurable.
+
+**Steps 0 and 1 are done** (`1fcf7f7`): the screen no longer prints `undefined`,
+confirmation no longer declares a step complete without reading it, and `end`,
+`check` and `branch` can be added and finished through the screen. Proved end
+to end — a `check` added to a draft, configured, confirmed, published and run
+against the portal.
+
+**Step 2 — the look session — is not done.** `read`, `enter` and `activate`
+still cannot be added, and the kind picker says so rather than offering them.
+
+One thing found by running it: a `check` step had never executed. `execute.ts`
+wrote a `check.evaluated` event, which is not in the vocabulary the database
+enforces, so the first `check` ever to run failed on a constraint. Nothing in
+authoring produces one, so the line was unreachable until an author could add
+one.
 
 ## Why there is a plan rather than a fix
 
