@@ -82,7 +82,6 @@ and the requirement false, in a history that cannot afterwards be corrected.
 
 | Item | Note |
 |---|---|
-| Criterion 2 — a failed interpretation stores **nothing** | Not proved. A partial parse must leave no trace, not the parts that happened to validate. |
 | Criterion 12 — each §13 authoring row behaves as its table states | Not walked row by row. |
 | Retry as a *step-level* policy | §9 lets a designer configure attempts, delay and which kinds are worth retrying per step. Slice 1 has the operator-initiated retry only, and one contract-wide set of retryable kinds. |
 | Waiting on a person | `waitingForAPerson` is a status the schema allows and nothing produces. `handOff` halts instead. |
@@ -121,4 +120,5 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | 2026-09-20 | A step no path can reach is now a blocker. An ending dragged to the front stranded everything behind it and nothing objected, because an unreachable step is on no path that could run out. |
 | 2026-09-20 | §10's run controls built. Cancellation proved cooperative against a live run: asked to stop part-way, it stopped before step 3 with two steps and their evidence complete. |
 | 2026-09-20 | Two evidence faults found by looking at the screen. The store was cwd-relative, so the worker wrote where the API did not read; and the run page reported *every* image failure as an integrity failure, telling an operator that absent evidence had been altered. A false provenance alarm teaches people to discount the real one. |
+| 2026-09-20 | Criterion 2 closed. An interpretation is validated as a whole before anything is written, and a refusal names every bad step. Storing a draft was split from producing one, because a rule that can only be exercised by whatever a model said that day is a rule nobody can rely on. |
 | 2026-09-20 | Decision 13 recorded (a judged step). Amendments: Decision 5 takes a set of applications; Decision 4 adds the authoring reasoning record and rules out video; Decision 8 fixes `us-east-1`, United States only; Decision 10 makes tokens swappable at run time; Decision 11 records the recording route and its three cautions. |

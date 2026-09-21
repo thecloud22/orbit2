@@ -12,10 +12,33 @@
  * reasoning is not half a result; it is a result nobody can check.
  */
 import type { PoolClient } from 'pg';
+import { step as stepSchema } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
 import { authorFromProcedure, type AuthoredDraft } from './author.ts';
 
-export interface Stored { workflowId: string; draft: AuthoredDraft }
+export interface Stored { stored: true; workflowId: string; draft: AuthoredDraft }
+
+/**
+ * What an interpretation that did not survive validation leaves behind.
+ *
+ * Acceptance criterion 2: "An interpretation that fails validation stores
+ * **nothing** — not the valid parts — and says so." The emphasis is the whole
+ * requirement. Keeping the steps that happened to validate would hand someone
+ * a procedure with a hole in the middle and no marker where the hole is, which
+ * is worse than handing them nothing: they would be reviewing a workflow that
+ * never existed as a reading of their text.
+ */
+export interface NotStored {
+  stored: false;
+  /** Which step of the interpretation, and what was wrong with it. */
+  problems: Array<{ step: number; kind: string; wrong: string[] }>;
+  /** The turns, returned rather than recorded — there is no workflow row for
+   *  them to hang from, and inventing one to hold them would be storing part
+   *  of a result that was refused. Said out loud because §12 does want failed
+   *  calls kept, and slice 1 cannot keep these. */
+  turns: AuthoredDraft['turns'];
+  describe: string;
+}
 
 export async function authorAndStore(db: PoolClient, opts: {
   name: string;
@@ -25,8 +48,41 @@ export async function authorAndStore(db: PoolClient, opts: {
   startPath: string;
   inputs: Record<string, string>;
   model: ModelProvider;
-}): Promise<Stored> {
-  const draft = await authorFromProcedure(opts);
+}): Promise<Stored | NotStored> {
+  return storeDraft(db, opts, await authorFromProcedure(opts));
+}
+
+/**
+ * Stores an interpretation, or refuses the whole of it.
+ *
+ * Kept apart from producing one so that the rule about what may be stored can
+ * be tested against a draft the test chose, rather than against whatever a
+ * model happened to say that day. The two were welded together, and a rule
+ * nobody can exercise is a rule nobody can rely on.
+ */
+export async function storeDraft(
+  db: PoolClient,
+  opts: { name: string; procedure: string },
+  draft: AuthoredDraft,
+): Promise<Stored | NotStored> {
+  // Validated before anything is written, and as a whole. Validating inside
+  // the transaction would work too, but it would mean the check that decides
+  // whether to store lives next to the storing — and the requirement is about
+  // the interpretation, not about the database.
+  const problems = draft.steps.flatMap((step, i) => {
+    const checked = stepSchema.safeParse(step);
+    return checked.success ? [] : [{
+      step: i + 1,
+      kind: step.kind,
+      wrong: [...new Set(checked.error.issues.map((issue) =>
+        `${issue.path.join('.') || 'the step'}: ${issue.message}`))],
+    }];
+  });
+  if (problems.length > 0) {
+    return { stored: false, problems, turns: draft.turns,
+      describe: `This reading of the procedure did not hold together, so none of it was kept. `
+        + problems.map((p) => `Step ${p.step} (${p.kind}) — ${p.wrong.join('; ')}`).join('. ') };
+  }
 
   await db.query('BEGIN');
   try {
@@ -79,7 +135,7 @@ export async function authorAndStore(db: PoolClient, opts: {
       })]);
 
     await db.query('COMMIT');
-    return { workflowId, draft };
+    return { stored: true, workflowId, draft };
   } catch (error) {
     await db.query('ROLLBACK');
     throw error;
