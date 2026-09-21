@@ -5,6 +5,7 @@ import { PORTAL_ENVIRONMENT, PORTAL_NAME, PORTAL_SUBTITLE } from '../app/app-inf
 const NAV = [
   { href: '/pipeline', label: 'Pipeline' },
   { href: '/underwriting', label: 'Underwriting' },
+  { href: '/features', label: 'Features' },
 ] as const;
 
 /** Header, environment banner, and footer — the chrome every page sits inside. */

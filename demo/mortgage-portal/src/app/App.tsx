@@ -2,6 +2,7 @@ import { AmbiguousDecisionPage } from '../pages/AmbiguousDecisionPage';
 import { ApplicationIntakePage } from '../pages/ApplicationIntakePage';
 import { AusPage } from '../pages/AusPage';
 import { DocumentsPage } from '../pages/DocumentsPage';
+import { FeaturesPage } from '../pages/FeaturesPage';
 import { FlakyDecisionPage } from '../pages/FlakyDecisionPage';
 import { LoanPage } from '../pages/LoanPage';
 import { LoginPage } from '../pages/LoginPage';
@@ -76,6 +77,10 @@ export function App() {
 
   if (path === '/applications/new') {
     return <ApplicationIntakePage />;
+  }
+
+  if (path === '/features') {
+    return <FeaturesPage />;
   }
 
   return (

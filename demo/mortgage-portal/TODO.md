@@ -6,6 +6,10 @@ own route, separate from the pipeline/underwriting/login pages a recorded
 workflow actually runs against, so the core app's behavior never changes
 underneath an existing recording.
 
+`/features` is a directory of everything below -- every fixture and every new
+workflow page, linked with a sample loan number filled in -- also reachable
+from the "Features" tab in the header on every page.
+
 ## Building now
 
 - [x] **Session expiry mid-run** — `/underwriting/session-expiry?loan=`.
