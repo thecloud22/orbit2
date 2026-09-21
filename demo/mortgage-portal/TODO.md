@@ -69,12 +69,13 @@ with stubbed data throughout.
       Five required stipulations plus one conditional one, each advancing
       needed → received → reviewed → cleared one step per click. Approve is
       disabled until every *required* item (not every item) is cleared.
-- [x] **Automated underwriting run (AUS simulation)** — `/underwriting/aus?loan=`.
-      "Run AUS" reads the file's LTV, DTI, credit score, program, and flood
-      zone against fixed thresholds and returns Approve/Eligible, Refer, or
-      Ineligible with a findings list. Deterministic and re-runnable, unlike
-      the flaky-decision fixture — a real AUS gives the same file the same
-      answer every time.
+- [x] **Automated underwriting run** — `/underwriting/automated-underwriting?loan=`.
+      "Run automated underwriting" reads the file's LTV, DTI, credit score,
+      program, and flood zone against fixed thresholds and returns
+      Approve/Eligible, Refer, or Ineligible with a findings list.
+      Deterministic and re-runnable, unlike the flaky-decision fixture — a
+      real automated underwriting run gives the same file the same answer
+      every time.
 - [x] **Rate lock / pricing** — `/underwriting/pricing?loan=&lockSeconds=`.
       A rate sheet filtered to the file's program, real amortization-based
       monthly P&I per option, a lock that counts down and expires (same
@@ -100,9 +101,9 @@ with stubbed data throughout.
 **Rules to layer onto existing data**
 
 - [x] Program-specific credit floor, surfaced as pass/fail chips on the
-      application review step and as findings on the AUS run, rather than
-      left implicit in the branch-matrix test. (VA no-PMI and jumbo minimum
-      reserves are not yet separately modeled.)
+      application review step and as findings on the automated underwriting
+      run, rather than left implicit in the branch-matrix test. (VA no-PMI
+      and jumbo minimum reserves are not yet separately modeled.)
 - [ ] PMI requirement/removal logic tied to LTV crossing 80%, shown as a
       computed flag rather than a manual condition button.
 - [ ] Ability-to-repay / DTI hard-stop above a threshold (blocks approval

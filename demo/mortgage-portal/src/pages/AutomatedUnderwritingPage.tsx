@@ -33,11 +33,12 @@ interface Finding {
 }
 
 /**
- * What an AUS run actually is: a fixed set of thresholds read off figures the
- * screen already shows, producing the same recommendation every time for the
- * same file. Deliberately not flaky and not random -- a real DU/LP run is
- * reproducible, and a workflow that re-runs it on the same file mid-recording
- * has to see the same answer, unlike `/underwriting/flaky`'s decision button.
+ * What an automated underwriting run actually is: a fixed set of thresholds
+ * read off figures the screen already shows, producing the same
+ * recommendation every time for the same file. Deliberately not flaky and
+ * not random -- a real DU/LP run is reproducible, and a workflow that
+ * re-runs it on the same file mid-recording has to see the same answer,
+ * unlike `/underwriting/flaky`'s decision button.
  */
 function evaluate(loan: Loan): { recommendation: Recommendation; findings: Finding[] } {
   const ltv = loanToValue(loan);
@@ -112,7 +113,7 @@ function evaluate(loan: Loan): { recommendation: Recommendation; findings: Findi
   return { recommendation, findings };
 }
 
-export function AusPage() {
+export function AutomatedUnderwritingPage() {
   const params = new URLSearchParams(window.location.search);
   const loan = findLoan(params.get('loan') ?? '');
 
@@ -159,20 +160,20 @@ export function AusPage() {
           {loan.borrowerName}
         </p>
 
-        <FileNav current="aus" loanNumber={loan.loanNumber} />
+        <FileNav current="automated-underwriting" loanNumber={loan.loanNumber} />
 
         <button
           className="mt-5 rounded bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-          data-testid="run-aus-button"
+          data-testid="run-automated-underwriting-button"
           disabled={running}
           onClick={run}
           type="button"
         >
-          Run AUS
+          Run automated underwriting
         </button>
 
         {running && (
-          <p className="mt-4 text-sm text-slate-500" data-testid="aus-processing">
+          <p className="mt-4 text-sm text-slate-500" data-testid="automated-underwriting-processing">
             Submitting to automated underwriting…
           </p>
         )}
@@ -181,10 +182,10 @@ export function AusPage() {
           <div className="mt-5">
             <div
               className={`rounded-lg border px-4 py-3 ${RECOMMENDATION_TONES[result.recommendation]}`}
-              data-testid="aus-recommendation"
+              data-testid="automated-underwriting-recommendation"
             >
               <div className="text-xs font-semibold tracking-wide uppercase opacity-70">
-                AUS recommendation
+                Automated underwriting recommendation
               </div>
               <div className="mt-0.5 text-lg font-semibold">
                 {RECOMMENDATION_LABELS[result.recommendation]}
@@ -192,11 +193,11 @@ export function AusPage() {
             </div>
 
             {result.findings.length === 0 ? (
-              <p className="mt-3 text-sm text-slate-500" data-testid="aus-findings-empty">
+              <p className="mt-3 text-sm text-slate-500" data-testid="automated-underwriting-findings-empty">
                 No findings. The file clears every automated threshold.
               </p>
             ) : (
-              <ul className="mt-3 space-y-2" data-testid="aus-findings">
+              <ul className="mt-3 space-y-2" data-testid="automated-underwriting-findings">
                 {result.findings.map((finding) => (
                   <li
                     className={`rounded border px-3 py-2 text-sm ${
@@ -204,7 +205,7 @@ export function AusPage() {
                         ? 'border-rose-200 bg-rose-50 text-rose-900'
                         : 'border-amber-200 bg-amber-50 text-amber-900'
                     }`}
-                    data-testid={`aus-finding-${finding.id}`}
+                    data-testid={`automated-underwriting-finding-${finding.id}`}
                     key={finding.id}
                   >
                     {finding.text}

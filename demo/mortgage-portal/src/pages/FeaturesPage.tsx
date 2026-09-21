@@ -110,11 +110,11 @@ const GROUPS: readonly FeatureGroup[] = [
         href: `/underwriting/documents?loan=${SAMPLE_LOAN}`,
       },
       {
-        id: 'aus',
+        id: 'automated-underwriting',
         label: 'Automated underwriting run',
         description:
           'A deterministic Approve/Refer/Ineligible verdict, with findings, read off the file’s own figures.',
-        href: `/underwriting/aus?loan=${SAMPLE_LOAN}`,
+        href: `/underwriting/automated-underwriting?loan=${SAMPLE_LOAN}`,
       },
       {
         id: 'pricing',

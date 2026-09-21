@@ -418,7 +418,8 @@ export function getSubmittedLoans(): readonly Loan[] {
  * Dated today and left unassigned -- exactly the state a freshly submitted
  * application is in before anyone has picked it up. Stored for the current
  * browser session only: the point of this fixture is that the form and
- * everything downstream of it (underwriting review, documents, AUS, pricing)
+ * everything downstream of it (underwriting review, documents, automated
+ * underwriting, pricing)
  * works end to end, not that it survives a server restart.
  */
 export function submitApplication(input: LoanApplicationInput): Loan {

@@ -1,6 +1,6 @@
 import { AmbiguousDecisionPage } from '../pages/AmbiguousDecisionPage';
 import { ApplicationIntakePage } from '../pages/ApplicationIntakePage';
-import { AusPage } from '../pages/AusPage';
+import { AutomatedUnderwritingPage } from '../pages/AutomatedUnderwritingPage';
 import { DocumentsPage } from '../pages/DocumentsPage';
 import { FeaturesPage } from '../pages/FeaturesPage';
 import { FlakyDecisionPage } from '../pages/FlakyDecisionPage';
@@ -67,8 +67,8 @@ export function App() {
     return <DocumentsPage />;
   }
 
-  if (path === '/underwriting/aus') {
-    return <AusPage />;
+  if (path === '/underwriting/automated-underwriting') {
+    return <AutomatedUnderwritingPage />;
   }
 
   if (path === '/underwriting/pricing') {
