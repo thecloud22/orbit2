@@ -317,6 +317,10 @@ const INSTRUCTION = [
   'Never give a web address.',
   '',
   'Rules that matter:',
+  '- Where the procedure says to sign in — with any user ID, with your credentials, as yourself —',
+  '  use the account named under SIGNS IN AS below, exactly as written. That is the account this',
+  '  agent is registered to act as, and a sign-in as anyone else is not the procedure.',
+  '  For the password field, give any value: the registered password is filled in and never stored.',
   '- Every declared input must be entered into a field before anything is searched for.',
   '- Never repeat a step you have already taken. If the page has not changed and you have',
   '  already acted on it, the next act is done.',
@@ -403,7 +407,18 @@ export async function authorFromProcedure(opts: {
         {
           purpose: 'propose the next step',
           instruction: INSTRUCTION,
-          shown: [`PROCEDURE:\n${procedure}`, '', `DECLARED INPUTS: ${Object.keys(inputs).join(', ')}`,
+          shown: [`PROCEDURE:\n${procedure}`, '',
+                  `DECLARED INPUTS: ${Object.keys(inputs).join(', ') || 'none'}`,
+                  // The registry's answer to "who is this agent". Withholding
+                  // it meant a procedure that says "sign in with any user ID"
+                  // had no user ID to give: the walk typed an empty string
+                  // into a required field, the form refused, and every
+                  // remaining turn mapped the procedure against the login
+                  // page. Orbit does not guess which field is the account —
+                  // it supplies a registered fact and the model maps it, and
+                  // an entry matching this becomes a reference to the
+                  // registered account rather than a declared input.
+                  `SIGNS IN AS: ${opts.signsInAs || 'nothing registered — do not invent an account'}`,
                   '', `PAGE (${page.url()}):`, asText(seen), '', asking].join('\n'),
         },
         proposal, shape,
