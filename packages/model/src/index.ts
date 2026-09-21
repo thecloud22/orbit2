@@ -73,20 +73,6 @@ const PRICE: Record<string, { in: number; out: number }> = {
   'gpt-4.1-mini': { in: 0.4, out: 1.6 },
   'gpt-4.1': { in: 2, out: 8 },
 
-  // Anthropic through Bedrock, by model id with the version suffix dropped.
-  'anthropic.claude-opus-4-1-20250805-v1': { in: 15, out: 75 },
-  'anthropic.claude-opus-4-20250514-v1': { in: 15, out: 75 },
-  'anthropic.claude-sonnet-4-5-20250929-v1': { in: 3, out: 15 },
-  'anthropic.claude-sonnet-4-20250514-v1': { in: 3, out: 15 },
-  'anthropic.claude-haiku-4-5-20251001-v1': { in: 1, out: 5 },
-  'anthropic.claude-3-7-sonnet-20250219-v1': { in: 3, out: 15 },
-  'anthropic.claude-3-5-sonnet-20241022-v2': { in: 3, out: 15 },
-  'anthropic.claude-3-5-sonnet-20240620-v1': { in: 3, out: 15 },
-  'anthropic.claude-3-5-haiku-20241022-v1': { in: 0.8, out: 4 },
-  'anthropic.claude-3-opus-20240229-v1': { in: 15, out: 75 },
-  'anthropic.claude-3-sonnet-20240229-v1': { in: 3, out: 15 },
-  'anthropic.claude-3-haiku-20240307-v1': { in: 0.25, out: 1.25 },
-
   // Amazon's own, through the same surface.
   'amazon.nova-premier-v1': { in: 2.5, out: 12.5 },
   'amazon.nova-pro-v1': { in: 0.8, out: 3.2 },
@@ -96,6 +82,56 @@ const PRICE: Record<string, { in: number; out: number }> = {
 
 /** Region prefixes a cross-region inference profile puts in front of an id. */
 const ROUTED = /^(?:us|eu|apac|jp|au|ca|global|us-gov)\./;
+
+/**
+ * Claude's own rates, per million tokens, by model family.
+ *
+ * Keyed by the family and not by a Bedrock model id, because the rate belongs
+ * to the model rather than to the way it was reached: the same Claude costs
+ * the same through Bedrock as it does directly, so pricing it twice would be
+ * two places to be wrong. It also means an id shape nobody anticipated still
+ * finds its rate — the account this was built against offers
+ * `us.anthropic.claude-sonnet-4-5-20250929-v1:0` and `us.anthropic.claude-
+ * sonnet-5` side by side, and an exact-match table would price the first and
+ * silently lose the second.
+ *
+ * Two of these were confirmed on 2026-09-21 against the rate card AWS returns
+ * from ListFoundationModelAgreementOffers, rather than from memory: Sonnet 4.5
+ * is 3/15 and Haiku 4.5 is 1/5. The rest follow Anthropic's published tiers.
+ *
+ * Not covered: the long-context premium. Above a 200k-token request the rate
+ * roughly doubles — 6/22.5 for Sonnet 4.5 — so a figure here would understate.
+ * Authoring sends around 20k, so it does not arise; if a prompt ever grows
+ * that far, this is the comment that says what it stopped being true.
+ */
+const CLAUDE: Record<string, { in: number; out: number }> = {
+  'claude-opus-4-1': { in: 15, out: 75 },
+  'claude-opus-4': { in: 15, out: 75 },
+  'claude-3-opus': { in: 15, out: 75 },
+  'claude-sonnet-4-5': { in: 3, out: 15 },
+  'claude-sonnet-4': { in: 3, out: 15 },
+  'claude-3-7-sonnet': { in: 3, out: 15 },
+  'claude-3-5-sonnet': { in: 3, out: 15 },
+  'claude-3-sonnet': { in: 3, out: 15 },
+  'claude-haiku-4-5': { in: 1, out: 5 },
+  'claude-3-5-haiku': { in: 0.8, out: 4 },
+  'claude-3-haiku': { in: 0.25, out: 1.25 },
+};
+
+/**
+ * The Claude family an id names, or null if it does not name one.
+ *
+ * Strips the three things a rate does not depend on: where the request is
+ * routed, when the model was trained, and which revision of it this is.
+ * `us.anthropic.claude-sonnet-4-5-20250929-v1:0` and the plain
+ * `claude-sonnet-4-5` an Anthropic key would use are the same model at the
+ * same price, and both arrive here as `claude-sonnet-4-5`.
+ */
+function claudeFamily(model: string): string | null {
+  const bare = model.replace(ROUTED, '').replace(/^anthropic\./, '');
+  if (!bare.startsWith('claude-')) return null;
+  return bare.replace(/:\d+$/, '').replace(/-v\d+$/, '').replace(/-\d{8}$/, '');
+}
 
 /**
  * What a million tokens of this model costs, or nothing if no rate is held.
@@ -109,6 +145,8 @@ const ROUTED = /^(?:us|eu|apac|jp|au|ca|global|us-gov)\./;
  * model whose price is sitting in it.
  */
 export function priceFor(model: string): { in: number; out: number } | undefined {
+  const family = claudeFamily(model);
+  if (family) return CLAUDE[family];
   return PRICE[model] ?? PRICE[model.replace(ROUTED, '').replace(/:\d+$/, '')];
 }
 

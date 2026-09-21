@@ -74,6 +74,21 @@ test('an inference profile is priced as the model it routes to', () => {
   assert.deepEqual(priceFor('us.amazon.nova-lite-v1:0'), { in: 0.06, out: 0.24 });
 });
 
+test('a Claude costs the same however it was reached', () => {
+  // The rate belongs to the model, not to the road to it. Bedrock's id, the
+  // profile-routed id and the plain name an Anthropic key would use are one
+  // model at one price, and pricing them separately is two places to be wrong.
+  const sonnet = { in: 3, out: 15 };
+  assert.deepEqual(priceFor('claude-sonnet-4-5'), sonnet);
+  assert.deepEqual(priceFor('claude-sonnet-4-5-20250929'), sonnet);
+  assert.deepEqual(priceFor('anthropic.claude-sonnet-4-5-20250929-v1:0'), sonnet);
+  assert.deepEqual(priceFor('us.anthropic.claude-sonnet-4-5-20250929-v1:0'), sonnet);
+
+  // An id carrying no date and no revision at all, which this account offers
+  // beside the dated ones. An exact-match table lost these silently.
+  assert.deepEqual(priceFor('us.anthropic.claude-opus-4-1'), { in: 15, out: 75 });
+});
+
 test('a model held under no rate at all is still unknown, not free', () => {
   assert.equal(priceFor('meta.llama3-70b-instruct-v1:0'), undefined);
   assert.equal(priceFor('mistral.mistral-large-2407-v1:0'), undefined);
