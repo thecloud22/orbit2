@@ -46,8 +46,15 @@ acceptance criterion 7. Not one binding reads a `data-testid`.
 | 15 | The locator | Seven rungs ordered by how often each is **wrong**, measured against `demo/legacy-portal` |
 
 Amended since: evidence on disk now and S3 later with **redaction deferred** — safe only because
-capture starts after sign-in; a registered credential held **encrypted in the store**, written out
-of band, decrypted only in the worker; provider and model chosen in an **environment file**.
+capture starts after sign-in; a registered credential held **encrypted in the store**; provider and
+model chosen in an **environment file**.
+
+**Diverges from the spec, on the record, as of 2026-09-20:** a registered credential's value can
+now be set through the Admin screen (encrypted before it is written), not only out of band. See
+[`docs/decisions.md`](decisions.md#amendment-to-decision-5-item-5-a-value-may-be-set-through-the-product)
+— this is the one place slice 1 moves away from
+[`docs/orbit-2.0-functional-specification.md`](orbit-2.0-functional-specification.md) §8 rather
+than toward it, and it is recorded there in full rather than left for a reader to notice.
 
 ## What slice 1 will knowingly not satisfy
 
@@ -132,3 +139,4 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | 2026-09-20 | Confirmation made real. A question was closed by citing its id, so nothing recorded what was decided — which is how a version was published with its conclusion named "unnamed". An answer is now something somebody wrote, and the screen asks for it, for the conclusion's name, and for the example values the activation test will run with, all of which it had been inventing. |
 | 2026-09-20 | A version declaring no conclusion could be activated, because the gate is "every declared ending proved" and an empty list passes. An empty gate is not a passed gate. |
 | 2026-09-20 | Decision 13 recorded (a judged step). Amendments: Decision 5 takes a set of applications; Decision 4 adds the authoring reasoning record and rules out video; Decision 8 fixes `us-east-1`, United States only; Decision 10 makes tokens swappable at run time; Decision 11 records the recording route and its three cautions. |
+| 2026-09-20 | The Admin screen can register an application and edit one already registered, minting a revision only when a connection detail actually changed. Asked for explicitly: a credential's value can now be set alongside it, encrypted before it is written. Decision 5 item 5 is amended for this, on the record — it moves slice 1 away from functional-spec §8 rather than toward it, the one place that is true. |

@@ -11,7 +11,12 @@ import { strict as assert } from 'node:assert';
 import { after, before, beforeEach, test } from 'node:test';
 import { Client } from 'pg';
 import { editApplication, registerApplication } from './applications.ts';
+import { decrypt, setCredential } from './credentials.ts';
 import { migrate } from './migrate.ts';
+
+// Not read from .env — the test runner does not load it, and a value this
+// throwaway has no business anywhere real.
+process.env['ORBIT_CREDENTIAL_KEY'] ??= 'applications-test-key-not-for-anything-real';
 
 const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.env['USER']}@localhost/orbit2_test`;
 let db: Client;
@@ -128,4 +133,57 @@ test('surface is not something an edit can carry — it is fixed at registration
   // The edit schema has no `surface` field at all, so one arriving anyway is
   // an unknown key at the boundary, refused like any other.
   assert.equal(result.ok, false);
+});
+
+// ── the credential's value ──────────────────────────────────────────────
+// Amends Decision 5 item 5 (migration 0014): a value may now be filed
+// through this path rather than only out of band. What is worth proving is
+// that it is never stored as it arrived, and that filing one is decoupled
+// from the revision — rotation refers to nothing the registry holds.
+
+test('a value offered alongside registration is encrypted, not stored as it arrived', async () => {
+  const credentialName = `CRED_${crypto.randomUUID().slice(0, 6)}`;
+  const result = await registerApplication(db as never, asked({
+    name: `App ${crypto.randomUUID().slice(0, 6)}`, credentialName, credentialValue: 'hunter2',
+  }));
+  assert.equal(result.ok, true);
+
+  const { rows } = await db.query<{ secret_enc: Buffer }>(
+    `SELECT secret_enc FROM credential WHERE name = $1`, [credentialName]);
+  assert.equal(rows.length, 1);
+  assert.notEqual(rows[0]!.secret_enc.toString('latin1'), 'hunter2');
+  assert.equal(decrypt(rows[0]!.secret_enc), 'hunter2');
+});
+
+test('a value with no name to file it under is refused', async () => {
+  const result = await registerApplication(db as never,
+    asked({ credentialName: undefined, credentialValue: 'hunter2' }));
+  assert.equal(result.ok, false);
+  assert.match(result.ok === false ? result.because : '', /needs a credential name/);
+});
+
+test('setting a value on an edit does not mint a revision — nothing in the registry refers to it', async () => {
+  const result = await editApplication(db as never, applicationId, edited({ credentialValue: 'a new value' }));
+  assert.equal(result.ok, true);
+  assert.equal(result.ok === true ? result.revision : -1, 1);
+
+  const { rows } = await db.query<{ secret_enc: Buffer }>(
+    `SELECT secret_enc FROM credential WHERE name = 'UNDERWRITING_PW'`);
+  assert.equal(decrypt(rows[0]!.secret_enc), 'a new value');
+});
+
+test('setting a value is recorded on the audit trail without the value itself', async () => {
+  await editApplication(db as never, applicationId, edited({ credentialValue: 'audited value' }));
+  const { rows } = await db.query<{ reason: string; changed: unknown }>(
+    `SELECT reason, changed FROM audit_entry WHERE object_kind = 'application' AND act = 'application edited'
+      ORDER BY id DESC LIMIT 1`);
+  assert.match(rows[0]!.reason, /credential value/);
+  assert.doesNotMatch(JSON.stringify(rows[0]!.changed), /audited value/);
+});
+
+test('a value round-trips through encryption', async () => {
+  await setCredential(db as never, `ROUND_TRIP_${crypto.randomUUID().slice(0, 6)}`, 'correct horse battery staple');
+  const { rows } = await db.query<{ name: string; secret_enc: Buffer }>(
+    `SELECT name, secret_enc FROM credential ORDER BY rotated_at DESC LIMIT 1`);
+  assert.equal(decrypt(rows[0]!.secret_enc), 'correct horse battery staple');
 });

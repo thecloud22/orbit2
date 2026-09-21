@@ -4,10 +4,9 @@ import { Chip, EmptyState, Row } from '../ui.tsx';
 import { send, useFetch } from '../fetching.ts';
 
 interface Application {
-  id: string; name: string; surface: string; owner_note: string | null; revision: number;
+  id: string; name: string; surface: string; revision: number;
   addresses: Array<{ host: string; pathPrefix: string }>; sign_in_as: string | null;
   credential_name: string | null; credential_set: boolean; retired_at: string | null;
-  formats: { date?: string; thousands?: string; decimal?: string };
 }
 
 interface Admin {
@@ -126,12 +125,13 @@ export function AdminScreen() {
 
       <div style={{ marginTop: 26, background: 'var(--nav)', borderRadius: 6, padding: '24px 28px' }}>
         <h2 style={{ margin: '0 0 9px', fontSize: 19, fontWeight: 700, letterSpacing: '-0.012em',
-          color: 'var(--page)' }}>There is no password field on this page</h2>
+          color: 'var(--page)' }}>Nothing ever reads a credential's value back</h2>
         <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, color: '#9C9C96', maxWidth: 640 }}>
           Registering an application records a contract: where the system is, who signs in, and{' '}
           <em style={{ color: 'var(--primary)', fontStyle: 'normal', fontWeight: 600 }}>what the credential
-          is called</em>. The value is supplied to the deployment separately. Orbit tells you whether a named
-          credential is set; it never tells anyone what it is.
+          is called</em>. A value typed in beside it is encrypted before it is written and filed under that
+          name, separately from the application. No screen, response or export ever includes it again — Orbit
+          tells you whether a named credential is set; it never tells anyone what it is.
         </p>
       </div>
     </Page>
@@ -157,14 +157,11 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
   const [name, setName] = useState(application?.name ?? '');
   const [surface, setSurface] = useState<'browser' | 'terminal'>(
     (application?.surface as 'browser' | 'terminal') ?? 'browser');
-  const [ownerNote, setOwnerNote] = useState(application?.owner_note ?? '');
   const [addresses, setAddresses] = useState(
     application?.addresses.length ? application.addresses.map((a) => ({ ...a })) : [{ host: '', pathPrefix: '/' }]);
   const [signInAs, setSignInAs] = useState(application?.sign_in_as ?? '');
   const [credentialName, setCredentialName] = useState(application?.credential_name ?? '');
-  const [dateFormat, setDateFormat] = useState(application?.formats.date ?? '');
-  const [thousands, setThousands] = useState(application?.formats.thousands ?? '');
-  const [decimal, setDecimal] = useState(application?.formats.decimal ?? '');
+  const [credentialValue, setCredentialValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
 
@@ -173,18 +170,13 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
 
   async function submit() {
     setBusy(true); setRefused(null);
-    const formats: Record<string, string> = {};
-    if (dateFormat.trim()) formats['date'] = dateFormat.trim();
-    if (thousands.trim()) formats['thousands'] = thousands.trim();
-    if (decimal.trim()) formats['decimal'] = decimal.trim();
     const body = {
       name: name.trim(),
       ...(mode === 'register' ? { surface } : {}),
-      ...(ownerNote.trim() ? { ownerNote: ownerNote.trim() } : {}),
       addresses: usableAddresses.map((a) => ({ host: a.host.trim(), pathPrefix: a.pathPrefix.trim() || '/' })),
       ...(signInAs.trim() ? { signInAs: signInAs.trim() } : {}),
       ...(credentialName.trim() ? { credentialName: credentialName.trim() } : {}),
-      ...(Object.keys(formats).length ? { formats } : {}),
+      ...(credentialValue ? { credentialValue } : {}),
     };
     const result = mode === 'register'
       ? await send('/api/applications', body)
@@ -224,12 +216,6 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-        <span style={label}>Owner note</span>
-        <input style={field} value={ownerNote} onChange={(e) => setOwnerNote(e.target.value)}
-          aria-label="Owner note" placeholder="Optional — who to ask about this system" />
-      </div>
-
       <div style={{ display: 'flex', gap: 11 }}>
         <span style={{ ...label, paddingTop: 8 }}>Addresses</span>
         <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
@@ -266,20 +252,18 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
         <input style={{ ...field, maxWidth: 260 }} value={credentialName} onChange={(e) => setCredentialName(e.target.value)}
           aria-label="Credential name" placeholder="PORTAL_PASSWORD" />
       </div>
-
-      <div style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
-        <span style={label}>How it writes numbers</span>
-        <input style={{ ...field, maxWidth: 130 }} value={dateFormat} onChange={(e) => setDateFormat(e.target.value)}
-          aria-label="Date format" placeholder="date, e.g. MMM d, yyyy" />
-        <input style={{ ...field, maxWidth: 70 }} value={thousands} onChange={(e) => setThousands(e.target.value)}
-          aria-label="Thousands separator" placeholder="," />
-        <input style={{ ...field, maxWidth: 70 }} value={decimal} onChange={(e) => setDecimal(e.target.value)}
-          aria-label="Decimal separator" placeholder="." />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+        <span style={label}>Credential value</span>
+        <input type="password" style={{ ...field, maxWidth: 260 }} value={credentialValue}
+          onChange={(e) => setCredentialValue(e.target.value)} autoComplete="new-password"
+          aria-label="Credential value"
+          placeholder={mode === 'edit' && application?.credential_set ? 'Leave blank to keep the current value' : ''} />
       </div>
 
       <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5, maxWidth: 560 }}>
-        There is no field for the credential's value here. Orbit records what it is called; the deployment
-        holds what it is.
+        Encrypted the moment you save, and filed under the name above rather than against this application —
+        the same name can be shared by several. Nothing ever reads it back; this page can only tell you
+        whether a name has a value set, never what it is.
       </p>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 4 }}>

@@ -1,0 +1,12 @@
+-- Amends Decision 5 item 5. The original design held a credential's value out
+-- of band — a command-line tool, never a form — because a form means the
+-- value crosses the API as a request body. That is still the more cautious
+-- shape; it is changed here because nothing yet exists to automate a sign-in
+-- without a way to set the value, and the product needs one now.
+--
+-- What does not move: the value is still never returned by any read (§8), a
+-- run-time secret supplied by an operator is still never stored (§2), and the
+-- value is encrypted before it is written — orbit_app can set it but the
+-- column it lands in is still not selected by anything that serialises a
+-- response (see admin.ts).
+GRANT INSERT, UPDATE ON credential TO orbit_app;

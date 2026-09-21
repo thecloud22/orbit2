@@ -890,6 +890,62 @@ With the consequences that follow:
 - A run reaching a host that is not in its version's copied list halts and names it, which is the
   only host boundary slice 1 has and is therefore tested as the load-bearing one.
 
+### Amendment to Decision 5 item 5: a value may be set through the product
+
+The text above is preserved as it was decided, and this amendment sits beneath it rather than
+inside it. Item 5's core property — **the credential is referenced by name in both the revision
+and the copy, never by value** — is unchanged and is not up for renegotiation here.
+
+What changes is one clause of the four conditions under "where the value lives":
+
+> - **Written out of band.** A command-line tool or an administrative channel, never a form. The
+>   registration screen has no password field, which was the point of it.
+
+The registration screen now has one (migration 0014). This was chosen deliberately, on the
+record: nothing existed to write a value into the store at all, so "automate a sign-in" had no
+path to it, out of band or otherwise, and building the out-of-band tool first was weighed against
+building the field and rejected — a second, separate surface to keep secure and to keep in sync
+with the API's own validation, for a value that ends up encrypted the same way either path.
+
+**What still holds, unchanged:**
+
+- **The key is not in the store.** `ORBIT_CREDENTIAL_KEY`, an environment variable. A database
+  backup on its own still decrypts nothing.
+- **No interface returns it**, in any form, to any role. `admin.ts`'s read does not select
+  `secret_enc`, and nothing in this path adds a route that does.
+- **Never logged, never in evidence**, and rotation writes a new value without reading the old —
+  setting a value is decoupled from the application's revision entirely (it is filed by name, in
+  its own table), so rotating it mints nothing and touches nothing a published version's copy
+  refers to.
+- **A run-time secret is still different and stays unstorable.** §2's "required afresh on every
+  run, is never stored" does not move. This is about a service account Orbit signs in with on an
+  application's behalf, set once and rotated occasionally — not a value a person supplies while a
+  run is in progress.
+
+**What is genuinely weaker, stated rather than glossed.** The value now crosses the API as a
+request body before it is encrypted, where before it never crossed the product's own surface at
+all. That is a larger attack surface by one hop — a request-logging proxy, an unhandled exception
+that echoes its input, a browser extension reading form fields — than a value that only ever
+existed on an operator's terminal and in the database. Encryption at rest is unchanged either way;
+what is different is what could observe the plaintext in transit, for the few seconds between a
+person typing it and the server encrypting it.
+
+**This also diverges from `docs/orbit-2.0-functional-specification.md` §8, not only from this
+decision, and that document is not edited to match it.** §8's requirement is stronger than
+anything above and was written to be permanent, not slice-scoped:
+
+> Registering a connection means recording where the system is... and **the name of the
+> credential** that supplies the password. The value itself is supplied to the deployment
+> separately and is never entered, stored or displayed through the product.
+
+and Figure 35's caption there reads, in full: *"Registering a connection. There is no password
+field, by design... A secret cannot be entered here because Orbit does not accept one through the
+product surface."* That is the destination this codebase is meant to be converging on, and this
+amendment moves slice 1 away from it rather than toward it — the opposite of what every other gap
+in [`docs/ACTIVE_TASK.md`](../ACTIVE_TASK.md) is. Recorded here in full rather than reconciled
+quietly, so a future reader deciding whether to build the out-of-band tool and retire this field
+is choosing to return to the spec, not discovering a contradiction nobody noticed.
+
 ---
 
 ## Decision 6 — Where a model may drive a browser
