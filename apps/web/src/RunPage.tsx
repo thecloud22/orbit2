@@ -118,8 +118,15 @@ function Controls({ run, again }: { run: RunView['run']; again: () => void }) {
       {canRetry && button(`Retry step ${run.error?.step ?? ''}`.trim(), 'retry', 'strong')}
       {run.status === 'failed' && !canRetry && (
         <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
-          A {failure ?? 'failure'} will not come out differently on a second attempt, so there is no retry.
-          Repair the workflow, or run it again from the start.
+          {/* A check that did not hold is not a fault, so "repair the
+              workflow" is advice about something that is not broken — and
+              `checkFailed` is the vocabulary's word for it, not the author's.
+              Both were being shown to somebody whose agent had just worked. */}
+          {failure === 'checkFailed'
+            ? 'Retrying would compare the same values and stop in the same place, which is what the check is for. '
+              + 'Run it again with a different record, or change the check.'
+            : `A ${failure ?? 'failure'} will not come out differently on a second attempt, so there is no retry. `
+              + 'Repair the workflow, or run it again from the start.'}
         </span>
       )}
 
@@ -205,7 +212,28 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
   const [selected, setSelected] = useState(0);
   const outcomes = run.outcomes ?? [];
   const label = (name: string) => outcomes.find((o) => o.name === name)?.label ?? name;
-  const state = run.status === 'succeeded' ? 'ok' : run.status === 'failed' ? 'failed'
+  /**
+   * A check that did not hold is the procedure deciding, not the machinery
+   * breaking.
+   *
+   * `failures.ts` says so in as many words — "checkFailed — not a technical
+   * failure at all. It is the workflow saying the business condition did not
+   * hold" — and this screen said `Failed` in red beside `No conclusion
+   * reached`, which is exactly what it shows for a binding that found
+   * nothing. A run that stopped where the procedure says to stop read as a
+   * broken agent.
+   *
+   * The record is untouched: `run.status` is `failed`, because the schema
+   * allows an error only on a failure and the error is what carries the
+   * check's own sentence. What changes is that the screen stops describing a
+   * decision as a fault, and says which it was.
+   */
+  const stoppedByACheck = run.status === 'failed'
+    && (run.error as { kind?: string } | null)?.kind === 'checkFailed';
+
+  const state = run.status === 'succeeded' ? 'ok'
+    : stoppedByACheck ? 'attention'
+    : run.status === 'failed' ? 'failed'
     : run.status === 'running' ? 'running' : 'attention';
   /** Still going: nothing about it is in the past tense yet. */
   const going = run.status === 'queued' || run.status === 'running';
@@ -245,13 +273,19 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
       {/* "No conclusion reached" is a finding about a run that finished. A
           run that has not started has not failed to reach anything yet, and
           saying so put a verdict on the screen before there was one. */}
-      <OutcomePair state={state} status={run.status[0]!.toUpperCase() + run.status.slice(1)}
+      <OutcomePair state={state}
+        status={stoppedByACheck ? 'Stopped by a check'
+          : run.status[0]!.toUpperCase() + run.status.slice(1)}
         outcome={run.outcome ? label(run.outcome)
+          : stoppedByACheck ? String((run.error as { describe?: string }).describe ?? 'A check did not hold')
           : going ? 'Not yet'
           : 'No conclusion reached'}
-        note={going
-          ? `One of ${outcomes.length} conclusions this version declares. Which one it reaches is what it is deciding.`
-          : `One of ${outcomes.length} conclusions this version declares. Orbit reports it without judging it.`} />
+        note={stoppedByACheck
+          ? 'A check in this procedure did not hold, so the run stopped where the procedure says to stop. '
+            + 'Nothing technical failed. The record stores it as a failure, because that is where an error belongs.'
+          : going
+            ? `One of ${outcomes.length} conclusions this version declares. Which one it reaches is what it is deciding.`
+            : `One of ${outcomes.length} conclusions this version declares. Orbit reports it without judging it.`} />
 
       <section style={{ display: 'flex', gap: 46, padding: '16px 0 18px',
         borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)' }}>
