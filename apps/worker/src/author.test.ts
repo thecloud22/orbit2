@@ -1,3 +1,4 @@
+import type { Step } from '@orbit/contract';
 /**
  * The rule that decides which elements an act was allowed to mean.
  *
@@ -13,7 +14,7 @@
 import { strict as assert } from 'node:assert';
 import { describe, test } from 'node:test';
 import { chromium } from 'playwright';
-import { couldMean, forTest, mismatchOf, settleAfterActivating } from './author.ts';
+import { couldMean, forTest, mismatchOf, repeatsACommit, settleAfterActivating } from './author.ts';
 
 const el = (what: 'field' | 'button' | 'link' | 'value' | 'heading', name: string) => ({ what, name });
 
@@ -142,4 +143,35 @@ describe('after a click, the walk is on the page the click led to',
       await browser.close();
     }
   });
+});
+
+// ── committing twice ─────────────────────────────────────────────────────
+
+const press = (label: string, commits: boolean): Step => ({
+  id: crypto.randomUUID(), kind: 'activate', summary: label,
+  control: { label, binding: { strategy: 'roleAndName', role: 'button', name: label } },
+  then: { describe: 'the page moves on' }, changesARecord: commits,
+});
+
+test('a control that commits is not pressed twice in a row', () => {
+  // Test case 5 produced two identical `activate Decline file` steps, both
+  // claiming to change a record: the model proposed it, had the next turn
+  // rejected, and proposed the same thing again. A run taking that branch
+  // would decline the file twice.
+  assert.equal(repeatsACommit(press('Decline file', true), press('Decline file', true)), true);
+});
+
+test('a control that commits nothing may be pressed again', () => {
+  // Search, a filter, the same "Advance" on a checklist — repeats a procedure
+  // may genuinely need. This rule is not about them.
+  assert.equal(repeatsACommit(press('Open file', false), press('Open file', false)), false);
+});
+
+test('two different commits in a row are not a repeat', () => {
+  assert.equal(repeatsACommit(press('Approve file', true), press('Decline file', true)), false);
+});
+
+test('a commit after something else is not a repeat', () => {
+  assert.equal(repeatsACommit(press('Open file', false), press('Approve file', true)), false);
+  assert.equal(repeatsACommit(undefined, press('Approve file', true)), false);
 });

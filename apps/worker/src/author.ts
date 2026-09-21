@@ -24,6 +24,27 @@ import { asNumber } from './compare.ts';
 import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
 
 /**
+ * Whether this act would commit, a second time, what the step before it
+ * already committed.
+ *
+ * Test case 5 produced two identical `activate Decline file` steps, both
+ * `changesARecord: true` and both guarded by the same condition: the model
+ * proposed it, had the next turn rejected, and proposed the same thing again.
+ * A run taking that branch would press Decline twice, on a version claiming
+ * the authority to do it.
+ *
+ * Narrow on purpose. Pressing search again, or a filter, or the same
+ * "Advance" on a checklist, is left alone — those are repeats a procedure may
+ * genuinely need. This refuses only where being wrong means a second decision
+ * on somebody's file.
+ */
+export function repeatsACommit(last: Step | undefined, next: Step): boolean {
+  return next.kind === 'activate' && next.changesARecord
+    && last?.kind === 'activate' && last.changesARecord
+    && last.control.label === next.control.label;
+}
+
+/**
  * What the walk types into a field, taken from the step it just built.
  *
  * It used to be `inputs[p.value] ?? ''` — the author's example values, looked
@@ -572,6 +593,29 @@ export async function authorFromProcedure(opts: {
         turns.push(record('rejected',
           `it conditioned this on ${unknown.map((c) => `"${c.value}"`).join(', ')}, which no earlier step reads`));
         questions.push(asQuestion(`The procedure conditions "${made.summary}" on ${unknown.map((c) => c.value).join(', ')}, and no step reads that. What should be read first?`));
+        continue;
+      }
+
+      // Something that commits is not committed twice in a row.
+      //
+      // Test case 5 — "if the credit score is below 620, decline the file" —
+      // produced two identical `activate Decline file` steps, both
+      // `changesARecord: true`, both guarded by the same condition. The model
+      // proposed it at one turn, had the next turn rejected, and proposed the
+      // same thing again; Orbit kept both. A run taking that branch would
+      // press Decline twice, on a version claiming the authority to do it.
+      //
+      // The instruction already tells the model not to repeat a step it has
+      // taken. Stating a rule and not enforcing it is how this got through, so
+      // Orbit enforces it for the acts where repeating is never a slip to
+      // tolerate: the ones that commit something a person would have to undo.
+      // Pressing search, or a filter, or the same "Advance" again is left
+      // alone — it only refuses where the cost of being wrong is a second
+      // decision on somebody's file.
+      if (repeatsACommit(steps[steps.length - 1], made)) {
+        turns.push(record('rejected',
+          `"${(made as Extract<Step, { kind: 'activate' }>).control.label}" commits something and was pressed`
+          + ' by the step before this one. Pressing it again would do it twice'));
         continue;
       }
 
