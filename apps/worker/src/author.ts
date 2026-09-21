@@ -302,7 +302,7 @@ const shape = {
         type: 'object',
         properties: {
           value: { type: 'string' },
-          is: { type: 'string', enum: ['isMoreThan', 'isAtLeast', 'isLessThan', 'isAtMost', 'is', 'isNot'] },
+          is: { type: 'string', enum: ['isMoreThan', 'isAtLeast', 'isLessThan', 'isAtMost', 'is', 'isNot', 'contains'] },
           than: { type: 'string' },
         },
         required: ['value', 'is', 'than'],
@@ -762,6 +762,25 @@ export async function authorFromProcedure(opts: {
       isLessThan: ['isAtLeast'], isAtLeast: ['isLessThan'],
       is: ['isNot'], isNot: ['is'],
     };
+    // A condition can only compare a value that has been read by the time the
+    // branch runs. Conditions are checked against what was read earlier in the
+    // order the model proposed things, and the branches are then lifted in
+    // front of the steps they guard — so a read the model proposed *after* the
+    // guarded act ends up behind the branch that depends on it. Test case 6
+    // conditions the decline on the loan program and reads the program
+    // afterwards, and publication refused it: "Step 9 uses loanProgram, which
+    // is not produced on every path that reaches it." True, and about a step
+    // Orbit had placed.
+    const readBeforeGuard = new Set(steps.slice(0, guardedAt)
+      .flatMap((x) => (x.kind === 'read' ? [x.produces.name] : [])));
+    const tooLate = allConditions.filter((c) => !readBeforeGuard.has(c.value));
+    for (const c of tooLate) {
+      questions.push(asQuestion(
+        `This is conditioned on ${c.of.label}, and ${c.of.label} is only read after the act it is supposed`
+        + ' to govern. Orbit could not put that condition in front of the step, so it is not on the steps'
+        + ' below. Say where in the procedure that value should be read.'));
+    }
+
     const contradicted = allConditions.filter((c) => allConditions.some((o) =>
       o.value === c.value && o.than === c.than && (OPPOSITES[c.is] ?? []).includes(o.is)));
     if (contradicted.length > 0) {
@@ -775,6 +794,7 @@ export async function authorFromProcedure(opts: {
     // A condition Orbit cannot turn into a comparison is not quietly made into
     // one that can never hold. It is dropped and said.
     const buildable = allConditions
+      .filter((c) => !tooLate.includes(c))
       .filter((c) => !contradicted.includes(c))
       .filter((c) => {
         if (comparisonFor(c, c.of) !== null) return true;
@@ -1069,7 +1089,12 @@ function comparisonFor(
   // and `isNot` are meaningful, which is what the contract allows for text —
   // "at least" against a sentence is not a comparison that can be carried out,
   // and turning it into equality would make a branch that can never hold.
-  if (c.is !== 'is' && c.is !== 'isNot') return null;
+  // `contains` is what a condition on a note or a description actually means:
+  // the income analyst's note is not equal to "seasonal", it mentions it.
+  // compare.ts has carried out `contains` since it was written; authoring
+  // never offered it, so the model said `isNot` and a paragraph that plainly
+  // described seasonal income satisfied "is not seasonal".
+  if (c.is !== 'is' && c.is !== 'isNot' && c.is !== 'contains') return null;
   return { of: 'text', operator: c.is,
     left, right: { from: 'literal', literal: { type: 'text', text: said } } };
 }

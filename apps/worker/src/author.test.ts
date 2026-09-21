@@ -212,3 +212,12 @@ test('a comparison against nothing is refused', () => {
   assert.equal(forTest.comparisonFor(cond('note', 'isNot', ''), { type: 'text' }), null);
   assert.equal(forTest.comparisonFor(cond('note', 'isNot', '   '), { type: 'text' }), null);
 });
+
+test('a condition on a note means it mentions the thing, not that it equals it', () => {
+  // compare.ts has carried out `contains` since it was written; authoring
+  // never offered it. So the model said `isNot`, and a paragraph plainly
+  // describing seasonal income satisfied "is not seasonal".
+  const c = forTest.comparisonFor(cond('note', 'contains', 'seasonal'), { type: 'text' });
+  assert.equal(c?.of, 'text');
+  assert.equal(c?.operator, 'contains');
+});
