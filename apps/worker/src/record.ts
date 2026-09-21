@@ -116,6 +116,9 @@ export async function record(opts: {
    *  is still standing in front of the page it happened on. */
   onNote?: (note: Note) => void;
   open?: OpenForPerson;
+  /** What the application's registry calls its password. A recorded sign-in
+   *  names it; without one the sign-in cannot be recorded at all. */
+  credentialName?: string | null;
 }): Promise<Recording> {
   const { page, close } = await (opts.open ?? aWindowTheyCanSee)();
   const steps: Step[] = [];
@@ -147,7 +150,12 @@ export async function record(opts: {
       return;
     }
 
-    const step = stepFor(event, element);
+    const step = stepFor(event, element, opts.credentialName ?? null);
+    if (!step && event.sensitive) {
+      raise(asQuestion('A password was typed and no credential is registered for this application. '
+        + 'Register one first — the value is never kept, so Orbit needs a name to look it up by at run time.'));
+      return;
+    }
     if (step) { steps.push(step); opts.onStep?.(step, page.url()); }
     } catch (error) {
       // An action that could not be turned into a step is said, not dropped.
@@ -181,7 +189,7 @@ export async function record(opts: {
   return { steps, questions, touched };
 }
 
-export function stepFor(event: Touched, element: Seen): Step | null {
+export function stepFor(event: Touched, element: Seen, credentialName?: string | null): Step | null {
   const id = crypto.randomUUID();
   const target = { label: element.labelledBy ?? element.name, binding: element.binding };
 
@@ -195,8 +203,14 @@ export function stepFor(event: Touched, element: Seen): Step | null {
   }
   if (event.sensitive) {
     // The field is remembered. The value never was.
+    //
+    // It named `portalPassword` whatever the application was — a credential
+    // nobody registered, so the reference parsed and pointed at nothing. It
+    // names the registered one, and where there is none the step is not made:
+    // a secret Orbit cannot find later is worse than a refusal now.
+    if (!credentialName) return null;
     return { id, kind: 'enter', summary: `A secret, into ${target.label}`,
-      into: target, value: { from: 'secret', credential: 'portalPassword' }, sensitive: true };
+      into: target, value: { from: 'secret', credential: credentialName }, sensitive: true };
   }
   return { id, kind: 'enter', summary: `A value, into ${target.label}`,
     into: target, value: { from: 'input', value: asValueName(target.label) || 'aValue' }, sensitive: false };

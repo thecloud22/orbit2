@@ -241,6 +241,10 @@ export async function authorFromProcedure(opts: {
   origin: string;
   startPath: string;
   inputs: Record<string, string>;
+  /** What the application's registry calls its password, if it has one. A
+   *  sign-in step names this; without it Orbit has no secret to refer to and
+   *  will not invent one. */
+  credentialName?: string | null;
   model: ModelProvider;
   maxTurns?: number;
 }): Promise<AuthoredDraft> {
@@ -357,10 +361,17 @@ export async function authorFromProcedure(opts: {
         continue;
       }
 
-      const made = makeStep(p, element, procedure);
+      const made = makeStep(p, element, procedure, opts.credentialName ?? null);
       if (!made) {
-        turns.push(record('rejected',
-          `${p.act} needs a value and "${p.value ?? ''}" is neither a name nor anything the procedure says`));
+        const why = element.secret
+          ? `"${element.labelledBy ?? element.name}" takes a password and no credential is registered for this application`
+          : `${p.act} needs a value and "${p.value ?? ''}" is neither a name nor anything the procedure says`;
+        turns.push(record('rejected', why));
+        if (element.secret) {
+          questions.push(asQuestion(
+            `This procedure signs in, and no credential is registered for the application. `
+            + 'Register one first — a password is never something a run is given, and never something Orbit stores in a workflow.'));
+        }
         continue;
       }
 
@@ -646,12 +657,25 @@ function comparisonFor(c: { value: string; is: string; than: string }): Extract<
 }
 
 /** A proposal becomes a step, with Orbit's binding rather than the model's. */
-function makeStep(p: Proposal, element: Seen, procedure: string): Step | null {
+function makeStep(p: Proposal, element: Seen, procedure: string,
+  credentialName: string | null): Step | null {
   const id = crypto.randomUUID();
   const target = { label: element.labelledBy ?? element.name, binding: element.binding };
 
   if (p.act === 'enter') {
     if (!p.value) return null;
+
+    // A password is never a declared input. Making one was how the
+    // confirmation screen came to ask an author to type a password into a
+    // text box, which would then be stored as an example, copied into the
+    // version, and written to run.inputs in plain text on every run. §2: a
+    // secret never appears in inputs.
+    if (element.secret) {
+      if (!credentialName) return null;
+      return { id, kind: 'enter', summary: `A secret, into ${target.label}`,
+        into: target, value: { from: 'secret', credential: credentialName }, sensitive: true };
+    }
+
     const supplied = valueToEnter(p.value, procedure);
     if (!supplied) return null;
     // What the step will read as: the literal itself, or the input's name.

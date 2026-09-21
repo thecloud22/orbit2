@@ -61,13 +61,27 @@ test('a captured password becomes a named credential, not a value', () => {
     index: 1, what: 'field', role: 'textbox', name: 'Password',
     binding: { strategy: 'formName', name: 'passwd' },
   };
-  const step = stepFor({ kind: 'change', value: null, sensitive: true }, field);
+  const step = stepFor({ kind: 'change', value: null, sensitive: true }, field, 'UNDERWRITING_PW');
   assert.equal(step?.kind, 'enter');
   assert.equal(step.sensitive, true);
   // A secret is referred to by name. There is nowhere in the step for a value,
   // because the reference kind carries a credential name and nothing else.
   assert.equal(step.value.from, 'secret');
+  assert.equal(step.value.from === 'secret' && step.value.credential, 'UNDERWRITING_PW',
+    'the credential the application registered, not one invented here');
   assert.equal(JSON.stringify(step).includes('hunter2'), false);
+});
+
+test('a password with no registered credential makes no step at all', () => {
+  // It used to name `portalPassword` whatever the application was — a
+  // credential nobody registered, so the reference parsed and pointed at
+  // nothing. A secret Orbit cannot find at run time is worse than a refusal
+  // while somebody is still standing in front of the page.
+  const field: Seen = {
+    index: 1, what: 'field', role: 'textbox', name: 'Password',
+    binding: { strategy: 'formName', name: 'passwd' },
+  };
+  assert.equal(stepFor({ kind: 'change', value: null, sensitive: true }, field, null), null);
 });
 
 test('a click becomes an activate, and does not claim to know if it changes a record', () => {

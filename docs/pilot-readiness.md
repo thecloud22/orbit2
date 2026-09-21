@@ -88,6 +88,35 @@ keeping it was more accurate and less useful, because an author cannot tell
 "expected object, received undefined" from a bug in Orbit, which is the doubt a
 refusal exists to remove.
 
+## 1c. A password was being made a declared input
+
+Hit in practice, from the same procedure once the portal grew a login page. The
+confirmation screen asked the author to type a **password** into a text box,
+beside `userID`, as "a value that reaches this conclusion".
+
+Had they, it would have been stored in `workflow.examples`, copied into the
+published version's declared inputs, and written to `run.inputs` in plain text
+on every test run. Acceptance criterion 11 — *a secret never appears in
+inputs* — broken on the authoring path.
+
+The recorder has checked for a password field since it was written
+(`record.ts`, `el.type === 'password'`). Authoring could not: the snapshot knew
+the field's type and `Seen` never exposed it, so `makeStep` hardcoded
+`sensitive: false` and made every field an input. The same asymmetry as the
+camelCase helper — the careful path and the path that failed.
+
+Underneath it, a second defect that made the first hard to fix properly:
+`secretRef.credential` used the contract's `name` — a camelCase identifier —
+while a registered credential is `UNDERWRITING_PW`. **A secret reference could
+not name any credential that existed**, which is why the recorder wrote
+`portalPassword` into every one: a reference that parsed and pointed at
+nothing.
+
+Both fixed. A password field now yields `{ from: 'secret', credential }`
+naming what the application registered, and where nothing is registered no
+step is made at all — a secret Orbit cannot find at run time is worse than a
+refusal while somebody is still in front of the page.
+
 ## 2. The terminal surface
 
 Selectable in Admin, publishable, and then refused at run time: `SURFACES` in

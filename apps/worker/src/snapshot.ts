@@ -27,6 +27,16 @@ export interface Seen {
   name: string;
   /** For a value: the label beside it, which is how a person names it. */
   labelledBy?: string;
+  /**
+   * The page declared this field a secret.
+   *
+   * Carried because authoring could not see it and so made a password into a
+   * declared input — which put it on the confirmation screen as a box to type
+   * a password into, and would have written it to `run.inputs` in plain text
+   * on every test run. The recorder has checked this since it was written;
+   * authoring is the path that could not.
+   */
+  secret?: boolean;
   /** What kind of element it is. Carried so that a binding made from the
    *  label can be corroborated against it — Decision 15 refuses the
    *  structural rung uncorroborated, and the tag is what is knowable here. */
@@ -99,6 +109,8 @@ export const COLLECT = `
       touched: el.hasAttribute('data-orbit-touched'),
       tag,
       type: el.type || null,
+      secret: el.type === 'password'
+        || el.autocomplete === 'current-password' || el.autocomplete === 'new-password',
       what: tag === 'a' ? 'link' : (tag === 'button' || el.type === 'submit' ? 'button' : 'field'),
       role: tag === 'a' ? 'link' : (tag === 'button' || el.type === 'submit' ? 'button' : (tag === 'select' ? 'combobox' : 'textbox')),
       name: (name || '').trim(),
@@ -161,6 +173,7 @@ export const COLLECT = `
 export interface Raw {
   tag: string; type: string | null; what: Seen['what']; role: string;
   name: string; formName: string | null; labelledBy: string | null; touched?: boolean;
+  secret?: boolean;
   row: string | null; column: string | null;
 }
 
@@ -215,6 +228,7 @@ export function shape(raw: Raw[]): Seen[] {
       };
       if (r.labelledBy) seen.labelledBy = r.labelledBy;
       if (r.tag) seen.tag = r.tag;
+      if (r.secret) seen.secret = true;
       if (r.touched) seen.touched = true;
       if (r.row) seen.row = r.row;
       if (r.column) seen.column = r.column;

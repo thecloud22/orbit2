@@ -145,8 +145,8 @@ async function claimRecording(): Promise<string | null> {
 async function recordOne(sessionId: string) {
   const db = await pool.connect();
   try {
-    const { rows: [s] } = await db.query<{ name: string; start_path: string; host: string }>(
-      `SELECT s.name, s.start_path, (r.addresses->0->>'host') AS host
+    const { rows: [s] } = await db.query<{ name: string; start_path: string; host: string; credential_name: string | null }>(
+      `SELECT s.name, s.start_path, (r.addresses->0->>'host') AS host, r.credential_name
          FROM recording_session s
          JOIN application_revision r ON r.application_id = s.application_id
         WHERE s.id = $1 ORDER BY r.revision DESC LIMIT 1`, [sessionId]);
@@ -180,6 +180,7 @@ async function recordOne(sessionId: string) {
     const recording = await record({
       origin: `http://${s.host}`,
       startPath: s.start_path,
+      credentialName: s.credential_name,
       until: finished,
       onStep: (step, on) => {
         console.log(`  captured: ${step.kind.padEnd(9)} ${step.summary}`);

@@ -54,7 +54,23 @@ export const valueRef = z.discriminatedUnion('from', [
 export type ValueRef = z.infer<typeof valueRef>;
 
 /** A named secret. Never compared, never read into, never published. */
-export const secretRef = object({ from: z.literal('secret'), credential: name });
+/**
+ * What a credential is called in the registry.
+ *
+ * Not `name`. A registered credential is `UNDERWRITING_PW` — an environment
+ * variable by convention and by how operations teams already name these —
+ * which the camelCase identifier `name` cannot express. So a secret reference
+ * could not name any credential that actually exists, and the recorder wrote
+ * `portalPassword` into every one: a reference that parsed and pointed at
+ * nothing.
+ */
+export const credentialName = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/, 'letters, digits, underscores and hyphens');
+
+export const secretRef = object({ from: z.literal('secret'), credential: credentialName });
 
 /** What an `enter` step may put into a field — the one place a secret is allowed. */
 export const enterValue = z.union([valueRef, secretRef]);
