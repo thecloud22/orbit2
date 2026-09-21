@@ -24,6 +24,31 @@ import { asNumber } from './compare.ts';
 import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
 
 /**
+ * Whether an act could possibly have meant this element.
+ *
+ * Used twice, and the order matters. It narrows the candidates *before* they
+ * are counted, so something the act can never touch does not compete for a
+ * name — a heading "Sign in" above a button "Sign in" is one candidate, not an
+ * ambiguity. And it is the mismatch check afterwards, so an act that names the
+ * only thing carrying a name still has to suit it.
+ *
+ * Decision 12 is untouched: two buttons called "Sign in" remain a refusal.
+ */
+export function couldMean(act: 'enter' | 'activate' | 'read' | 'done', s: Pick<Seen, 'what'>): boolean {
+  return act === 'enter' ? s.what === 'field'
+    : act === 'activate' ? s.what === 'button' || s.what === 'link'
+    : act === 'read' ? s.what === 'value' || s.what === 'heading'
+    : true;
+}
+
+/** Why that act cannot touch that element, in the terms the page uses. */
+export function mismatchOf(act: string, it: Pick<Seen, 'what' | 'name'>): string {
+  return act === 'enter' ? `${it.what} "${it.name}" is not something a value goes into`
+    : act === 'activate' ? `${it.what} "${it.name}" is not something that can be pressed`
+    : `${it.what} "${it.name}" is not a value to read`;
+}
+
+/**
  * What the model may answer. Note what is absent: no URL, no selector, no
  * strategy, no free text that becomes a locator. An address cannot be supplied
  * because no field accepts one.
@@ -283,6 +308,7 @@ export async function authorFromProcedure(opts: {
   try {
     await page.goto(`${origin}${startPath}`, { waitUntil: 'domcontentloaded' });
 
+    let finished = false;
     for (let turn = 1; turn <= maxTurns; turn++) {
       const seen = await snapshot(page);
       // Only an act that is *supposed* to move the page counts towards being
@@ -294,6 +320,7 @@ export async function authorFromProcedure(opts: {
       }
       lastFingerprint = fingerprint;
       if (unchanged >= 2) {
+        finished = true;   // said in its own words below; not the ceiling
         questions.push(asQuestion('The page stopped changing, so the rest of the procedure could not be worked out here.'));
         break;
       }
@@ -331,10 +358,37 @@ export async function authorFromProcedure(opts: {
       }
 
       const p = answered.value;
-      if (p.act === 'done') { turns.push(record('kept', 'the model said the procedure is finished')); break; }
+      if (p.act === 'done') {
+        finished = true;
+        turns.push(record('kept', 'the model said the procedure is finished'));
+        break;
+      }
 
       const wanted = normaliseName(p.element ?? '');
-      const named = seen.filter((s) => calledIn(s) === wanted);
+
+      // Counted among the things the act could possibly have meant, not among
+      // everything that happens to share the name.
+      //
+      // A login page has a heading "Sign in" above a button "Sign in". Both
+      // carried the name, so an `activate` naming it was refused as ambiguous
+      // — on every ordinary login page there is, which is every one of these
+      // procedures. The check that knows a heading cannot be pressed already
+      // existed; it ran on the single survivor, one step too late to stop the
+      // heading competing for the name in the first place.
+      //
+      // This is not breaking a tie, which Decision 12 forbids. Two *buttons*
+      // called "Sign in" are still a refusal. What changes is that something
+      // the act could never have acted on is not a candidate.
+      const carrying = seen.filter((s) => calledIn(s) === wanted);
+      const named = carrying.filter((s) => couldMean(p.act, s));
+
+      if (named.length === 0 && carrying.length > 0) {
+        // The name was on the page, on something this act cannot touch. Said
+        // as the mismatch it is rather than as "not on the page", which would
+        // send an author looking for a control that is sitting right there.
+        turns.push(record('rejected', mismatchOf(p.act, carrying[0]!)));
+        continue;
+      }
       if (named.length === 0) {
         // It named something it was not shown. Rejected, not retried into
         // existence: the session's record is evidence either way.
@@ -354,13 +408,8 @@ export async function authorFromProcedure(opts: {
       // pressing a cell are not slips to be tolerated — they are the model
       // reaching past what it was offered, and Orbit is the one that knows
       // which is which.
-      const mismatch =
-        p.act === 'enter' && element.what !== 'field' ? `${element.what} "${element.name}" is not something a value goes into`
-        : p.act === 'activate' && element.what !== 'button' && element.what !== 'link' ? `${element.what} "${element.name}" is not something that can be pressed`
-        : p.act === 'read' && element.what !== 'value' && element.what !== 'heading' ? `${element.what} "${element.name}" is not a value to read`
-        : null;
-      if (mismatch) {
-        turns.push(record('rejected', mismatch));
+      if (!couldMean(p.act, element)) {
+        turns.push(record('rejected', mismatchOf(p.act, element)));
         continue;
       }
 
@@ -419,6 +468,21 @@ export async function authorFromProcedure(opts: {
           .click().catch(() => undefined);
         await page.waitForLoadState('domcontentloaded').catch(() => undefined);
       }
+    }
+
+    // The walk ran out of turns rather than reaching the end of the procedure.
+    //
+    // It used to fall out of this loop in silence. What followed then named a
+    // conclusion from the steps it happened to have, so a session that was cut
+    // off two steps into a sign-in produced a draft reading `open`, `enter`,
+    // `enter`, `end: Pipeline loaded` — a conclusion it never reached, with
+    // nothing on the record to say the walk had been truncated. A draft that
+    // stops early is recoverable; one that stops early and looks finished is
+    // the thing this product exists not to produce.
+    if (!finished) {
+      questions.push(asQuestion(
+        `Orbit worked through ${maxTurns} turns without reaching the end of this procedure, so what is below is`
+        + ' only as far as it got. Check it against what you wrote, and say what should happen after the last step.'));
     }
   } finally {
     await page.close();
