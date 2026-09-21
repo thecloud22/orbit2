@@ -44,7 +44,27 @@ judgement made while building the editor and it was the wrong one.
 
 ---
 
-## Activation is off: a version can run without any conclusion being proved
+## ~~Activation is off: a version can run without any conclusion being proved~~ — removed
+
+Superseded. The gate was off; now the machinery is gone too, by decision: no
+"Test it" panel, no example per ending, and no blocker for the want of one. A
+version is published and run, and the run is the proof. `testCases`,
+`queueTests`, `activate` and the activation CLI have been removed;
+`activate.ts` keeps pause, resume and the version-precedence gate.
+
+What this gives up, plainly: nothing now proves that every ending a version
+declares can actually be reached before it runs against a real system. On a
+procedure with two conclusions, the second may never have executed. That was
+the point of the gate, and it is the cost of removing it.
+
+Retiring an agent arrived with it — `Retire it` on the agent page, which sets
+`archived_at`, drops the live version, and records why on the audit trail. It
+is not a delete and cannot be: versions, runs, evidence and the model calls
+that authored an agent are append-only.
+
+### What the gate used to say
+
+
 
 **What.** §4 had an agent unable to touch a real system until every conclusion
 it declares had been reached by a real run. Publication now sets
