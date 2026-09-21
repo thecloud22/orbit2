@@ -35,7 +35,7 @@ acceptance criterion 7. Not one binding reads a `data-testid`.
 | 4 | Evidence storage | Content-addressed on local disk, behind an object-store interface; redact before storing |
 | 5 | Registered application | Versioned definition, copied into the published version; one host list. A workflow names a **set** of applications, filled with one |
 | 6 | Model-driven browser | Authoring only, never execution |
-| 7 | Model provider | OpenAI now, Bedrock later, behind one interface |
+| 7 | Model provider | OpenAI and Bedrock, behind one interface. Both built |
 | 8 | Where this runs | Local now, AWS `us-east-1` later. United States only |
 | 9 | Backend stack | TypeScript on Node |
 | 10 | Frontend | React, headless primitives, tokens resolved per workspace at run time |
@@ -140,3 +140,6 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | 2026-09-20 | A version declaring no conclusion could be activated, because the gate is "every declared ending proved" and an empty list passes. An empty gate is not a passed gate. |
 | 2026-09-20 | Decision 13 recorded (a judged step). Amendments: Decision 5 takes a set of applications; Decision 4 adds the authoring reasoning record and rules out video; Decision 8 fixes `us-east-1`, United States only; Decision 10 makes tokens swappable at run time; Decision 11 records the recording route and its three cautions. |
 | 2026-09-20 | The Admin screen can register an application and edit one already registered, minting a revision only when a connection detail actually changed. Asked for explicitly: a credential's value can now be set alongside it, encrypted before it is written. Decision 5 item 5 is amended for this, on the record — it moves slice 1 away from functional-spec §8 rather than toward it, the one place that is true. |
+| 2026-09-21 | Installable by somebody who has not seen it: the lockfile committed, a `scripts/setup` that checks what is present and creates what is not, and a README verified by running it from a clean clone. |
+| 2026-09-21 | Setup stopped assuming the postgres it was pointed at. It had run `createdb` and migrated `postgres://$(whoami)@localhost/$db`, which works only for one installed locally on a socket under your own name — a containerised one has a different role over TCP. The three URLs in `.env` are now the truth, and setup creates and migrates whatever they name. |
+| 2026-09-21 | Decision 7's second provider built. `.env.example` had offered three and the switch threw on two, so configuring bedrock failed at the start of a first authoring session — after installing, migrating, registering an application and writing out a procedure. Bedrock goes through Converse, with the schema imposed as a forced tool rather than a response format, and the answer validated against Orbit's own schema regardless. No price is held for a Bedrock model, so the spend record says the cost is unknown rather than reporting zero. `pnpm verify:model` makes one real call, since the ambient AWS credential chain is a question only a call can answer. |
