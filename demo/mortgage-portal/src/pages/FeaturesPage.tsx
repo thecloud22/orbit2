@@ -42,7 +42,8 @@ const GROUPS: readonly FeatureGroup[] = [
       {
         id: 'underwriting',
         label: 'File review',
-        description: 'The underwriting summary, conditions, and decision for a single file.',
+        description:
+          'The underwriting summary, conditions, and decision for a single file, plus a "Download PDF" button that renders the whole file as a form-styled document.',
         href: `/underwriting?loan=${SAMPLE_LOAN}`,
       },
     ],

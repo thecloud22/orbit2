@@ -135,3 +135,11 @@ pipeline/underwriting/login flow and off each other's nav -- reachable from
       download before, and a recorded workflow that reads a value off a
       downloaded document is a different capability than reading one off a
       page.
+- [x] **Loan file PDF, form-styled** — a "Download PDF" button on the real
+      `/underwriting?loan=` file review page itself (`src/lib/loanFilePdf.ts`).
+      Everything the screen shows -- underwriting summary, borrower &
+      employment, property & program, the decision banner and attached
+      conditions if any -- laid out as bordered, labelled boxes rather than
+      run-together text, the way a printed form reads. Reflects the page's
+      own live state at the moment of the click: a decision made or a
+      condition attached before downloading shows up in the PDF.
