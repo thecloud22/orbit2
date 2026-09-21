@@ -19,7 +19,7 @@
  */
 import type { PoolClient } from 'pg';
 import { describeBlocker, step as stepSchema, type Blocker, type Step } from '@orbit/contract';
-import { checkForPublication, type DraftStep } from './publish.ts';
+import { asDraftStep, checkForPublication, type DraftStep } from './publish.ts';
 
 export type EditResult = { ok: true } | { ok: false; because: string };
 
@@ -27,13 +27,7 @@ export type EditResult = { ok: true } | { ok: false; because: string };
 async function stepsOf(db: PoolClient, workflowId: string): Promise<DraftStep[]> {
   const { rows } = await db.query<{ id: string; kind: string; declares: Record<string, unknown> }>(
     `SELECT id, kind, declares FROM workflow_step WHERE workflow_id = $1 ORDER BY position`, [workflowId]);
-  return rows.map((r) => {
-    const parsed = stepSchema.safeParse({ id: r.id, kind: r.kind, ...r.declares });
-    return parsed.success
-      ? parsed.data
-      : { id: r.id, kind: r.kind, incomplete: true as const,
-          missing: [...new Set(parsed.error.issues.map((i) => String(i.path[0] ?? 'its configuration')))] };
-  });
+  return rows.map(asDraftStep);
 }
 
 /** Confirmation refers to a particular set of steps. Change them and it lapses. */
@@ -161,6 +155,23 @@ export async function editStep(db: PoolClient, workflowId: string, stepId: strin
   }
 
   const { id, kind, ...rest } = checked.data;
+
+  // The same gate its siblings have.
+  //
+  // `moveStep` and `deleteStep` both refuse a change that leaves the draft
+  // worse than it was; `editStep` only checked the schema, which was harmless
+  // while editing could not change the shape of the workflow. Configuring a
+  // `branch` writes `ifTrue` and `ifFalse`, so it can strand a step or make a
+  // conclusion unreachable — and the author would find out at publication,
+  // about a change they had already been told was fine.
+  const steps = await stepsOf(db, workflowId);
+  const after = steps.map((s) => (s.id === stepId ? checked.data : s));
+  const { rows: [w] } = await db.query<{ outcomes: Array<{ name: string }> }>(
+    `SELECT outcomes FROM workflow WHERE id = $1`, [workflowId]);
+  const outcomes = (w?.outcomes ?? []).map((o) => o.name);
+  const broken = madeWorse(wouldBreak(steps, outcomes), wouldBreak(after, outcomes));
+  if (broken) return { ok: false, because: why('Configuring it', broken) };
+
   await db.query('BEGIN');
   try {
     await db.query(

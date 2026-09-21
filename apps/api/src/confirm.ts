@@ -13,6 +13,7 @@
  */
 import type { PoolClient } from 'pg';
 import { object, z, type Blocker, describeBlocker } from '@orbit/contract';
+import { asDraftStep } from './publish.ts';
 
 /**
  * Declared rather than asserted, because a request body is a boundary.
@@ -119,12 +120,24 @@ export async function confirm(db: PoolClient, workflowId: string, c: Confirmatio
   await db.query('BEGIN');
   try {
     for (const ending of c.endings) {
-      await db.query(
+      // `complete` follows from the step, not from the act of confirming.
+      //
+      // It was set to true here unconditionally, alongside a `jsonb_set` that
+      // writes the outcome without going near the schema. An `end` also
+      // requires `publishes`, so a hand-added ending came through confirmation
+      // marked finished and was then refused at publication —
+      // `stepIncomplete: ['publishes']`. The column said one thing and the
+      // gate said another, and the gate was right. A write that declares a
+      // step complete without reading it is how that got past.
+      const { rows: [row] } = await db.query<{ kind: string; declares: Record<string, unknown> }>(
         `UPDATE workflow_step
-            SET declares = jsonb_set(declares, '{outcome}', to_jsonb($2::text)),
-                complete = true
-          WHERE id = $1 AND workflow_id = $3`,
+            SET declares = jsonb_set(declares, '{outcome}', to_jsonb($2::text))
+          WHERE id = $1 AND workflow_id = $3
+        RETURNING kind, declares`,
         [ending.stepId, ending.outcome, workflowId]);
+      if (!row) continue;
+      const finished = !('incomplete' in asDraftStep({ id: ending.stepId, ...row }));
+      await db.query(`UPDATE workflow_step SET complete = $2 WHERE id = $1`, [ending.stepId, finished]);
     }
     for (const answer of c.answers) {
       // Resolved and answered are set together, and the schema will not accept

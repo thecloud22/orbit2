@@ -14,7 +14,7 @@
  * Every blocker is collected, never just the first. Somebody fixing three
  * things wants to know there are three.
  */
-import type { Blocker, Step } from '@orbit/contract';
+import { step as stepSchema, type Blocker, type Step } from '@orbit/contract';
 
 const CAN_LIE = new Set(['text', 'structural']);
 
@@ -79,6 +79,25 @@ function uses(step: DraftStep): string[] {
     case 'end': return step.publishes;
     default: return [];
   }
+}
+
+/**
+ * A stored step as it is, half-written ones included.
+ *
+ * Written out three times — in `edit.ts`, in `mint.ts` and again where the
+ * draft screen is served — which meant three places each decided for
+ * themselves what "not configured" looks like, and one of them got it wrong.
+ * Persistence is a boundary (Decision 9), and a boundary crossed three ways is
+ * three boundaries.
+ */
+export function asDraftStep(row: { id: string; kind: string; declares: Record<string, unknown> }): DraftStep {
+  const parsed = stepSchema.safeParse({ id: row.id, kind: row.kind, ...row.declares });
+  return parsed.success
+    ? parsed.data
+    : {
+        id: row.id, kind: row.kind, incomplete: true as const,
+        missing: [...new Set(parsed.error.issues.map((i) => String(i.path[0] ?? 'its configuration')))],
+      };
 }
 
 export function checkForPublication(

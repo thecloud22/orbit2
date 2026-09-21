@@ -162,6 +162,72 @@ export interface BindingShape {
   corroborate?: { tag?: string; text?: string };
 }
 
+/**
+ * What a step does not say yet, in the words the product uses everywhere else.
+ *
+ * A schema message is written for whoever wrote the schema. "expected object,
+ * received undefined" describes a field path in a discriminated union to
+ * somebody who wrote a sentence about a loan file — true, precise, and nothing
+ * they can act on. So the field is named plainly and the schema's own wording
+ * is dropped rather than appended.
+ *
+ * It lives here, beside `describeBinding`, because three places have to say
+ * the same thing about the same hole: the draft screen showing an unconfigured
+ * step, the refusal when a reading could not be stored, and the publish gate
+ * naming what blocks it. Said in three places it was said three ways — and in
+ * one of them not at all: the draft screen interpolated the field straight
+ * into a sentence and printed "undefined (undefined)".
+ */
+const PLAINLY: Record<string, string> = {
+  // what a step acts on
+  into: 'what on the page this puts a value into',
+  control: 'what on the page this presses',
+  region: 'what on the page this reads',
+  table: 'which table on the page this reads',
+  list: 'which list of rows this goes through',
+  // what it carries
+  value: 'what goes into that field',
+  produces: 'what the value it reads is called',
+  publishes: 'which values the conclusion carries',
+  outcome: 'the name of the conclusion it reaches',
+  columns: 'which columns to keep',
+  rowNamed: 'what each row is called while it is being worked on',
+  steps: 'what to do for each row',
+  // what must be true
+  then: 'what should be true once this has been done',
+  arrives: 'what should be true once the page has opened',
+  when: 'what is being compared',
+  that: 'what is being checked',
+  otherwise: 'what happens when the check does not hold',
+  // where it goes
+  path: 'where to go',
+  application: 'which system this happens in',
+  ifTrue: 'which step follows when it holds',
+  ifFalse: 'which step follows when it does not',
+  // limits and flags
+  changesARecord: 'whether doing this commits anything',
+  sensitive: 'whether what goes in is a secret',
+  mostRows: 'how many rows at most',
+  mostPasses: 'how many passes at most',
+  // handing over
+  request: 'what the person is being asked to do',
+  show: 'what the person is shown',
+  handsBack: 'what the person hands back',
+  summary: 'what this step is called',
+};
+
+export function describeMissing(field: string): string {
+  return PLAINLY[field] ?? (field ? `its ${field}` : 'a shape Orbit can carry out');
+}
+
+/** The same, as a sentence, for a step that is missing several things. */
+export function describeMissingAll(fields: string[]): string {
+  const said = [...new Set(fields)].map(describeMissing);
+  if (said.length === 0) return 'It is not a shape Orbit can carry out.';
+  if (said.length === 1) return `It does not say ${said[0]}.`;
+  return `It does not say ${said.slice(0, -1).join(', ')} or ${said.at(-1)}.`;
+}
+
 export function describeBinding(binding: unknown): string {
   const b = (binding ?? {}) as BindingShape;
   const named = b.name ? `“${b.name}”` : 'something unnamed';

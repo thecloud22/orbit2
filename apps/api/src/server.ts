@@ -47,6 +47,7 @@ createServer(async (req, res) => {
         if (verb === 'archive') { const r = await actions.archive(id, body); return json(res, r.status, r.body); }
         if (verb === 'resume')  { const r = await actions.resume(id); return json(res, r.status, r.body); }
         if (verb === 'edit-step')   { const r = await actions.editStep(id, body); return json(res, r.status, r.body); }
+        if (verb === 'configure-step') { const r = await actions.configureStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'move-step')   { const r = await actions.moveStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'delete-step') { const r = await actions.deleteStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'insert-step') { const r = await actions.insertStep(id, body); return json(res, r.status, r.body); }

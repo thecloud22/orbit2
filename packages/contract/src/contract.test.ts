@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { comparison, enterValue, valueRef } from './values.ts';
-import { STEP_KINDS, step, type StepKind } from './steps.ts';
+import { STEP_KINDS, describeMissing, describeMissingAll, step, type StepKind } from './steps.ts';
 import { object, z } from './zod.ts';
 
 test('an unknown key is refused, not quietly dropped', () => {
@@ -61,4 +61,31 @@ test('a step that binds to a page carries what a refusal will name', () => {
   assert.equal(read.success, true);
   // `required: false` is what makes "the record does not exist" expressible,
   // and therefore what makes acceptance criterion 7 writable at all.
+});
+
+test('every required field of every step kind has a phrase', () => {
+  // The draft screen, the refusal when a reading could not be stored, and the
+  // publish gate all name the same hole. Said in three places it was said
+  // three ways, and in one of them not at all — "undefined (undefined)".
+  // Driven off the schema so a new kind fails here, at the site that must
+  // handle it, rather than on somebody's screen.
+  const holes: string[] = [];
+  for (const kind of STEP_KINDS) {
+    const parsed = step.safeParse({ kind, id: crypto.randomUUID(), summary: 'x' });
+    if (parsed.success) continue;
+    for (const issue of parsed.error.issues) {
+      const field = String(issue.path[0] ?? '');
+      if (!field) continue;
+      const said = describeMissing(field);
+      if (said === `its ${field}`) holes.push(`${kind}.${field}`);
+    }
+  }
+  assert.deepEqual(holes, [], 'each of these renders as "its <field>" instead of a sentence');
+});
+
+test('a step missing several things says so as one sentence', () => {
+  assert.equal(describeMissingAll([]), 'It is not a shape Orbit can carry out.');
+  assert.match(describeMissingAll(['produces']), /^It does not say what the value it reads is called\.$/);
+  assert.match(describeMissingAll(['when', 'ifTrue', 'ifFalse']),
+    /It does not say what is being compared, which step follows when it holds or which step follows when it does not\./);
 });

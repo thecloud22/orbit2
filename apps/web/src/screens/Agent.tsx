@@ -1,15 +1,23 @@
 import { useEffect, useState } from 'react';
-import { describeBinding } from '@orbit/contract';
+import { describeBinding, describeMissingAll } from '@orbit/contract';
 import { Action, Page, Refusal, Section } from '../Page.tsx';
 import { Chip, EmptyState, Row } from '../ui.tsx';
 import { send as send2, useFetch } from '../fetching.ts';
+import { Configure } from './Configure.tsx';
+
+/** The kinds an author can add and finish today. The rest are named below. */
+const CONFIGURABLE = ['end', 'check', 'branch'] as const;
 import type { Route } from '../router.ts';
 
 interface Draft {
   workflow: { id: string; name: string; procedure: string | null; confirmed_at: string | null;
               declared_inputs: Array<{ name: string; label: string; required: boolean }>;
               live_version_id?: string | null; paused_at?: string | null };
-  steps: Array<{ id: string; position: number; kind: string; declares: Record<string, unknown>; complete: boolean }>;
+  steps: Array<{ id: string; position: number; kind: string; declares: Record<string, unknown>;
+                 complete: boolean;
+                 /** What the step does not say yet, decided by the schema
+                  *  rather than by the `complete` column somebody set. */
+                 missing: string[] }>;
   notes: Array<{ id: string; kind: string; body: string; answer: string | null; resolved_at: string | null }>;
   versions: Array<{ id: string; version: number; digest: string; published_at: string }>;
   authoring: { turns: Turn[]; producedNothing: number; costMicros: number };
@@ -66,6 +74,24 @@ function Detail({ step }: { step: Draft['steps'][number] }) {
   const d = step.declares;
   const target = targetOf(d);
   const lines: Array<[string, React.ReactNode]> = [];
+
+  // A step that says nothing is described as saying nothing, once.
+  //
+  // The per-kind lines below read fields straight out of `declares` and
+  // interpolated them, so an unconfigured step rendered its holes as prose:
+  // "Keeps it as undefined (undefined), and may legitimately find nothing" —
+  // which also asserted the step may find nothing, about a step that had not
+  // said whether it may. A branch rendered "nothing undefined nothing", an
+  // ending "Reports " and an open "Goes to ". Four spellings of the same
+  // silence, and none of them the truth.
+  if (step.missing && step.missing.length > 0) {
+    return (
+      <div style={{ padding: '2px 0 13px 101px', fontSize: 12.5, lineHeight: 1.55, maxWidth: 620 }}>
+        <div style={{ fontWeight: 600, marginBottom: 3 }}>Not configured yet</div>
+        <div style={{ color: 'var(--ink-2)' }}>{describeMissingAll(step.missing)}</div>
+      </div>
+    );
+  }
 
   if (target) lines.push(['Finds', describeBinding(target.binding)]);
 
@@ -324,6 +350,8 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const draft = useFetch<Draft>(`/api/workflows/${id}?r=${refresh}`, id);
   const [refused, setRefused] = useState<string[] | null>(null);
   const [editRefusal, setEditRefusal] = useState<string | null>(null);
+  const [configuring, setConfiguring] = useState<string | null>(null);
+  const [adding, setAdding] = useState({ kind: 'end' as string, after: 0 });
   const [opened, setOpened] = useState<Record<string, boolean>>({});
   const [showWhy, setShowWhy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -372,6 +400,12 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
    * the agent did. Changing a live agent means publishing again.
    */
   const editable = !live;
+  /** Values an earlier step reads, which is all a comparison may compare. */
+  const produced = steps.flatMap((s) => {
+    const p = s.declares['produces'] as { name?: string; type?: string } | undefined;
+    return s.kind === 'read' && p?.name ? [{ name: p.name, type: p.type ?? 'text' }] : [];
+  });
+
   const edit = async (verb: string, body: unknown) => {
     setBusy(true); setEditRefusal(null);
     const result = await send2(`/api/workflows/${id}/${verb}`, body);
@@ -477,24 +511,66 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
                 </span>
               )}
             </div>
-            {opened[s.id] && <Detail step={s} />}
+            {opened[s.id] && (
+              // An unfinished step opens into the panel that finishes it,
+              // rather than a description of what it does not say. A finished
+              // one still opens into its description; "Configure" reopens the
+              // panel, which is also how a configured step is changed.
+              editable && (configuring === s.id || s.missing.length > 0)
+                ? <Configure step={s} produced={produced} busy={busy}
+                    reachable={steps.filter((o) => o.id !== s.id)
+                      .map((o) => ({ id: o.id, position: o.position, kind: o.kind, summary: summary(o.declares) }))}
+                    onSave={(body) => { setConfiguring(null); void edit('configure-step', body); }}
+                    onCancel={() => setConfiguring(null)} />
+                : <Detail step={s} />
+            )}
             </div>
           ))}
         </div>
 
-        {/* Adding a step is hidden until a step can be configured.
-            It inserted one deliberately unfinished — "A new read step — not
-            configured yet" — and then offered no way to say what it reads.
-            Nothing in the product calls `editStep`, so the step could never be
-            completed and publication refused the draft from then on. An action
-            whose only outcome is a draft you cannot publish is worse than no
-            action. Moving, reordering and removing a step still work, because
-            those need nothing from the page.
+        {editable && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingTop: 13, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>Add a</span>
+            <select value={adding.kind} disabled={busy} aria-label="Kind of step to add"
+              onChange={(e) => setAdding((a) => ({ ...a, kind: e.target.value }))}
+              style={{ font: 'inherit', fontSize: 13, fontFamily: 'var(--mono)', padding: '5px 7px',
+                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
+              {CONFIGURABLE.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>step after</span>
+            <select value={adding.after} disabled={busy} aria-label="Where to add the step"
+              onChange={(e) => setAdding((a) => ({ ...a, after: Number(e.target.value) }))}
+              style={{ font: 'inherit', fontSize: 13, padding: '5px 7px',
+                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
+              <option value={0}>the beginning</option>
+              {steps.map((s) => <option key={s.id} value={s.position}>step {s.position} · {s.kind}</option>)}
+            </select>
+            <Action kind="ghost" disabled={busy}
+              onClick={() => edit('insert-step', { kind: adding.kind, after: adding.after })}>Add step</Action>
+          </div>
+        )}
 
-            What it takes to bring back is a way for an author to point at an
-            element without inventing a locator — Orbit derives a binding from
-            its own view of the page (Decision 15), and a typed one would be
-            the one thing the ladder exists to prevent. Planned separately. */}
+        {/* The seven kinds that are not here, said rather than hidden.
+            A control you cannot use is shown with its reason (§2), and the
+            reasons differ: three kinds name something on a page and Orbit
+            cannot yet show an author what a page offers, and three are not
+            executed at all — a version containing one publishes and then
+            halts mid-run. */}
+        {editable && (
+          <p style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.6, maxWidth: 720, paddingTop: 9 }}>
+            A <code style={{ fontFamily: 'var(--mono)' }}>read</code>,{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>enter</code>,{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>activate</code> or{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>open</code> step names something on a page, and
+            Orbit will not let anyone type that — it derives how a step finds things from its own view
+            of the page. Adding one needs Orbit to open the page and offer what is on it, which it
+            cannot do yet.{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>collect</code>,{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>forEach</code> and{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>handOff</code> are not carried out by a run at
+            all, so one would publish and then stop partway through.
+          </p>
+        )}
 
         {editRefusal && (
           <div style={{ paddingTop: 14 }}>

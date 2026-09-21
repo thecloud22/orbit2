@@ -1,4 +1,5 @@
 import { pool } from './db.ts';
+import { asDraftStep } from './publish.ts';
 
 /**
  * A draft, and how it came to say what it says.
@@ -16,9 +17,20 @@ export async function readWorkflow(id: string) {
        FROM workflow WHERE id = $1`, [id]);
   if (!workflow) return null;
 
-  const { rows: steps } = await pool.query(
-    `SELECT id, position, kind, declares, complete FROM workflow_step
+  const { rows: stepRows } = await pool.query<{
+    id: string; position: number; kind: string; declares: Record<string, unknown>; complete: boolean;
+  }>(`SELECT id, position, kind, declares, complete FROM workflow_step
       WHERE workflow_id = $1 ORDER BY position`, [id]);
+
+  // What each step does not say yet, decided by the schema rather than by the
+  // screen. `complete` is a column somebody set; this is the thing itself.
+  // They disagreed: confirmation wrote `complete = true` without re-parsing,
+  // so a hand-added ending arrived here marked finished and was then refused
+  // at publication for the `publishes` it never had.
+  const steps = stepRows.map((r) => {
+    const parsed = asDraftStep(r);
+    return { ...r, missing: 'incomplete' in parsed ? parsed.missing : [] };
+  });
   const { rows: notes } = await pool.query(
     `SELECT id, step_id, kind, body, answer, resolved_at FROM workflow_note
       WHERE workflow_id = $1 ORDER BY created_at`, [id]);

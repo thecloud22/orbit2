@@ -237,3 +237,47 @@ test('every kind of literal the contract declares is actually typed', async () =
   assert.deepEqual(surface.did,
     ['fill Amount=417000', 'fill Received=2026-09-20', 'fill Escrowed=yes', 'close']);
 });
+
+test('a check that holds carries on, and the run records what it compared', async () => {
+  // `check` had never been run. Authoring does not produce one, so until a
+  // step could be added and configured by hand there was no way to reach it —
+  // and the event it wrote was not in the vocabulary the database enforces, so
+  // the first run of one failed on a constraint.
+  const steps: Step[] = [
+    { id: crypto.randomUUID(), kind: 'read', summary: 'the score',
+      region: { label: 'Credit score', binding: byName('Credit score') },
+      produces: { name: 'creditScore', label: 'Credit score', type: 'number', required: true } },
+    { id: crypto.randomUUID(), kind: 'check', summary: 'clears the floor',
+      that: { of: 'number', operator: 'isAtLeast',
+        left: { from: 'step', value: 'creditScore' },
+        right: { from: 'literal', literal: { type: 'number', number: 620 } } },
+      otherwise: 'The credit score is below the program floor' },
+    { id: crypto.randomUUID(), kind: 'end', summary: 'done', outcome: 'found', publishes: ['creditScore'] },
+  ];
+  const result = await execute(db as never, runId, steps, {}, paperSurface({ 'Credit score': '762' }));
+  assert.equal(result.halted, null);
+  assert.equal(result.reached, 'found');
+
+  const { rows } = await db.query<{ detail: { left: string; right: string; held: boolean } }>(
+    `SELECT detail FROM run_event WHERE run_id = $1 AND kind = 'checked'`, [runId]);
+  assert.equal(rows.length, 1, 'and the event is one the record accepts');
+  assert.equal(rows[0]!.detail.held, true);
+  assert.equal(rows[0]!.detail.left, '762');
+});
+
+test('a check that does not hold stops the run, saying what was expected', async () => {
+  const steps: Step[] = [
+    { id: crypto.randomUUID(), kind: 'read', summary: 'the score',
+      region: { label: 'Credit score', binding: byName('Credit score') },
+      produces: { name: 'creditScore', label: 'Credit score', type: 'number', required: true } },
+    { id: crypto.randomUUID(), kind: 'check', summary: 'clears the floor',
+      that: { of: 'number', operator: 'isAtLeast',
+        left: { from: 'step', value: 'creditScore' },
+        right: { from: 'literal', literal: { type: 'number', number: 620 } } },
+      otherwise: 'The credit score is below the program floor' },
+    { id: crypto.randomUUID(), kind: 'end', summary: 'done', outcome: 'found', publishes: [] },
+  ];
+  const result = await execute(db as never, runId, steps, {}, paperSurface({ 'Credit score': '596' }));
+  assert.equal(result.halted?.kind, 'checkFailed');
+  assert.equal(result.halted?.describe, 'The credit score is below the program floor');
+});

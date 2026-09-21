@@ -277,7 +277,14 @@ async function runStep(ctx: Ctx, step: Step, position: number,
         const halt: Halt = { kind: decided.kind, step: position, describe: decided.describe };
         await end('halted', halt); return halt;
       }
-      await event(ctx, attemptId, 'check.evaluated', {
+      // `checked`, which is the word the vocabulary has. It wrote
+      // `check.evaluated` — by analogy with `branch.evaluated`, which is in
+      // the vocabulary and this is not — so the insert violated
+      // `run_event_kind_known` and the run failed on a constraint rather than
+      // on anything about the procedure. No `check` step had ever run: nothing
+      // in authoring produces one, and until an author could add one by hand
+      // there was no way to reach this line.
+      await event(ctx, attemptId, 'checked', {
         left: decided.left, operator: step.that.operator, right: decided.right,
         held: decided.held,
       });

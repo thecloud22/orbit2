@@ -11,6 +11,7 @@ import type { IncomingMessage } from 'node:http';
 import { pool } from './db.ts';
 import { archive, mayStart, pause, resume } from './activate.ts';
 import { confirm, confirmation } from './confirm.ts';
+import { configureStep } from './configure.ts';
 import { mintVersion } from './mint.ts';
 import { bringIn, finishRecording, startRecording } from './authoring.ts';
 import { cancelRun, retryRun, rerun } from './control.ts';
@@ -53,6 +54,13 @@ export const actions = {
       // Refused is not an error. It is the gate doing its job, and the caller
       // gets every blocker rather than the first.
       : { status: 409, body: { ...result, blockers: result.blockers.map(describeBlocker) } };
+  },
+
+  async configureStep(workflowId: string, body: unknown) {
+    const { stepId, ...declares } = (body ?? {}) as { stepId?: string };
+    if (!stepId) return { status: 400, body: { why: 'Which step is being configured?' } };
+    const result = await inTransaction((db) => configureStep(db, workflowId, stepId, declares));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
   },
 
   async pause(workflowId: string, body: unknown) {
