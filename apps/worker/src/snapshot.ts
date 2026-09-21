@@ -182,9 +182,22 @@ export interface Raw {
  * this element actually offers. The model is not consulted.
  */
 function bindingFor(raw: Raw, seenNames: Map<string, number>): Binding {
-  const unique = (name: string) => (seenNames.get(name) ?? 0) === 1;
+  // Counted as the rung actually locates: role *and* name together.
+  //
+  // It used to count names alone, across every kind of element. A login page
+  // has a heading "Sign in" above a button "Sign in", so the name counted
+  // twice, `roleAndName` was rejected as ambiguous, and the binding fell all
+  // the way to `text` — the rung Decision 15 measured as wrong most often.
+  // That binding then matched both at run time and the run failed with
+  // `controlAmbiguous`, after publication had passed.
+  //
+  // Two things sharing a name do not make `roleAndName` ambiguous unless they
+  // share the role as well; `getByRole('button', { name: 'Sign in' })` finds
+  // one thing on that page. Where the role does match — two buttons both
+  // called "Approve" — the rung is still refused, exactly as before.
+  const unique = (key: string) => (seenNames.get(key) ?? 0) === 1;
 
-  if (raw.name && raw.role && unique(raw.name)) {
+  if (raw.name && raw.role && unique(`${raw.role}|${raw.name}`)) {
     return { strategy: 'roleAndName' as Strategy, role: raw.role, name: raw.name };
   }
   if (raw.formName) return { strategy: 'formName', name: raw.formName };
@@ -217,7 +230,10 @@ export async function snapshot(page: Page | Frame): Promise<Seen[]> {
  */
 export function shape(raw: Raw[]): Seen[] {
   const counts = new Map<string, number>();
-  for (const r of raw) counts.set(r.name, (counts.get(r.name) ?? 0) + 1);
+  for (const r of raw) {
+    const key = `${r.role}|${r.name}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
 
   return raw
     .filter((r) => r.name.length > 0)
