@@ -18,4 +18,5 @@ The authoritative documents, in `docs/`:
 | `docs/slice-1-brief.md` | What is being built now, what is excluded, and the acceptance criteria. |
 | `docs/decisions.md` | The architecture decisions, with the options, trade-offs and quoted requirements. Twelve are closed. |
 | `docs/ACTIVE_TASK.md` | The authoritative record of what has actually shipped, and what is knowingly outstanding. Keep it current. |
+| `docs/TODO.md` | Work understood well enough to do and deliberately not done yet: a divergence from the spec, a gap already looked at, a decision left open. |
 | `docs/decision-draft-model-driven-browser.md` | Provenance for Decision 6. Not a pending decision; do not edit. |
