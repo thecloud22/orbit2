@@ -9,15 +9,15 @@ import {
 } from '../data/loans';
 
 /**
- * A real, downloaded file -- not another screen. Every other page in this
- * portal ends in the DOM; this is the one place a click has to be followed
- * past the browser into whatever a downloaded PDF becomes for the thing that
- * clicked it. No demo portal in this repository has triggered a download
- * before, and a recorded workflow that pulls loan figures off a document
- * rather than a page is a genuinely different capability than reading text
- * out of an element.
+ * A real PDF, opened inline in a new tab rather than saved to disk. Every
+ * other page in this portal ends in the DOM; this is the one place a click
+ * has to be followed into a document the browser's own viewer renders, not
+ * a download the OS has to be asked about. No demo portal in this
+ * repository has produced a PDF before, and a recorded workflow that pulls
+ * loan figures off a rendered document is a genuinely different capability
+ * than reading text out of an element.
  */
-export function downloadLoanSummaryPdf(loan: Loan): void {
+export function openLoanSummaryPdf(loan: Loan): void {
   const doc = new jsPDF();
   const marginX = 20;
   let y = 20;
@@ -71,5 +71,5 @@ export function downloadLoanSummaryPdf(loan: Loan): void {
   doc.setFontSize(8);
   doc.text('Meridian Home Lending -- training instance, not a real loan document.', marginX, 285);
 
-  doc.save(`${loan.loanNumber}-summary.pdf`);
+  window.open(doc.output('bloburl'), '_blank');
 }

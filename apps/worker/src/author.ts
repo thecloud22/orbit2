@@ -21,7 +21,7 @@ import type { ModelProvider } from '@orbit/model';
 import { chromium, type Page } from 'playwright';
 import { asQuestion, type Note } from './note.ts';
 import { asNumber } from './compare.ts';
-import { asText, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
+import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
 
 /**
  * What the model may answer. Note what is absent: no URL, no selector, no
@@ -357,10 +357,20 @@ export async function authorFromProcedure(opts: {
         continue;
       }
 
-      const made = makeStep(p, element);
+      const made = makeStep(p, element, procedure);
       if (!made) {
-        turns.push(record('rejected', `${p.act} needs a value name and none was given`));
+        turns.push(record('rejected',
+          `${p.act} needs a value and "${p.value ?? ''}" is neither a name nor anything the procedure says`));
         continue;
+      }
+
+      // A literal is faithful to what was written and is rarely what somebody
+      // wants forever: it fixes the agent to one record. Orbit does not guess
+      // which — it does the faithful thing and asks.
+      if (made.kind === 'enter' && made.value.from === 'literal') {
+        questions.push(asQuestion(
+          `The procedure names "${made.value.literal.type === 'text' ? made.value.literal.text : ''}" specifically, so every run would use it. `
+          + 'Is that right, or is it an example of something supplied each time?'));
       }
 
       // Conditions are checked against what has actually been read, before the
@@ -569,6 +579,45 @@ function regionFor(element: Seen): { label: string; binding: unknown } {
   };
 }
 
+/**
+ * What an `enter` step puts in, from what the model called it.
+ *
+ * The model is asked for "the name of the input it comes from", and a
+ * procedure does not always have one. *"Open the file ML-26-04502"* names the
+ * record it works on, so the honest answer is the number itself — which is not
+ * a name, and went straight into a field the contract requires to be a
+ * camelCase identifier. The whole interpretation was then discarded with a
+ * message about lower-case letters, which tells the author nothing they can
+ * act on.
+ *
+ * Three readings, in order of how sure Orbit can be:
+ *
+ *   It is already a name        — an input, as asked for.
+ *   It is in the procedure text — the author wrote that value, so it is a
+ *                                 literal. Faithful to what was written, and
+ *                                 a question is raised about whether it
+ *                                 should have been an input.
+ *   It is neither               — a label given where a name was wanted.
+ *                                 Turned into one, or the turn is rejected.
+ */
+function valueToEnter(given: string, procedure: string): Extract<Step, { kind: 'enter' }>['value'] | null {
+  const said = given.trim();
+  if (/^[a-z][a-zA-Z0-9]{0,63}$/.test(said)) return { from: 'input', value: said };
+
+  // Shaped like data *and* demonstrably written by the author. Both halves are
+  // needed: "Loan Number" appears inside "enter the loan number" and is a
+  // label, not a value, so containment alone would type the words "Loan
+  // Number" into the field. A code has no spaces and carries a digit —
+  // ML-26-04502, SR-4417, 6.375% — which is what tells the two apart.
+  const looksLikeData = !/\s/.test(said) && /\d/.test(said);
+  if (looksLikeData && procedure.toLowerCase().includes(said.toLowerCase())) {
+    return { from: 'literal', literal: { type: 'text', text: said.slice(0, 4096) } };
+  }
+
+  const asName = asValueName(said);
+  return asName ? { from: 'input', value: asName } : null;
+}
+
 /** How a condition reads to a person, in the words the procedure used. */
 function readable(is: string): string {
   return is === 'isMoreThan' ? 'above' : is === 'isAtLeast' ? 'at least'
@@ -597,15 +646,20 @@ function comparisonFor(c: { value: string; is: string; than: string }): Extract<
 }
 
 /** A proposal becomes a step, with Orbit's binding rather than the model's. */
-function makeStep(p: Proposal, element: Seen): Step | null {
+function makeStep(p: Proposal, element: Seen, procedure: string): Step | null {
   const id = crypto.randomUUID();
   const target = { label: element.labelledBy ?? element.name, binding: element.binding };
 
   if (p.act === 'enter') {
     if (!p.value) return null;
-    return { id, kind: 'enter', summary: `${p.value}, into ${target.label}`,
-      into: target, value: { from: 'input', value: p.value }, sensitive: false };
+    const supplied = valueToEnter(p.value, procedure);
+    if (!supplied) return null;
+    // What the step will read as: the literal itself, or the input's name.
+    const puts = supplied.from === 'input' ? supplied.value : p.value;
+    return { id, kind: 'enter', summary: `${puts}, into ${target.label}`,
+      into: target, value: supplied, sensitive: false };
   }
+
   if (p.act === 'activate') {
     // Only something pressable can commit anything, so a claim about a field
     // or a value is discarded rather than trusted. Orbit verifies; the model
@@ -623,3 +677,6 @@ function makeStep(p: Proposal, element: Seen): Step | null {
   }
   return null;
 }
+
+/** Reached by tests only: the rules worth pinning without driving a browser. */
+export const forTest = { valueToEnter };

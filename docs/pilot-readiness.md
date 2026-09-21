@@ -66,45 +66,27 @@ implemented, `ORBIT_CREDENTIAL_KEY` is set in `.env` and documented in
 missing is the worker calling `decrypt`, and the care around the value once it
 has it.
 
-## 1b. A procedure that names the record it works on cannot be authored
+## ~~1b. A procedure that names the record it works on cannot be authored~~ — fixed
 
-Hit in practice, from *"Go to the site, then open the file ML-26-04502. Once you
-go there, extract credit score, Debt-to-income, Loan-to-value."* The whole
-interpretation was discarded:
+Was: *"Go to the site, then open the file ML-26-04502…"* discarded the whole
+interpretation over `value.value: starts with a lower-case letter`.
 
-> This reading of the procedure did not hold together, so none of it was kept.
-> Step 2 (enter) — value.value: starts with a lower-case letter, then letters
-> and digits. Step 3 (enter) — value.value: starts with a lower-case letter,
-> then letters and digits
+Authoring can now emit a literal. What the model gives for an `enter` is read
+three ways, in order of how sure Orbit can be: a name is the input it names; a
+token shaped like data *and* written in the procedure is a literal; anything
+else is turned into a name or the turn is rejected. Both halves of the middle
+test are needed — "Loan Number" appears inside "enter the loan number" and is a
+label, so containment alone would have typed those words into the field.
 
-Three defects, in one line at `apps/worker/src/author.ts:598`:
+A literal fixes the agent to one record, so Orbit does the faithful thing and
+asks: *"The procedure names ML-26-04502 specifically, so every run would use
+it. Is that right, or is it an example of something supplied each time?"*
 
-```ts
-value: { from: 'input', value: p.value }
-```
-
-1. **Authoring can only ever emit an input reference.** The contract supports
-   `{ from: 'literal', literal: { type: 'text', text } }` and authoring never
-   produces one. A procedure that names the record it works on — which is how
-   people write procedures — has nowhere to put that name.
-2. **The value name is not normalised**, though three sibling call sites in the
-   same file normalise (`author.ts:320`, `:433`, `:434`) and `record.ts:192`
-   has `nameFor()` doing exactly this job from a field label. Authoring is the
-   one path that skips it, and the one that fails.
-3. **The refusal is in the schema's words, not the author's.** "value.value:
-   starts with a lower-case letter" is meaningless to somebody who wrote a
-   sentence about a loan file. Criterion 2 requires the refusal to *say so*;
-   this says so to a developer.
-
-The fix is not to loosen the pattern. Orbit should take the literal at its word
-— build `{ from: 'literal' }`, which is faithful to what was written — and then
-raise the ambiguity as a question, which is the product's own idiom: *"The
-procedure names ML-26-04502 specifically. Should every run use that file, or is
-it an example of something supplied each time?"* Answering the second way turns
-it into a declared input.
-
-Note this is the same failure shape as the `absenceOf` field renamed earlier
-today: the model was asked for a name and had only a value to give.
+Refusals no longer speak in the schema's words. Each field is named in the
+product's own terms and zod's message is dropped rather than appended —
+keeping it was more accurate and less useful, because an author cannot tell
+"expected object, received undefined" from a bug in Orbit, which is the doubt a
+refusal exists to remove.
 
 ## 2. The terminal surface
 

@@ -65,9 +65,11 @@ function drawSection(doc: jsPDF, y: number, title: string, fields: readonly Fiel
  * sections, a label over each value -- not the same content run together as
  * paragraphs. This is the file review page's own numbers (`loan`), its own
  * transient state (`decision`, `conditions`) turned into resolved text
- * before the call, since neither lives on the `Loan` record itself.
+ * before the call, since neither lives on the `Loan` record itself. Opened
+ * inline in a new tab, the same as `loanSummaryPdf`, rather than saved to
+ * disk.
  */
-export function downloadLoanFilePdf(
+export function openLoanFilePdf(
   loan: Loan,
   decisionLabel: string | null,
   conditionSummaries: readonly string[],

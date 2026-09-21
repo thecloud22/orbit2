@@ -90,8 +90,12 @@ test('the refusal says which step and what was wrong with it', async () => {
   assert.equal(result.problems[0]!.step, 1);
   assert.equal(result.problems[0]!.kind, 'activate');
   assert.ok(result.problems[0]!.wrong.length > 0, 'and what was missing from it');
-  assert.match(result.describe, /Step 1 \(activate\)/);
+  assert.match(result.describe, /The activate at step 1/);
   assert.match(result.describe, /none of it was kept/);
+  // And in the author's words, not the schema's. They wrote a sentence about a
+  // procedure; "control.binding: Required" is true and useless to them.
+  assert.doesNotMatch(result.describe, /\bRequired\b|Invalid input|expected/i,
+    `still speaking zod: ${result.describe}`);
 });
 
 test('every bad step is named, not the first', async () => {

@@ -248,6 +248,21 @@ export function calledIn(s: Seen): string {
 }
 
 /** Tolerates a name copied with its kind or its quotes still attached. */
+/**
+ * A value name, from whatever a person or a model called something.
+ *
+ * `name` in the contract is a camelCase identifier, and both ways in produce
+ * labels instead: a recording has "Open a file by loan number", a model
+ * answers with whatever reads naturally. Shared because authoring and
+ * recording were solving it separately and only one of them was solving it.
+ */
+export function asValueName(label: string): string {
+  const camel = label.replace(/[^a-zA-Z0-9 ]/g, ' ').trim().split(/\s+/)
+    .map((w, i) => (i === 0 ? w.toLowerCase() : w[0]!.toUpperCase() + w.slice(1).toLowerCase()))
+    .join('');
+  return /^[a-z][a-zA-Z0-9]*$/.test(camel) ? camel.slice(0, 64) : '';
+}
+
 export function normaliseName(given: string): string {
   return given
     .replace(/^(field|button|link|value|heading)\s*[\u2014-]?\s*/i, '')

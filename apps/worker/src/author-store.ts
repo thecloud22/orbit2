@@ -60,6 +60,47 @@ export async function authorAndStore(db: PoolClient, opts: {
  * model happened to say that day. The two were welded together, and a rule
  * nobody can exercise is a rule nobody can rely on.
  */
+/**
+ * What was wrong with a step, for the person who wrote the procedure.
+ *
+ * A schema message is written for whoever wrote the schema. "value.value:
+ * starts with a lower-case letter, then letters and digits" describes a field
+ * path in a discriminated union to somebody who wrote a sentence about a loan
+ * file — true, precise, and nothing they can act on.
+ *
+ * So the field is named in the terms the product uses everywhere else, and the
+ * schema's own wording is dropped rather than appended. Keeping it would be
+ * more accurate and less useful: the author cannot tell "expected object,
+ * received undefined" from a bug in Orbit, which is exactly the doubt a
+ * refusal is supposed to remove.
+ */
+const PLAINLY: Record<string, string> = {
+  value: 'Orbit could not work out what goes into that field',
+  into: 'Orbit could not work out what on the page this acts on',
+  control: 'Orbit could not work out what on the page this acts on',
+  region: 'Orbit could not work out what on the page this acts on',
+  table: 'Orbit could not work out which table on the page this reads',
+  then: 'it does not say what should be true once this has been done',
+  arrives: 'it does not say what should be true once the page has opened',
+  changesARecord: 'it does not say whether doing this commits anything',
+  outcome: 'it has no name for the conclusion it reaches',
+  produces: 'it does not say what the value it reads is called',
+  publishes: 'it does not say which values the conclusion carries',
+  path: 'it does not say where to go',
+  application: 'it does not say which system this happens in',
+  when: 'it does not say what is being compared',
+  that: 'it does not say what is being checked',
+  otherwise: 'it does not say what happens when the check does not hold',
+  sensitive: 'it does not say whether what goes in is a secret',
+};
+
+function inWords(issue: { path: PropertyKey[]; message: string }): string {
+  const field = String(issue.path[0] ?? '');
+  return PLAINLY[field] ?? (field
+    ? `Orbit did not work out its ${field}`
+    : 'it is not a shape Orbit can carry out');
+}
+
 export async function storeDraft(
   db: PoolClient,
   /** A recording has no written procedure: the demonstration is the description. */
@@ -75,14 +116,13 @@ export async function storeDraft(
     return checked.success ? [] : [{
       step: i + 1,
       kind: step.kind,
-      wrong: [...new Set(checked.error.issues.map((issue) =>
-        `${issue.path.join('.') || 'the step'}: ${issue.message}`))],
+      wrong: [...new Set(checked.error.issues.map(inWords))],
     }];
   });
   if (problems.length > 0) {
     return { stored: false, problems, turns: draft.turns,
       describe: `This reading of the procedure did not hold together, so none of it was kept. `
-        + problems.map((p) => `Step ${p.step} (${p.kind}) — ${p.wrong.join('; ')}`).join('. ') };
+        + problems.map((p) => `The ${p.kind} at step ${p.step}: ${p.wrong.join('; ')}.`).join(' ') };
   }
 
   await db.query('BEGIN');

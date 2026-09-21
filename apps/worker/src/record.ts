@@ -28,7 +28,7 @@
 import type { Step } from '@orbit/contract';
 import { chromium, type Page } from 'playwright';
 import { asQuestion, asRisk, type Note } from './note.ts';
-import { COLLECT, shape, type Raw, type Seen } from './snapshot.ts';
+import { asValueName, COLLECT, shape, type Raw, type Seen } from './snapshot.ts';
 
 export interface Touched {
   kind: 'click' | 'change';
@@ -199,13 +199,6 @@ export function stepFor(event: Touched, element: Seen): Step | null {
       into: target, value: { from: 'secret', credential: 'portalPassword' }, sensitive: true };
   }
   return { id, kind: 'enter', summary: `A value, into ${target.label}`,
-    into: target, value: { from: 'input', value: nameFor(target.label) }, sensitive: false };
+    into: target, value: { from: 'input', value: asValueName(target.label) || 'aValue' }, sensitive: false };
 }
 
-/** A declared input named after the field it goes into, for the author to rename. */
-function nameFor(label: string): string {
-  const camel = label.replace(/[^a-zA-Z0-9 ]/g, ' ').trim().split(/\s+/)
-    .map((w, i) => (i === 0 ? w.toLowerCase() : w[0]!.toUpperCase() + w.slice(1).toLowerCase()))
-    .join('');
-  return /^[a-z]/.test(camel) ? camel.slice(0, 64) : `value${camel.slice(0, 58)}`;
-}
