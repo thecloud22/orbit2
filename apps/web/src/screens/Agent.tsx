@@ -221,10 +221,13 @@ function Confirm({ draft, onDone, onCancel }: {
             </div>
             <div style={{ display: 'flex', gap: 9, marginBottom: 11 }}>
               <input style={field} value={named[e.id]?.outcome ?? ''} aria-label={`Name for conclusion ${i + 1}`}
-                placeholder="noteRateRecorded"
+                placeholder="aShortName"
                 onChange={(ev) => setNamed((n) => ({ ...n, [e.id]: { outcome: ev.target.value, label: n[e.id]?.label ?? '' } }))} />
+              {/* Its own summary, not an example borrowed from another
+                  workflow — "Note rate recorded" under "Loan Declined" reads
+                  like a value somebody left behind. */}
               <input style={field} value={named[e.id]?.label ?? ''} aria-label={`Label for conclusion ${i + 1}`}
-                placeholder="Note rate recorded"
+                placeholder={summary(e.declares)}
                 onChange={(ev) => setNamed((n) => ({ ...n, [e.id]: { outcome: n[e.id]?.outcome ?? '', label: ev.target.value } }))} />
             </div>
             {inputs.length > 0 && (
@@ -262,14 +265,11 @@ function Confirm({ draft, onDone, onCancel }: {
             })}>
             I attest this is the procedure
           </Action>
+          {/* What is missing is said by the Action itself. It used to be said
+              here as well, so the form told you twice. */}
           <button type="button" onClick={onCancel}
             style={{ font: 'inherit', fontSize: 13, color: 'var(--ink-2)', background: 'transparent',
               border: 0, cursor: 'pointer' }}>Not yet</button>
-          {missing.length > 0 && (
-            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
-              Still needed: {[...new Set(missing)].join(', ')}.
-            </span>
-          )}
         </div>
       </div>
     </Section>

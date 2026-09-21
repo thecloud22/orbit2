@@ -72,11 +72,20 @@ export async function confirm(db: PoolClient, workflowId: string, c: Confirmatio
     `SELECT count(*) AS n FROM workflow_step WHERE workflow_id = $1 AND kind = 'end'`, [workflowId]);
   if (Number(ends?.n ?? 0) === 0) blockers.push({ kind: 'workflowHasNoEnding' });
 
+  // Activation is gated on proving every ending with a real run, and those runs
+  // use these values — so an ending with no example is one nothing could ever
+  // prove. But that is only true where the workflow asks for something. A
+  // procedure that names the record it works on needs no input, a run of it
+  // needs no values, and demanding an example anyway made such a workflow
+  // impossible to confirm at all: the screen had nothing to ask for, and the
+  // gate refused what it sent.
+  const { rows: [declared] } = await db.query<{ inputs: Array<{ name: string; required: boolean }> }>(
+    `SELECT coalesce(declared_inputs, '[]'::jsonb) AS inputs FROM workflow WHERE id = $1`, [workflowId]);
+  const wanted = (declared?.inputs ?? []).filter((i) => i.required).map((i) => i.name);
+
   for (const ending of c.endings) {
-    if (Object.keys(ending.example).length === 0) {
-      // Activation is gated on proving every ending with a real run, and those
-      // runs use these values. An ending with no example is one nothing could
-      // ever prove.
+    const missing = wanted.filter((name) => !String(ending.example[name] ?? '').trim());
+    if (missing.length > 0) {
       blockers.push({ kind: 'endingHasNoExample', outcome: ending.outcome });
     }
   }

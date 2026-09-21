@@ -57,3 +57,15 @@ test('a space bar is not an answer', () => {
     endings: [], answers: [{ noteId: crypto.randomUUID(), answer: '   ' }], attested: true });
   assert.equal(given.success, false, 'trimmed before it is judged');
 });
+
+test('an ending needs an example only for what the workflow actually asks for', () => {
+  // A procedure that names the record it works on declares no input, so a run
+  // of it needs no values. Demanding an example anyway made such a workflow
+  // impossible to confirm at all: the screen had nothing to ask for, and the
+  // gate refused what it sent.
+  const given = confirmation.safeParse({
+    endings: [{ stepId: crypto.randomUUID(), outcome: 'loanApproved', label: 'Loan approved', example: {} }],
+    answers: [], attested: true,
+  });
+  assert.equal(given.success, true, 'the shape is fine; whether it is enough is the rule’s business');
+});
