@@ -721,9 +721,22 @@ export async function authorFromProcedure(opts: {
       }
 
       if (repeatsACommit(steps[steps.length - 1], made)) {
+        const label = (made as Extract<Step, { kind: 'activate' }>).control.label;
         turns.push(record('rejected',
-          `"${(made as Extract<Step, { kind: 'activate' }>).control.label}" commits something and was pressed`
-          + ' by the step before this one. Pressing it again would do it twice'));
+          `"${label}" commits something and was pressed by the step before this one.`
+          + ' Pressing it again would do it twice'));
+        // Said, not only recorded. Test case 17 is a page whose first click
+        // fails on purpose and whose second succeeds; Orbit refused the second
+        // press, kept the first, and the draft went on to report "Decision
+        // approved" for a decision that had not gone through. Pressing a
+        // committing control twice is not how trying again is expressed —
+        // §9 makes that a policy on the step, with attempts and a delay — but
+        // an author who wrote "the second click commits it" has to be told
+        // that, not left with a draft that looks like it worked.
+        questions.push(asQuestion(
+          `The procedure presses "${label}" again, and Orbit does not record pressing something that commits`
+          + ' twice — a run of this would do it twice over. If the second press is meant to be a retry after'
+          + ' the first fails, say so: that is a property of the step, and this version does not carry one.'));
         continue;
       }
 
