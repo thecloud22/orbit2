@@ -198,6 +198,55 @@ type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]:
 
 type Sends = (command: ConverseCommand) => Promise<ConverseCommandOutput>;
 
+/** Whether a JSON Schema node permits null. */
+const permitsNull = (node: unknown): boolean => {
+  const t = (node as { type?: unknown })?.type;
+  return Array.isArray(t) ? t.includes('null') : t === 'null';
+};
+
+/**
+ * Fill in required-but-nullable keys the model left out.
+ *
+ * OpenAI's strict json_schema guarantees every key listed in `required` comes
+ * back. A tool schema on Bedrock carries no such guarantee, and both Claude
+ * and Nova omit a key rather than sending an explicit null for it. Orbit's
+ * shapes declare those keys as `["string", "null"]`, so an absent one arrived
+ * as undefined and failed validation: eight of the thirteen turns in the first
+ * real Bedrock authoring session produced nothing for this reason alone, every
+ * one of them on `value` and `optional`.
+ *
+ * This asserts nothing the model did not. It fills only where the schema
+ * itself says null is a legal value, and to a schema that permits both, absent
+ * and null mean the same thing — the difference between them was the
+ * provider's, not the author's. Anything the schema does not permit to be null
+ * is left missing, so a genuinely incomplete answer still fails validation and
+ * is still recorded as having produced nothing.
+ *
+ * It lives in the provider because that is where a provider's shortfall
+ * belongs, next to the forced tool choice that exists for the same reason.
+ */
+function fillAbsentNullable(value: unknown, node: unknown): unknown {
+  const schema = node as { type?: unknown; properties?: Record<string, unknown>;
+                           required?: string[]; items?: unknown };
+  const type = schema?.type;
+  const allows = (want: string) => Array.isArray(type) ? type.includes(want) : type === want;
+
+  if (allows('object') && schema.properties && value && typeof value === 'object' && !Array.isArray(value)) {
+    const filled: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+    for (const [key, sub] of Object.entries(schema.properties)) {
+      if (key in filled) filled[key] = fillAbsentNullable(filled[key], sub);
+      else if (schema.required?.includes(key) && permitsNull(sub)) filled[key] = null;
+    }
+    return filled;
+  }
+
+  if (allows('array') && schema.items && Array.isArray(value)) {
+    return value.map((item) => fillAbsentNullable(item, schema.items));
+  }
+
+  return value;
+}
+
 export class BedrockProvider implements ModelProvider {
   readonly provider = 'bedrock';
   readonly model: string;
@@ -271,8 +320,9 @@ export class BedrockProvider implements ModelProvider {
     }
 
     // Converse hands back the arguments already parsed, so unlike OpenAI
-    // there is no JSON to fail on — only a shape to check.
-    const checked = schema.safeParse(used.input);
+    // there is no JSON to fail on — only a shape to check, once the keys this
+    // provider is entitled to leave out have been put back as null.
+    const checked = schema.safeParse(fillAbsentNullable(used.input, shape));
     return checked.success
       ? { ...meta, value: checked.data }
       : { ...meta, value: null, refusedBecause: checked.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };

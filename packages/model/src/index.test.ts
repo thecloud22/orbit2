@@ -108,6 +108,90 @@ test('a model with no price held says so, rather than reporting nothing spent', 
   assert.equal(answered.costMicros, 0);
 });
 
+/** The shape authoring actually sends, in miniature: nullable keys, required. */
+const walkSchema = z.object({
+  act: z.enum(['enter', 'read']),
+  element: z.string().nullable(),
+  value: z.string().nullable(),
+  optional: z.boolean().nullable(),
+});
+const walkShape = {
+  type: 'object',
+  properties: {
+    act: { type: 'string', enum: ['enter', 'read'] },
+    element: { type: ['string', 'null'] },
+    value: { type: ['string', 'null'] },
+    optional: { type: ['boolean', 'null'] },
+  },
+  required: ['act', 'element', 'value', 'optional'],
+  additionalProperties: false,
+};
+
+test('a key the provider is entitled to omit is read as null, not as a failure', async () => {
+  // Exactly what a real session produced: Bedrock honours `required` far more
+  // loosely than OpenAI's strict mode, and sent neither value nor optional.
+  // Eight of thirteen turns produced nothing for this alone.
+  const fake = answering({
+    output: { message: { role: 'assistant', content: [{ toolUse: { toolUseId: 't', name: 'proposal',
+      input: { act: 'read', element: 'Credit score' } } }] } },
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+  });
+  const answered = await new BedrockProvider('anthropic.claude-x', 'eu-west-1', fake.send)
+    .propose(asked, walkSchema, walkShape);
+
+  assert.deepEqual(answered.value, { act: 'read', element: 'Credit score', value: null, optional: null });
+});
+
+test('a key the schema does not permit to be null is still missing, and still fails', async () => {
+  // The filling is not a way of making any answer pass. `act` is required and
+  // not nullable, so an answer without it produces nothing, as it should.
+  const fake = answering({
+    output: { message: { role: 'assistant', content: [{ toolUse: { toolUseId: 't', name: 'proposal',
+      input: { element: 'Credit score' } } }] } },
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+  });
+  const answered = await new BedrockProvider('anthropic.claude-x', 'eu-west-1', fake.send)
+    .propose(asked, walkSchema, walkShape);
+
+  assert.equal(answered.value, null);
+  assert.match(answered.refusedBecause ?? '', /act/);
+});
+
+test('nested and repeated parts of an answer are filled the same way', async () => {
+  const nestedSchema = z.object({
+    why: z.string(),
+    whenAbsent: z.object({ outcome: z.string(), label: z.string().nullable() }).nullable(),
+    onlyIf: z.array(z.object({ value: z.string(), missing: z.string().nullable() })).nullable(),
+  });
+  const nestedShape = {
+    type: 'object',
+    properties: {
+      why: { type: 'string' },
+      whenAbsent: { type: ['object', 'null'],
+        properties: { outcome: { type: 'string' }, label: { type: ['string', 'null'] } },
+        required: ['outcome', 'label'] },
+      onlyIf: { type: ['array', 'null'],
+        items: { type: 'object',
+          properties: { value: { type: 'string' }, missing: { type: ['string', 'null'] } },
+          required: ['value', 'missing'] } },
+    },
+    required: ['why', 'whenAbsent', 'onlyIf'],
+  };
+  const fake = answering({
+    output: { message: { role: 'assistant', content: [{ toolUse: { toolUseId: 't', name: 'proposal',
+      input: { why: 'because', whenAbsent: { outcome: 'noSuchFile' }, onlyIf: [{ value: 'score' }] } } }] } },
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+  });
+  const answered = await new BedrockProvider('anthropic.claude-x', 'eu-west-1', fake.send)
+    .propose(asked, nestedSchema, nestedShape);
+
+  assert.deepEqual(answered.value, {
+    why: 'because',
+    whenAbsent: { outcome: 'noSuchFile', label: null },
+    onlyIf: [{ value: 'score', missing: null }],
+  });
+});
+
 test('arguments the provider let through are still checked against Orbit\'s schema', async () => {
   const fake = answering({
     output: { message: { role: 'assistant', content: [{ toolUse: { toolUseId: 't', name: 'proposal', input: { control: 'Open file' } } }] } },
