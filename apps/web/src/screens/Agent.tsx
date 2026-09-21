@@ -335,8 +335,15 @@ function Proving({ versionId, onDone }: { versionId: string; onDone: () => void 
   const unproved = (cases ?? []).filter((c) => !c.provedBy);
   const send = async (verb: 'tests' | 'activate') => {
     setBusy(true); setRefused(null);
-    const result = await send2(`/api/versions/${versionId}/${verb}`, {});
+    const result = await send2<{ blockers?: string[]; unproved?: string[] }>(
+      `/api/versions/${versionId}/${verb}`, {});
     setBusy(false);
+    const value = result.ok ? result.value : result.value;
+    if (value?.blockers?.length) { setRefused(value.blockers); return; }
+    if (value?.unproved?.length) {
+      setRefused(value.unproved.map((u) => `"${u}" has not been proved by a run yet.`));
+      return;
+    }
     if (!result.ok) { setRefused([result.why]); return; }
     if (verb === 'activate') onDone();
   };
@@ -429,11 +436,17 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
     setBusy(true); setRefused(null);
     const result = await send2<{ blockers?: string[]; unproved?: string[] }>(path, body);
     setBusy(false);
+    // Blockers first, whichever way the answer arrived. A refusal comes back
+    // as 409, which is not the same thing as something going wrong, and
+    // reporting it as a status code tells an author nothing they can act on.
+    const value = result.ok ? result.value : result.value;
+    if (value?.blockers?.length) { setRefused(value.blockers); return; }
+    if (value?.unproved?.length) {
+      setRefused(value.unproved.map((u) => `"${u}" has not been proved by a run yet.`));
+      return;
+    }
     if (!result.ok) { setRefused([result.why]); return; }
-    const value = result.value;
-    if (value.blockers?.length) setRefused(value.blockers);
-    else if (value.unproved?.length) setRefused(value.unproved.map((u) => `"${u}" has not been proved by a run yet.`));
-    else setRefresh((n) => n + 1);
+    setRefresh((n) => n + 1);
   };
 
   /**
