@@ -145,8 +145,9 @@ async function claimRecording(): Promise<string | null> {
 async function recordOne(sessionId: string) {
   const db = await pool.connect();
   try {
-    const { rows: [s] } = await db.query<{ name: string; start_path: string; host: string; credential_name: string | null }>(
-      `SELECT s.name, s.start_path, (r.addresses->0->>'host') AS host, r.credential_name
+    const { rows: [s] } = await db.query<{ name: string; start_path: string; host: string;
+      credential_name: string | null; sign_in_as: string | null }>(
+      `SELECT s.name, s.start_path, (r.addresses->0->>'host') AS host, r.credential_name, r.sign_in_as
          FROM recording_session s
          JOIN application_revision r ON r.application_id = s.application_id
         WHERE s.id = $1 ORDER BY r.revision DESC LIMIT 1`, [sessionId]);
@@ -181,6 +182,7 @@ async function recordOne(sessionId: string) {
       origin: `http://${s.host}`,
       startPath: s.start_path,
       credentialName: s.credential_name,
+      signsInAs: s.sign_in_as,
       until: finished,
       onStep: (step, on) => {
         console.log(`  captured: ${step.kind.padEnd(9)} ${step.summary}`);
@@ -281,7 +283,7 @@ async function runOne(runId: string) {
     console.log(`  ${row.reference}: ${steps.length} steps against ${origin} (${app.surface})`);
 
     const { halted, values, reached } = await execute(
-      db, runId, steps, row.inputs, await open(origin));
+      db, runId, steps, row.inputs, await open(origin), app.sign_in_as ?? null);
 
     if (halted) {
       // Cancelling is a decision, not a fault. §13 records a cancelled run as

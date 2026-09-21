@@ -119,6 +119,9 @@ export async function record(opts: {
   /** What the application's registry calls its password. A recorded sign-in
    *  names it; without one the sign-in cannot be recorded at all. */
   credentialName?: string | null;
+  /** The account the registry says this application signs in as. A field
+   *  filled in with exactly this value is the sign-in, not run data. */
+  signsInAs?: string | null;
 }): Promise<Recording> {
   const { page, close } = await (opts.open ?? aWindowTheyCanSee)();
   const steps: Step[] = [];
@@ -150,7 +153,8 @@ export async function record(opts: {
       return;
     }
 
-    const step = stepFor(event, element, opts.credentialName ?? null);
+    const step = stepFor(event, element, {
+      credentialName: opts.credentialName ?? null, signsInAs: opts.signsInAs ?? null });
     if (!step && event.sensitive) {
       raise(asQuestion('A password was typed and no credential is registered for this application. '
         + 'Register one first — the value is never kept, so Orbit needs a name to look it up by at run time.'));
@@ -189,7 +193,13 @@ export async function record(opts: {
   return { steps, questions, touched };
 }
 
-export function stepFor(event: Touched, element: Seen, credentialName?: string | null): Step | null {
+export function stepFor(
+  event: Touched,
+  element: Seen,
+  registry?: { credentialName?: string | null; signsInAs?: string | null } | null,
+): Step | null {
+  const credentialName = registry?.credentialName ?? null;
+  const signsInAs = registry?.signsInAs ?? null;
   const id = crypto.randomUUID();
   const target = { label: element.labelledBy ?? element.name, binding: element.binding };
 
@@ -212,6 +222,22 @@ export function stepFor(event: Touched, element: Seen, credentialName?: string |
     return { id, kind: 'enter', summary: `A secret, into ${target.label}`,
       into: target, value: { from: 'secret', credential: credentialName }, sensitive: true };
   }
+  // The other half of the sign-in. A password is recognised by the page — it
+  // says the field is a secret — and there is no such marker on the box above
+  // it, so the account is recognised by what was typed: the person
+  // demonstrating typed the name the registry already holds for this
+  // application. That is evidence rather than a guess about the label, and a
+  // field filled in with anything else stays what it looks like, a value
+  // supplied per run.
+  //
+  // Without this the recorder declared `userId` as a run input, which asked
+  // whoever started a run to type the service account's name and let them
+  // choose a different one.
+  if (signsInAs && event.value?.trim() === signsInAs.trim()) {
+    return { id, kind: 'enter', summary: `The registered account, into ${target.label}`,
+      into: target, value: { from: 'account' }, sensitive: false };
+  }
+
   return { id, kind: 'enter', summary: `A value, into ${target.label}`,
     into: target, value: { from: 'input', value: asValueName(target.label) || 'aValue' }, sensitive: false };
 }

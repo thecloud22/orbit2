@@ -49,14 +49,17 @@ export async function authorAndStore(db: PoolClient, opts: {
   inputs: Record<string, string>;
   model: ModelProvider;
 }): Promise<Stored | NotStored> {
-  // What the application calls its password, so a sign-in step can name a
-  // credential that exists rather than one invented here.
-  const { rows: [registered] } = await db.query<{ credential_name: string | null }>(
-    `SELECT r.credential_name FROM application_revision r
+  // The sign-in the registry holds: what the application calls its password,
+  // and the account it signs in as. Both so a sign-in step can refer to what
+  // exists rather than to something invented here — and so the account never
+  // becomes a value somebody is asked for when they start a run.
+  const { rows: [registered] } = await db.query<{ credential_name: string | null; sign_in_as: string | null }>(
+    `SELECT r.credential_name, r.sign_in_as FROM application_revision r
       WHERE r.application_id = $1 ORDER BY r.revision DESC LIMIT 1`, [opts.applicationId]);
 
-  return storeDraft(db, opts,
-    await authorFromProcedure({ ...opts, credentialName: registered?.credential_name ?? null }));
+  return storeDraft(db, opts, await authorFromProcedure({ ...opts,
+    credentialName: registered?.credential_name ?? null,
+    signsInAs: registered?.sign_in_as ?? null }));
 }
 
 /**

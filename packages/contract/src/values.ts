@@ -72,8 +72,29 @@ export const credentialName = z
 
 export const secretRef = object({ from: z.literal('secret'), credential: credentialName });
 
-/** What an `enter` step may put into a field — the one place a secret is allowed. */
-export const enterValue = z.union([valueRef, secretRef]);
+/**
+ * The account the registry says this application signs in as.
+ *
+ * It carries no name because there is nothing to name: the value is on the
+ * application's revision, beside the credential the password is filed under,
+ * and a version copies both. The pair is the sign-in.
+ *
+ * It exists because the alternative was making the account a declared input.
+ * A recorded sign-in typed a user id into a box, so the recorder declared
+ * `userId` as something supplied at the start of every run — which asked the
+ * person starting it to type the service account's name, put that name in
+ * `run.inputs` and in the workflow's example, and let whoever started a run
+ * choose which account the agent signed in as. None of those is what a
+ * registered account means.
+ */
+export const accountRef = object({ from: z.literal('account') });
+
+/**
+ * What an `enter` step may put into a field — the one place a secret or the
+ * registered account is allowed. Both are the sign-in, and neither is a value
+ * a run may be started with, compared against or made to publish.
+ */
+export const enterValue = z.union([valueRef, secretRef, accountRef]);
 export type EnterValue = z.infer<typeof enterValue>;
 
 const sides = { left: valueRef, right: valueRef };

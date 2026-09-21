@@ -10,6 +10,7 @@
  * interrupted case and is found by a query rather than by inference.
  */
 import type { ErrorKind, Step } from '@orbit/contract';
+import { readCredential } from '@orbit/credentials';
 import type { PoolClient } from 'pg';
 import { describeRefusal, type Binding } from './binder.ts';
 import { capture } from './evidence.ts';
@@ -26,6 +27,9 @@ interface Ctx {
   surface: Surface;
   values: Map<string, string | null>;
   inputs: Record<string, string>;
+  /** The account the version's application signs in as. Not an input: it is
+   *  on the version, so no run can be started as a different one. */
+  account: string | null;
   /** The ending actually reached, which is not the last step in the list. */
   reached: string | null;
 }
@@ -41,6 +45,10 @@ interface Ctx {
 function resolveRef(ctx: Ctx, ref: { from: string; value?: string; literal?: unknown }): string | null {
   if (ref.from === 'step') return ctx.values.get(ref.value ?? '') ?? null;
   if (ref.from === 'input') return ctx.inputs[ref.value ?? ''] ?? null;
+  // Never on either side of a comparison — the contract does not allow it
+  // there — so this is only ever reached for an `enter`, where the account is
+  // read off the version rather than off the run.
+  if (ref.from === 'account') return ctx.account;
   if (ref.from === 'literal') {
     const l = ref.literal as { type: string; text?: string; number?: number; date?: string; yesNo?: boolean };
     return l.type === 'text' ? l.text ?? null
@@ -74,10 +82,28 @@ interface Shows {
   at: { x: number; y: number; width: number; height: number };
 }
 
-async function screenshot(ctx: Ctx, attemptId: string, shows?: Shows | null) {
-  // Sign-in happened before capture started, so nothing here can hold a
-  // credential — which is what makes deferring redaction safe rather than
-  // reckless (Decision 4 item 13).
+async function screenshot(ctx: Ctx, attemptId: string, shows?: Shows | null, withhold?: string) {
+  // A picture of a step that handled a secret is not taken.
+  //
+  // The comment that stood here said sign-in happened before capture started,
+  // so nothing captured could hold a credential. That stopped being true the
+  // moment a sign-in became a step like any other: the run types the password
+  // and then photographs the page it typed it into. A password box renders as
+  // dots, so in practice the pixels would not carry it — which is exactly the
+  // kind of reasoning criterion 11 is written to make unnecessary. It says a
+  // secret never appears in any artefact, and the way to mean that is to have
+  // no artefact rather than a safe-looking one.
+  //
+  // A row is still written. §12's record says what happened at every step,
+  // and "there is a picture and you may not see it" is a different statement
+  // from "nothing was recorded here".
+  if (withhold) {
+    await ctx.db.query(
+      `INSERT INTO artefact (run_id, attempt_id, kind, withheld, withheld_why)
+       VALUES ($1, $2, 'screenshot', true, $3)`,
+      [ctx.runId, attemptId, withhold]);
+    return;
+  }
   const shot = await ctx.surface.capture();
   const { digest, bytes, mediaType } = await capture(shot.bytes, shot.mediaType);
   await ctx.db.query(
@@ -128,8 +154,40 @@ async function runStep(ctx: Ctx, step: Step, position: number,
         await end('halted', halt); return halt;
       }
       const ref = step.value;
-      const value = ref.from === 'input' ? ctx.inputs[ref.value] ?? ''
-        : ref.from === 'literal' && ref.literal.type === 'text' ? ref.literal.text : '';
+      if (ref.from === 'secret') {
+        // The one place a secret is read, and the only moment it exists in
+        // this process. It is not put in `ctx.values`, not written to an
+        // event, and the picture below is withheld rather than taken.
+        const held = await readCredential(ctx.db, ref.credential);
+        if (held === null) {
+          // It used to be typed as an empty string: the field was filled with
+          // nothing, the form was submitted, and the step was recorded as
+          // having gone fine. A sign-in that cannot happen is said.
+          const halt = { kind: 'credentialMissing' as ErrorKind, step: position,
+            describe: `Step ${position} signs in with the password registered as ${ref.credential}, and no value is filed under that name.` };
+          await end('halted', halt); return halt;
+        }
+        await found.it.fill(held);
+        await event(ctx, attemptId, 'entered', { into: step.into.label, by: found.by, secret: true });
+        await screenshot(ctx, attemptId, null,
+          `A secret was entered at step ${position}. §2: a secret never appears in any artefact.`);
+        await end('ok'); return 'ok';
+      }
+      if (ref.from === 'account' && !ctx.account) {
+        // Said, not typed as nothing. The version names the registered
+        // account and this deployment has none recorded, which is a sign-in
+        // that cannot happen — and an empty user id would be entered, pressed
+        // and recorded as a step that went fine.
+        const halt = { kind: 'credentialMissing' as ErrorKind, step: position,
+          describe: `Step ${position} signs in as the account registered for this application, and no account is recorded against it.` };
+        await end('halted', halt); return halt;
+      }
+      // `resolveRef` rather than a second expression here. The one that used
+      // to stand in its place handled an input and a *text* literal, and
+      // everything else — a number, a date, a yes/no — fell through to an
+      // empty string, silently. The contract declares four kinds of literal
+      // and three of them typed nothing.
+      const value = resolveRef(ctx, ref) ?? '';
       const intoBox = await found.it.where();
       await found.it.fill(value);
       await event(ctx, attemptId, 'entered', { into: step.into.label, by: found.by });
@@ -253,8 +311,8 @@ async function runStep(ctx: Ctx, step: Step, position: number,
  * discovering what it is driving, so it cannot come to depend on one.
  */
 export async function execute(db: PoolClient, runId: string, steps: Step[],
-  inputs: Record<string, string>, surface: Surface) {
-  const ctx: Ctx = { db, runId, surface, values: new Map(), inputs, reached: null };
+  inputs: Record<string, string>, surface: Surface, account: string | null = null) {
+  const ctx: Ctx = { db, runId, surface, values: new Map(), inputs, account, reached: null };
   const positionOf = new Map(steps.map((s, i) => [s.id, i + 1]));
   try {
     let position = 1;

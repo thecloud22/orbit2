@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@orbit/contract": "file:../../packages/contract",
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "@orbit/credentials": "file:../../packages/credentials"
   },
   "devDependencies": {
     "@types/node": "^22",

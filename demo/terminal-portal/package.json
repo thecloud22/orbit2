@@ -17,8 +17,6 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@orbit/executor-x3270": "workspace:*",
-    "@orbit/screen-mapping": "workspace:*",
     "@types/node": "^26.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.9.0"

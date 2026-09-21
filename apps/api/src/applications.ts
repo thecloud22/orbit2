@@ -21,8 +21,29 @@ import type { PoolClient } from 'pg';
 import { object, z } from '@orbit/contract';
 import { setCredential } from './credentials.ts';
 
+/**
+ * The host and port, out of whatever somebody pasted.
+ *
+ * A run opens the application at `http://` + this, so a scheme typed here
+ * produced `http://http://localhost:4101` and every run and every recording
+ * failed with a name that could not be resolved — after the registration had
+ * been accepted, which is the wrong place to find out.
+ *
+ * A scheme is stripped rather than refused: copying the address out of a
+ * browser's bar is the obvious thing to do, and there is only one thing it
+ * could have meant. A path is not stripped, because there is a field for it
+ * beside this one and quietly dropping it would point every run at the wrong
+ * page instead of at no page — a failure nobody would see.
+ */
+const host = z.string().trim().min(1).max(255)
+  .transform((given) => given.replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, '').replace(/\/+$/, ''))
+  .refine((h) => h.length > 0, 'needs a host')
+  .refine((h) => !h.includes('/'), 'is the host and port only — a path belongs in the box beside it')
+  .refine((h) => /^(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9._-]+)(:\d{1,5})?$/.test(h),
+    'does not look like a host and port');
+
 const address = object({
-  host: z.string().trim().min(1).max(255),
+  host,
   pathPrefix: z.string().trim().max(255).default('/'),
 });
 

@@ -37,6 +37,8 @@ const ref = (r: unknown): string => {
   const v = r as { from?: string; value?: string; literal?: Record<string, unknown> };
   if (v?.from === 'step') return `the ${v.value} this run read`;
   if (v?.from === 'input') return `the ${v.value} the run was started with`;
+  if (v?.from === 'account') return 'the account this application is registered to sign in as';
+  if (v?.from === 'secret') return 'the password registered for this application';
   if (v?.from === 'literal') {
     const l = v.literal ?? {};
     return String(l['text'] ?? l['number'] ?? l['date'] ?? (l['yesNo'] ? 'yes' : 'no'));

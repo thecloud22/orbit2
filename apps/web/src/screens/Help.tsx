@@ -28,7 +28,7 @@ const TOPICS: Array<{ topic: string; answers: Array<{ q: string; a: string }> }>
     { q: 'What do the two headings at the top mean?',
       a: 'The left one is what happened technically — did the work complete. The right one is what the agent concluded about your business. They are never merged, because "succeeded" and "no such record" are both true at once and collapsing them loses one of them.' },
     { q: 'Why is a screenshot missing?',
-      a: 'If it says withheld, it was never stored, and the reason is given. That happens when a secret was typed into a field Orbit could not confirm was masked. An unreadable record is recoverable; a leaked credential is not.' },
+      a: 'If it says withheld, it was never stored, and the reason is given. That happens on any step that entered a secret — the picture is not taken rather than taken and judged safe. An unreadable record is recoverable; a leaked credential is not.' },
     { q: 'Can I trust the screenshots?',
       a: 'Each one carries a digest taken when it was captured, and Orbit re-checks the bytes against it every time it serves one. If they do not match you get a notice instead of a picture, rather than an image that may have changed.' },
   ] },

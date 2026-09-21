@@ -61,7 +61,7 @@ test('a captured password becomes a named credential, not a value', () => {
     index: 1, what: 'field', role: 'textbox', name: 'Password',
     binding: { strategy: 'formName', name: 'passwd' },
   };
-  const step = stepFor({ kind: 'change', value: null, sensitive: true }, field, 'UNDERWRITING_PW');
+  const step = stepFor({ kind: 'change', value: null, sensitive: true }, field, { credentialName: 'UNDERWRITING_PW' });
   assert.equal(step?.kind, 'enter');
   assert.equal(step.sensitive, true);
   // A secret is referred to by name. There is nowhere in the step for a value,
@@ -139,4 +139,38 @@ test('a demonstration against the real application becomes steps', async () => {
   const caution = result.questions.find((q) => /one way the procedure can end/.test(q.body));
   assert.ok(caution, 'it says so rather than implying the other paths do not exist');
   assert.equal(caution!.kind, 'risk');
+});
+
+// ── the account is the other half of the sign-in ─────────────────────────
+
+const userId: Seen = {
+  index: 1, what: 'field', role: 'textbox', name: 'User ID',
+  binding: { strategy: 'roleAndName', role: 'textbox', name: 'User ID' },
+};
+
+test('typing the registered account refers to it, rather than declaring an input', () => {
+  // The recorder declared `userId` as a value supplied at the start of every
+  // run, so the confirmation screen asked the author for an example user id —
+  // which put the service account's name in the workflow's example and in
+  // every run's inputs, and let whoever started a run sign in as somebody
+  // else.
+  const step = stepFor({ kind: 'change', value: 'admin', sensitive: false }, userId,
+    { credentialName: 'app_x', signsInAs: 'admin' });
+  assert.equal(step?.kind, 'enter');
+  assert.equal(step.value.from, 'account');
+  assert.equal(JSON.stringify(step).includes('admin'), false,
+    'the account is referred to, not copied into the step');
+});
+
+test('a field given anything else is still a value the run supplies', () => {
+  const step = stepFor({ kind: 'change', value: 'ML-26-04502', sensitive: false }, userId,
+    { credentialName: 'app_x', signsInAs: 'admin' });
+  assert.equal(step?.kind, 'enter');
+  assert.equal(step.value.from, 'input');
+});
+
+test('with no account registered, a typed value stays an input', () => {
+  const step = stepFor({ kind: 'change', value: 'admin', sensitive: false }, userId, { signsInAs: null });
+  assert.equal(step?.kind, 'enter');
+  assert.equal(step.value.from, 'input');
 });

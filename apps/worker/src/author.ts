@@ -245,6 +245,9 @@ export async function authorFromProcedure(opts: {
    *  sign-in step names this; without it Orbit has no secret to refer to and
    *  will not invent one. */
   credentialName?: string | null;
+  /** The account the registry says this application signs in as. A field
+   *  given exactly this value is the sign-in, not something a run supplies. */
+  signsInAs?: string | null;
   model: ModelProvider;
   maxTurns?: number;
 }): Promise<AuthoredDraft> {
@@ -361,7 +364,8 @@ export async function authorFromProcedure(opts: {
         continue;
       }
 
-      const made = makeStep(p, element, procedure, opts.credentialName ?? null);
+      const made = makeStep(p, element, procedure,
+        { credentialName: opts.credentialName ?? null, signsInAs: opts.signsInAs ?? null });
       if (!made) {
         const why = element.secret
           ? `"${element.labelledBy ?? element.name}" takes a password and no credential is registered for this application`
@@ -658,7 +662,8 @@ function comparisonFor(c: { value: string; is: string; than: string }): Extract<
 
 /** A proposal becomes a step, with Orbit's binding rather than the model's. */
 function makeStep(p: Proposal, element: Seen, procedure: string,
-  credentialName: string | null): Step | null {
+  registry: { credentialName: string | null; signsInAs: string | null }): Step | null {
+  const { credentialName, signsInAs } = registry;
   const id = crypto.randomUUID();
   const target = { label: element.labelledBy ?? element.name, binding: element.binding };
 
@@ -674,6 +679,16 @@ function makeStep(p: Proposal, element: Seen, procedure: string,
       if (!credentialName) return null;
       return { id, kind: 'enter', summary: `A secret, into ${target.label}`,
         into: target, value: { from: 'secret', credential: credentialName }, sensitive: true };
+    }
+
+    // The account is the other half of the sign-in, and it is recognised the
+    // same way the recorder recognises it: by the value being the one the
+    // registry already holds. It is not a declared input — nobody starting a
+    // run should be asked to type the service account's name, or able to
+    // choose a different one.
+    if (signsInAs && p.value.trim() === signsInAs.trim()) {
+      return { id, kind: 'enter', summary: `The registered account, into ${target.label}`,
+        into: target, value: { from: 'account' }, sensitive: false };
     }
 
     const supplied = valueToEnter(p.value, procedure);

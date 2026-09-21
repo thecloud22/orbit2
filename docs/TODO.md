@@ -101,3 +101,40 @@ screen.
 **What closing it takes.** Either leave it — it is retired, so the picker does
 not offer it — or a migration that removes it deliberately, which is a decision
 about whether registry rows may ever be removed rather than a tidy-up.
+
+---
+
+## An address was accepted that no run could open
+
+**What.** The Admin address box takes a host and port; the worker opens
+`http://` + it. A full URL pasted in produced `http://http://localhost:4101`,
+and every run and every recording against that application failed with
+`ERR_NAME_NOT_RESOLVED` — after the registration had been accepted.
+
+**What was done.** A scheme is stripped at the boundary, because pasting the
+address out of a browser's bar is the obvious thing to do and there is only
+one thing it could have meant. A path is *refused*, not stripped: there is a
+field for it beside the box, and quietly dropping it would point every run at
+the wrong page rather than at no page.
+
+**What is still open.** Nothing checks that the address answers. The first
+time anybody learns an application is unreachable is a failed run, which is
+the same shape of problem one layer up.
+
+---
+
+## Publication does not refuse a version whose sign-in cannot happen
+
+**What.** A version may name the registered account and the registered
+password for an application that has neither. It publishes, and halts at run
+time with `credentialMissing`.
+
+**Why it is not simply a bug.** Halting is correct and loud; the question is
+only whether the gate should have caught it. It belongs with pilot-readiness
+item 3, "publication must refuse what this deployment cannot execute", which
+is the same question for `handOff`, `collect`, `forEach` and the terminal
+surface. Answering it once is better than four times.
+
+**What closing it takes.** `checkForPublication` would need to know the
+application's sign-in, which means `mint.ts` reading the registered
+applications before it checks rather than after, and a blocker kind.

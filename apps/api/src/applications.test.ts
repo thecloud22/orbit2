@@ -135,6 +135,40 @@ test('surface is not something an edit can carry — it is fixed at registration
   assert.equal(result.ok, false);
 });
 
+// ── the address ─────────────────────────────────────────────────────────
+
+test('an address pasted out of a browser keeps only the host and port', async () => {
+  // `http://` is prepended when a run opens the application, so a scheme
+  // typed here produced `http://http://localhost:4101` and every run and
+  // every recording failed on a name that could not be resolved — after the
+  // registration had been accepted.
+  const name = `App ${crypto.randomUUID().slice(0, 6)}`;
+  const result = await registerApplication(db as never,
+    asked({ name, addresses: [{ host: 'http://localhost:4101/', pathPrefix: '/' }] }));
+  assert.equal(result.ok, true);
+
+  const { rows } = await db.query<{ addresses: Array<{ host: string }> }>(
+    `SELECT r.addresses FROM application_revision r JOIN application a ON a.id = r.application_id
+      WHERE a.name = $1`, [name]);
+  assert.equal(rows[0]!.addresses[0]!.host, 'localhost:4101');
+});
+
+test('an address carrying a path is refused, not quietly trimmed', async () => {
+  // There is a field for the path beside this one. Dropping it would point
+  // every run at the wrong page rather than at no page, which is worse: a
+  // failure nobody sees.
+  const result = await registerApplication(db as never,
+    asked({ addresses: [{ host: 'https://portal.example.internal/app', pathPrefix: '/' }] }));
+  assert.equal(result.ok, false);
+  assert.match(result.ok === false ? result.because : '', /path belongs in the box beside it/);
+});
+
+test('something that is not a host is refused', async () => {
+  const result = await registerApplication(db as never,
+    asked({ addresses: [{ host: 'the underwriting portal', pathPrefix: '/' }] }));
+  assert.equal(result.ok, false);
+});
+
 // ── the credential's value ──────────────────────────────────────────────
 // Amends Decision 5 item 5 (migration 0014): a value may now be filed
 // through this path rather than only out of band. What is worth proving is

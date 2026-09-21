@@ -23,48 +23,45 @@ hits in the first week.
 
 ---
 
-## 1. A secret is typed into the page as an empty string
+## ~~1. A secret is typed into the page as an empty string~~ — fixed
 
-**The sharpest defect found, and it is silent.**
+Was: one expression in `execute.ts` handled an input and a *text* literal, and
+everything else fell to `''`. A secret, a number, a date and a yes/no all
+typed nothing, and the step recorded as `ok`.
 
-One expression in `apps/worker/src/execute.ts` decides what an `enter` step
-types:
+Now the whole reference is resolved through `resolveRef`, so the four literal
+kinds the contract declares are the four it types, and a sign-in is read from
+where it is registered rather than from the run:
 
-```ts
-const value = ref.from === 'input' ? ctx.inputs[ref.value] ?? ''
-  : ref.from === 'literal' && ref.literal.type === 'text' ? ref.literal.text : '';
-```
+- **The password.** `@orbit/credentials` is a package rather than a file in
+  `apps/api`, because the API writes these and the worker reads them and two
+  implementations of one encryption format drift silently — which is the
+  arrangement that produced the evidence store the worker wrote to and the API
+  could not read from. `readCredential` is the one query anywhere that selects
+  `secret_enc`.
+- **The account.** `{ from: 'account' }` (`values.ts`) reads the account off
+  the version's own copy of the application. It exists because the alternative
+  — the recorder declaring `userId` as an input — asked whoever started a run
+  to type the service account's name, put it in `workflow.examples` and every
+  `run.inputs`, and let them choose a different account.
+- **Neither can happen quietly.** A password nobody filed, or an account the
+  version does not record, halts with `credentialMissing` naming the step.
+  That error kind was in the vocabulary and unreachable.
+- **The picture of that step is withheld, not taken.** A password box renders
+  as dots, so the pixels would very likely not carry it — which is the kind of
+  reasoning criterion 11 exists to make unnecessary. A row is still written,
+  carrying its reason: §12 distinguishes "there is a picture you may not see"
+  from "nothing was recorded here". Nothing wrote `artefact.withheld` before.
 
-Everything that is not an input or a *text* literal falls to `''`. Two things
-land there:
+Proved against the portal, run `B7B445`: `entered {into: Password, secret:
+true}`, the step-3 artefact withheld with no digest, and the registered value
+absent from the run's inputs, outputs, error, events and artefact rows.
+Four tests in `surface.test.ts` drive it against a surface made of arrays,
+including that a missing credential halts rather than types nothing.
 
-- **A secret.** `{ from: 'secret', credential: ... }` is the shape the recorder
-  produces for a password field and the only place the contract permits a
-  secret (`values.ts:60`). The run types an empty string into the password box,
-  presses on, and records the step as `ok`.
-- **A number, date or yes/no literal.** Three of the four literal kinds the
-  contract declares (`values.ts:31-36`) type nothing, silently.
-
-Around it, the same hole in four more places:
-
-- `apps/api/src/credentials.ts:36` has `decrypt`, and **its only caller is a
-  test**. The worker never signs in as the registered account.
-- `step.sensitive` is **never read in `execute.ts`** — verified. The field is
-  screenshotted whatever it holds.
-- Nothing anywhere writes `artefact.withheld = true`. The withheld path
-  (`artefacts.ts:47`) is exercised only by tests.
-- `credentialMissing` is in the error vocabulary and is unreachable.
-
-Acceptance criterion 11 — *a secret never appears in inputs, outputs, events,
-logs or any artefact* — is satisfied at the type level and at recording time,
-and **not on the run path**. Any application behind a login, which is every
-application worth piloting against, is unreachable today.
-
-Smaller than it looks: the storage half is done and working. AES-256-GCM is
-implemented, `ORBIT_CREDENTIAL_KEY` is set in `.env` and documented in
-`.env.example`, and the Admin screen already writes encrypted values. What is
-missing is the worker calling `decrypt`, and the care around the value once it
-has it.
+**Still open, and belongs with item 3.** Publication does not refuse a version
+whose application has no account or no filed password. It fails loudly at run
+time instead of at the gate.
 
 ## ~~1b. A procedure that names the record it works on cannot be authored~~ — fixed
 
@@ -88,7 +85,7 @@ keeping it was more accurate and less useful, because an author cannot tell
 "expected object, received undefined" from a bug in Orbit, which is the doubt a
 refusal exists to remove.
 
-## 1c. A password was being made a declared input
+## ~~1c. A password was being made a declared input~~ — fixed
 
 Hit in practice, from the same procedure once the portal grew a login page. The
 confirmation screen asked the author to type a **password** into a text box,
@@ -116,6 +113,16 @@ Both fixed. A password field now yields `{ from: 'secret', credential }`
 naming what the application registered, and where nothing is registered no
 step is made at all — a secret Orbit cannot find at run time is worse than a
 refusal while somebody is still in front of the page.
+
+**The other half of the same sign-in took another pass.** With the password
+handled, the box above it still became a declared input, and the confirmation
+screen went on asking for an example `userId` — reported as *"It still asks me
+for the user id"*. A password is recognised because the page says the field is
+a secret; there is no such marker on an account box, so it is recognised by
+the value instead: the person demonstrating typed the name the registry
+already holds for this application. That is evidence rather than a guess at
+the label, and a field given anything else stays what it looks like. See item
+1 for the reference it produces.
 
 ## 2. The terminal surface
 
