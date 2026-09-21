@@ -380,6 +380,7 @@ export async function authorFromProcedure(opts: {
     await page.goto(`${origin}${startPath}`, { waitUntil: 'domcontentloaded' });
 
     let finished = false;
+    let lastRejection: string | null = null;
     for (let turn = 1; turn <= maxTurns; turn++) {
       const seen = await snapshot(page);
       // Only an act that is *supposed* to move the page counts towards being
@@ -396,9 +397,21 @@ export async function authorFromProcedure(opts: {
         break;
       }
       const done = steps.slice(1).map((s, i) => `${i + 1}. ${s.kind} — ${s.summary}`);
+      // A rejected turn used to tell the model nothing, so it answered the
+      // same way again — and again, until the ceiling. One session spent ten
+      // of its twelve turns on the identical rejection, and another repeated
+      // "element: heading" twice because nobody said that "heading" is the
+      // kind and not the name. Saying what was wrong with the last answer is
+      // not conceding anything: Orbit still rejects, and still keeps the
+      // rejection on the record. It just stops asking the same question of
+      // somebody it has not told.
+      const correction = lastRejection
+        ? `Your last answer could not be used: ${lastRejection}. Do not answer the same way again.`
+        : '';
+
       const asking = done.length === 0
-        ? 'Nothing has been done yet. What is the first thing to do?'
-        : [`ALREADY DONE (do not repeat any of these):`, ...done, '',
+        ? [correction, 'Nothing has been done yet. What is the first thing to do?'].filter(Boolean).join('\n\n')
+        : [`ALREADY DONE (do not repeat any of these):`, ...done, '', correction,
            unchanged >= 1
              ? 'The page has NOT changed since your last act. Either something else is needed first, or the procedure is finished.'
              : '', 'What is the next thing to do?'].filter(Boolean).join('\n');
@@ -424,12 +437,17 @@ export async function authorFromProcedure(opts: {
         proposal, shape,
       );
 
-      const record = (verdict: Turn['verdict'], why: string): Turn => ({
-        turn, shown: { page: page.url(), elements: seen.length, asking },
-        answered: answered.value, verdict, why,
-        model: answered.model, provider: answered.provider,
-        tokensIn: answered.tokensIn, tokensOut: answered.tokensOut, costMicros: answered.costMicros,
-      });
+      // Every verdict passes through here, so the correction fed to the next
+      // turn cannot fall out of step with the rejection on the record.
+      const record = (verdict: Turn['verdict'], why: string): Turn => {
+        lastRejection = verdict === 'kept' ? null : why;
+        return {
+          turn, shown: { page: page.url(), elements: seen.length, asking },
+          answered: answered.value, verdict, why,
+          model: answered.model, provider: answered.provider,
+          tokensIn: answered.tokensIn, tokensOut: answered.tokensOut, costMicros: answered.costMicros,
+        };
+      };
 
       if (!answered.value) {
         // Not an error. A call that produced nothing usable is recorded,
@@ -447,6 +465,16 @@ export async function authorFromProcedure(opts: {
       }
 
       const wanted = normaliseName(p.element ?? '');
+      if (!wanted) {
+        // It answered with the kind — "heading", "button" — which
+        // `normaliseName` strips, leaving nothing. Reported as `named ""`,
+        // which reads to an author like a bug in Orbit rather than what it
+        // is: the line's format is `kind — name`, and only the name was
+        // asked for.
+        turns.push(record('rejected',
+          `it gave "${(p.element ?? '').trim() || 'nothing'}" as the element, which is a kind of thing rather than the name of one`));
+        continue;
+      }
 
       // Counted among the things the act could possibly have meant, not among
       // everything that happens to share the name.
