@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Action, Page, Refusal, Section } from '../Page.tsx';
+import { describeBinding } from '@orbit/contract';
 import { send, useFetch } from '../fetching.ts';
 import { EmptyState } from '../ui.tsx';
 import type { Route } from '../router.ts';
@@ -36,6 +37,9 @@ interface Session {
                  shown: { page?: string; elements?: number } }>;
 }
 
+/** A URL as a person reads it: the part that says which screen. */
+const shortly = (url: string) => url.replace(/^https?:\/\/[^/]+/, '') || '/';
+
 const field: React.CSSProperties = {
   font: 'inherit', fontSize: 14, padding: '9px 11px', width: '100%', boxSizing: 'border-box',
   border: '1px solid var(--rule-2)', borderRadius: 4, background: 'var(--panel)', color: 'var(--ink)',
@@ -52,7 +56,6 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const [inputs, setInputs] = useState<Array<{ name: string; value: string }>>([{ name: '', value: '' }]);
   const [refused, setRefused] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [recordingId, setRecordingId] = useState<string | null>(null);
 
   /**
    * Only what can actually be chosen.
@@ -85,12 +88,13 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
     setRefused(null);
     const result = await send<{ id: string }>('/api/recordings',
       { name, applicationId: chosen, startPath });
-    if (result.ok) setRecordingId(result.value.id);
+    // Straight to its own address, so a refresh does not strand a browser the
+    // worker is holding open.
+    if (result.ok) go({ at: 'recording', id: result.value.id });
     else setRefused(result.why);
   }
 
   if (sessionId) return <Working id={sessionId} go={go} onAbandon={() => setSessionId(null)} />;
-  if (recordingId) return <Demonstrating id={recordingId} go={go} onAbandon={() => setRecordingId(null)} />;
 
   return (
     <Page kicker="New agent" title="Bring in a procedure"
@@ -364,11 +368,14 @@ function Working({ id, go, onAbandon }: { id: string; go: (to: Route) => void; o
  * the one control the browser cannot give them, which is saying they are
  * finished.
  */
-function Demonstrating({ id, go, onAbandon }: { id: string; go: (to: Route) => void; onAbandon: () => void }) {
+export function Demonstrating({ id, go, onAbandon }: {
+  id: string; go: (to: Route) => void; onAbandon: () => void;
+}) {
   const [state, setState] = useState<{
     name: string; status: string; application: string; workflow_id: string | null;
     finish_requested_at: string | null; refused: { describe?: string } | null;
-    captured: Array<{ kind: string; summary: string }>;
+    captured: Array<{ kind: string; summary: string; on?: string;
+                      label?: string | null; binding?: unknown; noteKind?: string }>;
   } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -387,6 +394,10 @@ function Demonstrating({ id, go, onAbandon }: { id: string; go: (to: Route) => v
   }, [id, go]);
 
   const captured = state?.captured ?? [];
+  // A note is not a step, and numbering them together would make a recording
+  // look longer than the procedure it recorded.
+  const steps = captured.filter((c) => c.kind !== 'note');
+  const raised = captured.filter((c) => c.kind === 'note');
   const finishing = Boolean(state?.finish_requested_at);
 
   return (
@@ -416,25 +427,62 @@ function Demonstrating({ id, go, onAbandon }: { id: string; go: (to: Route) => v
         </div>
       )}
 
-      <Section title="What Orbit is watching"
-        note={captured.length === 0 ? 'nothing yet' : `${captured.length} step${captured.length === 1 ? '' : 's'}`}>
-        {captured.length === 0 ? (
+      <Section title="What Orbit is making of it"
+        note={steps.length === 0 ? 'nothing yet' : `${steps.length} step${steps.length === 1 ? '' : 's'}`}>
+        {/* This page exists because you cannot see any of this from the
+            browser. You already know what you did; what you cannot know is how
+            Orbit decided to find each control again — and that decision is
+            what fails at run time, months later, on a page that has moved on.
+            Here it is still cheap: press it again and watch what changes. */}
+        <p style={{ margin: '0 0 15px', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.6, maxWidth: 760 }}>
+          Each line is what Orbit decided, not what you pressed. The second line
+          is how it will find that control on a future run — check it now, while
+          doing it again costs nothing.
+        </p>
+
+        {steps.length === 0 ? (
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.6, maxWidth: 700 }}>
             {state?.status === 'queued'
               ? 'Queued. The browser opens in a moment.'
-              : 'Nothing captured yet. Press something, or fill a field in, and it will appear here.'}
+              : 'Nothing yet. Press something, or fill a field in, and it will appear here.'}
           </p>
         ) : (
           <div style={{ borderTop: '1px solid var(--ink)' }}>
-            {captured.map((c, i) => (
+            {steps.map((c, i) => (
               <div key={i} style={{ borderBottom: '1px solid var(--rule)', padding: '11px 0',
-                display: 'flex', gap: 13, alignItems: 'center' }}>
-                <span style={{ width: 18, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right' }}>{i + 1}</span>
-                <span style={{ width: 70, fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
-                  color: 'var(--running-ink)' }}>{c.kind}</span>
-                <span style={{ flexGrow: 1, fontSize: 13.5 }}>{c.summary}</span>
+                display: 'flex', gap: 13, alignItems: 'flex-start' }}>
+                <span style={{ width: 18, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right',
+                  paddingTop: 1 }}>{i + 1}</span>
+                <span style={{ width: 70, flexShrink: 0, fontFamily: 'var(--mono)', fontSize: 12,
+                  fontWeight: 600, color: 'var(--running-ink)' }}>{c.kind}</span>
+                <span style={{ flexGrow: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13.5 }}>{c.summary}</span>
+                  {c.binding != null && (
+                    <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-2)', marginTop: 3 }}>
+                      Finds {describeBinding(c.binding)}
+                    </span>
+                  )}
+                  {c.on && (
+                    <span style={{ display: 'block', fontSize: 11.5, color: 'var(--ink-2)',
+                      fontFamily: 'var(--mono)', marginTop: 3 }}>{shortly(c.on)}</span>
+                  )}
+                </span>
               </div>
             ))}
+          </div>
+        )}
+
+        {raised.length > 0 && (
+          <div style={{ paddingTop: 16 }}>
+            <Refusal tone="attention"
+              title={raised.length === 1
+                ? 'One thing Orbit could not work out'
+                : `${raised.length} things Orbit could not work out`}
+              blockers={raised.map((n) => n.summary)} />
+            <p style={{ fontSize: 12.5, color: 'var(--ink-2)', margin: '9px 0 0', maxWidth: 760 }}>
+              Raised while you were working rather than at the end, because the page it
+              happened on is still in front of you.
+            </p>
           </div>
         )}
       </Section>

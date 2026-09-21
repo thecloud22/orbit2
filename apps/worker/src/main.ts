@@ -154,6 +154,17 @@ async function recordOne(sessionId: string) {
 
     console.log(`  recording "${s.name}" against http://${s.host} — waiting for you to finish`);
 
+    // One write at a time, in the order things happened. These fire from
+    // callbacks and were each their own unawaited query, so two that arrived
+    // together could land either way round — and a procedure whose steps are
+    // out of order is not the procedure that was demonstrated.
+    let appending: Promise<unknown> = Promise.resolve();
+    const append = (row: unknown) => {
+      appending = appending.then(() => pool.query(
+        `UPDATE recording_session SET captured = captured || $2::jsonb WHERE id = $1`,
+        [sessionId, JSON.stringify([row])]));
+    };
+
     // The person's own signal, read from the store. Polled rather than pushed
     // for the same reason it is a column: two processes, either of which may
     // restart, and a demonstration that could not be stopped afterwards would
@@ -170,15 +181,30 @@ async function recordOne(sessionId: string) {
       origin: `http://${s.host}`,
       startPath: s.start_path,
       until: finished,
-      onStep: (step) => {
+      onStep: (step, on) => {
         console.log(`  captured: ${step.kind.padEnd(9)} ${step.summary}`);
-        // Written as it happens. A recorder that shows nothing until the end
-        // asks somebody to demonstrate a procedure and trust that it watched.
-        void pool.query(
-          `UPDATE recording_session SET captured = captured || $2::jsonb WHERE id = $1`,
-          [sessionId, JSON.stringify([{ kind: step.kind, summary: step.summary }])]);
+        // Written as it happens, and written whole. A recorder that shows
+        // nothing until the end asks somebody to demonstrate a procedure and
+        // trust that it watched; one that shows only what they did tells them
+        // something they already know. What they cannot see from the browser
+        // is how Orbit will find that control again, which is the thing that
+        // fails at run time and the thing they can still fix while standing
+        // in front of the page.
+        const target = (step as unknown as Record<string, { label?: string; binding?: unknown }>);
+        const named = target['into'] ?? target['control'] ?? target['region'] ?? null;
+        append({
+          kind: step.kind, summary: step.summary, on,
+          label: named?.label ?? null, binding: named?.binding ?? null,
+        });
+      },
+      onNote: (note) => {
+        console.log(`  · ${note.body}`);
+        append({ kind: 'note', noteKind: note.kind, summary: note.body });
       },
     });
+
+    // Every append landed before the draft is built from them.
+    await appending;
 
     const result = await storeDraft(db, { name: s.name, procedure: null }, {
       steps: recording.steps,

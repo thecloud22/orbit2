@@ -109,12 +109,18 @@ export async function record(opts: {
   startPath: string;
   /** Resolves when the person says they are finished. */
   until: Promise<void>;
-  onStep?: (step: Step) => void;
+  /** Each step as it is derived, with the screen it was derived on. */
+  onStep?: (step: Step, on: string) => void;
+  /** What could not be turned into a step, as it happens rather than at the
+   *  end — an action Orbit could not name is worth knowing while the person
+   *  is still standing in front of the page it happened on. */
+  onNote?: (note: Note) => void;
   open?: OpenForPerson;
 }): Promise<Recording> {
   const { page, close } = await (opts.open ?? aWindowTheyCanSee)();
   const steps: Step[] = [];
   const questions: Note[] = [];
+  const raise = (note: Note) => { questions.push(note); opts.onNote?.(note); };
   let touched = 0;
 
   steps.push({
@@ -137,19 +143,19 @@ export async function record(opts: {
     // turned every demonstration into a list of questions.
     const element = seen.find((s) => s.touched);
     if (!element) {
-      questions.push(asQuestion(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not name on the page. What is it called?`));
+      raise(asQuestion(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not name on the page. What is it called?`));
       return;
     }
 
     const step = stepFor(event, element);
-    if (step) { steps.push(step); opts.onStep?.(step); }
+    if (step) { steps.push(step); opts.onStep?.(step, page.url()); }
     } catch (error) {
       // An action that could not be turned into a step is said, not dropped.
       // It used to throw into the page-side callback and vanish, so a
       // demonstration could be watched from end to end and produce nothing at
       // all — with no question to say why, which is the worst way to fail:
       // silently, and looking like the person did nothing.
-      questions.push(asQuestion(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not record: ${String(error)}`));
+      raise(asQuestion(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not record: ${String(error)}`));
     }
   });
 
