@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { FileNav } from '../components/FileNav';
 import { Shell } from '../components/Shell';
 import { findLoan, type LoanProgram } from '../data/loans';
 
@@ -108,6 +109,8 @@ export function PricingPage() {
         <p className="mt-0.5 text-sm text-slate-600">
           Loan amount <span className="font-mono">${loan.loanAmount.toLocaleString('en-US')}</span>
         </p>
+
+        <FileNav current="pricing" loanNumber={loan.loanNumber} />
 
         <div className="mt-5 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-left text-sm" data-testid="rate-sheet">

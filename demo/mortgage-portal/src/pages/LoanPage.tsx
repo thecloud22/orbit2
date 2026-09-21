@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { FileNav } from '../components/FileNav';
 import { Shell } from '../components/Shell';
 import {
   CONFORMING_LIMIT,
@@ -142,6 +143,8 @@ function LoanFile({ loan }: { loan: Loan }) {
             </div>
           </div>
         </div>
+
+        <FileNav current="underwriting" loanNumber={loan.loanNumber} />
 
         {decision !== null && (
           <div

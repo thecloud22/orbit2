@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { FileNav } from '../components/FileNav';
 import { Shell } from '../components/Shell';
 import {
   CONFORMING_LIMIT,
@@ -157,6 +158,8 @@ export function AusPage() {
         <p className="mt-0.5 text-sm text-slate-600" data-testid="borrower-name">
           {loan.borrowerName}
         </p>
+
+        <FileNav current="aus" loanNumber={loan.loanNumber} />
 
         <button
           className="mt-5 rounded bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"

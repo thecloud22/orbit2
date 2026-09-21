@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { FileNav } from '../components/FileNav';
 import { Shell } from '../components/Shell';
 import { findLoan } from '../data/loans';
 
@@ -94,6 +95,8 @@ export function DocumentsPage() {
         <p className="mt-0.5 text-sm text-slate-600" data-testid="borrower-name">
           {loan.borrowerName}
         </p>
+
+        <FileNav current="documents" loanNumber={loan.loanNumber} />
 
         <div className="mt-5 rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-4 py-2.5">

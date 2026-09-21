@@ -29,10 +29,22 @@ export function PipelinePage() {
   return (
     <Shell current="/pipeline">
       <div className="mx-auto max-w-6xl px-6 py-8">
-        <h1 className="text-xl font-semibold text-slate-900">Underwriting pipeline</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          {LOANS.length} files awaiting a decision. Open a file to review its underwriting summary.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold text-slate-900">Underwriting pipeline</h1>
+            <p className="mt-1 text-sm text-slate-600">
+              {LOANS.length} files awaiting a decision. Open a file to review its underwriting
+              summary.
+            </p>
+          </div>
+          <a
+            className="rounded bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-500"
+            data-testid="new-application-link"
+            href="/applications/new"
+          >
+            New application
+          </a>
+        </div>
 
         <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <label
