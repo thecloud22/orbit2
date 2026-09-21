@@ -97,3 +97,45 @@ test('a step nothing can reach is refused, because it would never run', () => {
     blockers.filter((b) => b.kind === 'stepUnreachable').map((b) => b.step),
     [2, 3], 'both stranded steps named, not just the first');
 });
+
+test('a read that finds the value by the value is refused, because it can only confirm itself', () => {
+  // Taken from a real authored workflow: the model was asked to name the
+  // element holding the note rate, the snapshot named that element by its own
+  // text, and the binding came out as "6.375%" — the rate on the page that
+  // day. Every run since reported noteRate: null, and succeeded, because the
+  // value was optional. A green run that established nothing.
+  const circular: Step = {
+    id: ids[0]!, kind: 'read', summary: 'the note rate',
+    region: { label: 'Note rate', binding: { strategy: 'roleAndName', role: 'text', name: '6.375%' } },
+    produces: { name: 'noteRate', label: 'Note rate', type: 'text', required: false },
+  };
+  const blockers = checkForPublication([circular, end(1, 'done', ['noteRate'])], declared(['done']));
+
+  const found = blockers.find((b) => b.kind === 'readIsCircular');
+  assert.ok(found, `refused: ${JSON.stringify(blockers)}`);
+  assert.match(describeBlocker(found!), /finds "noteRate" by looking for "6\.375%"/);
+  assert.match(describeBlocker(found!), /Name what labels the value instead/);
+});
+
+test('a read bound to what labels the value is not refused', () => {
+  const labelled: Step = {
+    id: ids[0]!, kind: 'read', summary: 'the note rate',
+    region: { label: 'Note rate', binding: { strategy: 'structural', name: 'Note rate',
+                                             corroborate: { tag: 'dd' } } },
+    produces: { name: 'noteRate', label: 'Note rate', type: 'text', required: false },
+  };
+  const blockers = checkForPublication([labelled, end(1, 'done', ['noteRate'])], declared(['done']));
+  assert.equal(blockers.filter((b) => b.kind === 'readIsCircular').length, 0);
+});
+
+test('activating a control named by its own text is not circular, and is allowed', () => {
+  // The rule is about reads. The text on a button is the name of the control;
+  // the text in a region is the answer.
+  const press: Step = {
+    id: ids[0]!, kind: 'activate', summary: 'open the file',
+    control: { label: 'Open file', binding: { strategy: 'roleAndName', role: 'button', name: 'Open file' } },
+    then: { describe: 'the file is shown' }, changesARecord: false,
+  };
+  const blockers = checkForPublication([press, end(1, 'done')], declared(['done']));
+  assert.equal(blockers.filter((b) => b.kind === 'readIsCircular').length, 0);
+});

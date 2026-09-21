@@ -9,6 +9,21 @@ import { Pool } from 'pg';
 import { step as stepSchema, type Step } from '@orbit/contract';
 import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
+import { openBrowser } from './surface-browser.ts';
+import type { OpenSurface } from './surface.ts';
+
+/**
+ * Which driver each surface is executed through.
+ *
+ * Decision 5 item 9: a step never names a surface, so the surface is chosen
+ * here, at run time, from what the version copied about the application. A
+ * table rather than a branch, so that adding the terminal is a line here and a
+ * file beside `surface-browser.ts` — which is the whole of what Decision 2
+ * asked for when it said a second surface must not reopen the first.
+ */
+const SURFACES: Partial<Record<string, OpenSurface>> = {
+  browser: openBrowser,
+};
 
 const pool = new Pool({
   connectionString: process.env['ORBIT_DATABASE_URL']
@@ -40,11 +55,33 @@ async function runOne(runId: string) {
     const app = row.applications[0];
     const origin = `http://${app.addresses[0].host}`;
 
-    await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.started', $2)`,
-      [runId, JSON.stringify({ worker, origin })]);
-    console.log(`  ${row.reference}: ${steps.length} steps against ${origin}`);
+    // Read from the version's own copy, never from the live application: a
+    // version that could be made to run somewhere else by editing a row
+    // afterwards would not be the fixed thing every run names.
+    const open = SURFACES[app.surface];
+    if (!open) {
+      // Orbit does not guess what it is driving. A version that does not say
+      // is refused rather than assumed to be a browser, because assuming is
+      // how a terminal procedure would one day be run against a web page and
+      // the record would say it went fine.
+      const halt = { kind: 'pathReachesNothing' as const, step: 1,
+        describe: app.surface
+          ? `This version is registered against a ${app.surface} surface, which this worker cannot drive.`
+          : 'This version does not record what kind of application it runs against, so it cannot be run.' };
+      await db.query(`UPDATE run SET status = 'failed', error = $2, ended_at = now() WHERE id = $1`,
+        [runId, JSON.stringify(halt)]);
+      await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.failed', $2)`,
+        [runId, JSON.stringify(halt)]);
+      console.log(`  ${row.reference}: ${halt.describe}`);
+      return;
+    }
 
-    const { halted, values, reached } = await execute(db, runId, steps, row.inputs, origin);
+    await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.started', $2)`,
+      [runId, JSON.stringify({ worker, origin, surface: app.surface })]);
+    console.log(`  ${row.reference}: ${steps.length} steps against ${origin} (${app.surface})`);
+
+    const { halted, values, reached } = await execute(
+      db, runId, steps, row.inputs, await open(origin));
 
     if (halted) {
       // Cancelling is a decision, not a fault. §13 records a cancelled run as

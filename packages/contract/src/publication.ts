@@ -35,6 +35,23 @@ export const blocker = z.discriminatedUnion('kind', [
             *  different fix from "produced nowhere at all". */
            producedSomewhere: z.boolean() }),
 
+  /**
+   * A `read` that finds the value by the value.
+   *
+   * Binding a region by its own text means the run searches for "6.375%" and,
+   * if it finds it, reports "6.375%". The answer was decided when the workflow
+   * was authored, and the run only confirms that the page has not changed
+   * since. The day the rate is 6.5% the step finds nothing — and if the value
+   * is optional, the run succeeds carrying an absence, which is the worst
+   * shape this can take: a green run that establishes nothing.
+   *
+   * §5 wants a workflow that reads what the page says now, not one that checks
+   * whether the page still says what it said. So this is a refusal rather than
+   * a warning.
+   */
+  object({ kind: z.literal('readIsCircular'), step: z.number().int().positive(),
+           value: name, looksFor: z.string().max(200) }),
+
   /** A step no path can reach. The sibling of outcomeUnreachable, and the
    *  more serious one: §10's claim is that you can say what the agent did and
    *  be sure it could not have done anything else. A step carried into a
@@ -99,6 +116,10 @@ export function describeBlocker(b: Blocker): string {
       return b.producedSomewhere
         ? `Step ${b.step} uses "${b.value}", which is not produced on every path that reaches it.`
         : `Step ${b.step} uses "${b.value}", which no step produces.`;
+    case 'readIsCircular':
+      return `Step ${b.step} finds "${b.value}" by looking for "${b.looksFor}" — the value it is supposed to read. `
+        + `It can only ever report what it searched for, and will find nothing the day the page says something else. `
+        + `Name what labels the value instead.`;
     case 'stepUnreachable':
       return `Nothing can reach step ${b.step}, so it would never run.`;
     case 'pathReachesNoEnding':

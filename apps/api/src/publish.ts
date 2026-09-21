@@ -142,6 +142,20 @@ export function checkForPublication(
       blockers.push({ kind: 'outcomeNotDeclared', step: at(index), outcome: step.outcome });
     }
 
+    // ── a read that finds the value by the value ───────────────────────────
+    // Only `read` is affected. An `activate` bound by the text on a button is
+    // naming the control; a `read` bound by the text in a region is naming the
+    // answer.
+    if (step.kind === 'read') {
+      const b = step.region.binding as { strategy?: string; role?: string; name?: string } | null;
+      const byOwnText = b?.strategy === 'text'
+        || (b?.strategy === 'roleAndName' && b.role === 'text');
+      if (byOwnText && b?.name) {
+        blockers.push({ kind: 'readIsCircular', step: at(index),
+          value: step.produces.name, looksFor: b.name });
+      }
+    }
+
     // ── a way of naming a control that can return the wrong one ────────────
     const target = step.kind === 'enter' ? step.into
       : step.kind === 'activate' ? step.control

@@ -12,7 +12,12 @@ interface Draft {
   versions: Array<{ version: number; digest: string; published_at: string }>;
   authoring: { turns: Turn[]; producedNothing: number; costMicros: number };
 }
-interface Turn { turn: number; model: string; answered: { why: string } | null; verdict: string; why: string;
+interface Turn { turn: number; model: string; verdict: string; why: string;
+  /** The model's answer as it came back. `element` is what it named on the
+   *  page, and it is shown because Orbit turns that into a binding of its own
+   *  — the two disagreeing is the interesting case, and it cannot be seen if
+   *  only one of them is on the screen. */
+  answered: { why: string; act?: string; element?: string | null; value?: string | null } | null;
   shown: { elements: number }; tokens_in: number; tokens_out: number }
 
 const summary = (d: Record<string, unknown>) => String(d['summary'] ?? '');
@@ -212,6 +217,17 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
                   <Chip state={t.verdict === 'kept' ? 'ok' : 'failed'}>{t.verdict}</Chip></span>
                 <div style={{ flexGrow: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, marginBottom: 4 }}>{t.why}</div>
+                  {t.answered?.element && (
+                    <div style={{ fontSize: 12.5, marginBottom: 4 }}>
+                      <span style={{ color: 'var(--ink-2)' }}>It named </span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{t.answered.element}</span>
+                      {t.answered.act && <span style={{ color: 'var(--ink-2)' }}> to {t.answered.act}</span>}
+                      {t.answered.value && <>
+                        <span style={{ color: 'var(--ink-2)' }}>, as </span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{t.answered.value}</span>
+                      </>}
+                    </div>
+                  )}
                   {t.answered && <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontStyle: 'italic',
                     lineHeight: 1.5 }}>“{t.answered.why}”</div>}
                   <div style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--mono)', marginTop: 5 }}>

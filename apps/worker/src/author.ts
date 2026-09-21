@@ -86,6 +86,8 @@ const INSTRUCTION = [
   'act=enter   put a value into a field. element=the field. value=the name of the input it comes from.',
   'act=activate press a button or link. element=that control.',
   'act=read    take a value off the screen. element=the value. value=a short camelCase name for it.',
+  '            Orbit binds a read to whatever labels the value, not to the value, so that the',
+  '            step reads what the page says now rather than checking it still says what it said.',
   '            optional=true if the procedure says this may legitimately not be there.',
   'act=done    the procedure is finished, or the page does not show what comes next.',
   '',
@@ -265,6 +267,34 @@ export async function authorFromProcedure(opts: {
   return { steps, turns, questions, declaredInputs };
 }
 
+/**
+ * A value is found by what labels it, never by what it currently says.
+ *
+ * The snapshot names a value element by its own text, which is right for
+ * showing the model what is on the page and wrong for binding a `read` to it.
+ * A binding of `name: "6.375%"` searches for the rate that was there the day
+ * the workflow was authored: it can only ever report what it looked for, and
+ * the day the rate changes it finds nothing. Publication refuses this now
+ * (`readIsCircular`); authoring should not produce it in the first place.
+ *
+ * The label goes down the `structural` rung — find the label, take what sits
+ * beside it — corroborated by the tag, because Decision 15 measured that rung
+ * confidently wrong 28 times in 54 and refuses it uncorroborated.
+ */
+function regionFor(element: Seen): { label: string; binding: unknown } {
+  if (!element.labelledBy || !element.tag) {
+    // Nothing labels it, so there is no non-circular way to name it. Left as
+    // it is and refused at publication, rather than invented here: a binding
+    // Orbit guessed is worse than one it declined to make.
+    return { label: element.name, binding: element.binding };
+  }
+  return {
+    label: element.labelledBy,
+    binding: { strategy: 'structural', name: element.labelledBy,
+               corroborate: { tag: element.tag } },
+  };
+}
+
 /** A proposal becomes a step, with Orbit's binding rather than the model's. */
 function makeStep(p: Proposal, element: Seen): Step | null {
   const id = crypto.randomUUID();
@@ -281,8 +311,9 @@ function makeStep(p: Proposal, element: Seen): Step | null {
   }
   if (p.act === 'read') {
     if (!p.value) return null;
-    return { id, kind: 'read', summary: `${target.label}, into ${p.value}`, region: target,
-      produces: { name: p.value, label: target.label, type: 'text', required: !p.optional } };
+    const region = regionFor(element);
+    return { id, kind: 'read', summary: `${region.label}, into ${p.value}`, region,
+      produces: { name: p.value, label: region.label, type: 'text', required: !p.optional } };
   }
   return null;
 }

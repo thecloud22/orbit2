@@ -66,7 +66,8 @@ const version = await client.query<{ id: string }>(
      { name: 'noSuchTicket', label: 'No such ticket' },
      { name: 'ticketClosed', label: 'Ticket closed, sent to a person' }]),
    JSON.stringify([{ name: 'reference', label: 'Reference', type: 'text', required: true }]),
-   JSON.stringify([{ name: 'serviceDesk', revision: 7, addresses: [{ host: 'localhost:4101', pathPrefix: '/' }] }])]);
+   JSON.stringify([{ name: 'serviceDesk', surface: 'browser', revision: 7,
+     addresses: [{ host: 'localhost:4101', pathPrefix: '/' }] }])]);
 const versionId = version.rows[0]!.id;
 
 // Live is a pointer the workflow holds, so seeding an active workflow means

@@ -85,7 +85,8 @@ const version = await client.query<{ id: string }>(
    'sha256:' + crypto.randomUUID().replaceAll('-', '').slice(0, 12),
    JSON.stringify([{ name: 'fileFound', label: 'File found' }, { name: 'noSuchFile', label: 'No such file' }]),
    JSON.stringify([{ name: 'loanNumber', label: 'Loan number', type: 'text', required: true }]),
-   JSON.stringify([{ name: 'underwriting', revision: 1, addresses: [{ host: 'localhost:4101', pathPrefix: '/' }] }])]);
+   JSON.stringify([{ name: 'underwriting', surface: 'browser', revision: 1,
+     addresses: [{ host: 'localhost:4101', pathPrefix: '/' }] }])]);
 
 await client.query(`UPDATE workflow SET live_version_id = $1 WHERE id = $2`,
   [version.rows[0]!.id, wf.rows[0]!.id]);

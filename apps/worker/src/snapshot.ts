@@ -27,6 +27,10 @@ export interface Seen {
   name: string;
   /** For a value: the label beside it, which is how a person names it. */
   labelledBy?: string;
+  /** What kind of element it is. Carried so that a binding made from the
+   *  label can be corroborated against it — Decision 15 refuses the
+   *  structural rung uncorroborated, and the tag is what is knowable here. */
+  tag?: string;
   /** For a grid cell: its row and its column heading. */
   row?: string;
   column?: string;
@@ -181,6 +185,7 @@ export async function snapshot(page: Page | Frame): Promise<Seen[]> {
         binding: bindingFor(r, counts),
       };
       if (r.labelledBy) seen.labelledBy = r.labelledBy;
+      if (r.tag) seen.tag = r.tag;
       if (r.row) seen.row = r.row;
       if (r.column) seen.column = r.column;
       return seen;

@@ -10,19 +10,19 @@
  * interrupted case and is found by a query rather than by inference.
  */
 import type { ErrorKind, Step } from '@orbit/contract';
-import type { Page } from 'playwright';
-import { chromium } from 'playwright';
 import type { PoolClient } from 'pg';
-import { describeRefusal, resolve, type Binding } from './binder.ts';
+import { describeRefusal, type Binding } from './binder.ts';
 import { capture } from './evidence.ts';
+import type { Surface } from './surface.ts';
 
 export interface Halt { kind: ErrorKind; step: number; describe: string }
 
 interface Ctx {
   db: PoolClient;
   runId: string;
-  page: Page;
-  origin: string;
+  /** Whatever this application is driven through. The executor never learns
+   *  which, and Decision 5 item 9 requires that it cannot. */
+  surface: Surface;
   values: Map<string, string | null>;
   inputs: Record<string, string>;
   /** The ending actually reached, which is not the last step in the list. */
@@ -48,8 +48,8 @@ async function screenshot(ctx: Ctx, attemptId: string) {
   // Sign-in happened before capture started, so nothing here can hold a
   // credential — which is what makes deferring redaction safe rather than
   // reckless (Decision 4 item 13).
-  const png = await ctx.page.screenshot();
-  const { digest, bytes, mediaType } = await capture(png, 'image/png');
+  const shot = await ctx.surface.capture();
+  const { digest, bytes, mediaType } = await capture(shot.bytes, shot.mediaType);
   await ctx.db.query(
     `INSERT INTO artefact (run_id, attempt_id, kind, media_type, bytes, digest)
      VALUES ($1, $2, 'screenshot', $3, $4, $5)`, [ctx.runId, attemptId, mediaType, bytes, digest]);
@@ -74,8 +74,8 @@ async function runStep(ctx: Ctx, step: Step, position: number,
   const bind = async () => {
     const b = binding(step);
     if (!b) return { refusal: 'this step names nothing on the page' } as const;
-    const found = await resolve(ctx.page, b);
-    if (found.found === 'one') return { locator: found.locator, by: found.by } as const;
+    const found = await ctx.surface.find(b);
+    if (found.found === 'one') return { it: found.it, by: found.it.by } as const;
     const label = step.kind === 'enter' ? step.into.label
       : step.kind === 'activate' ? step.control.label
       : step.kind === 'read' ? step.region.label : 'the control';
@@ -84,7 +84,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
 
   switch (step.kind) {
     case 'open': {
-      await ctx.page.goto(`${ctx.origin}${step.path}`, { waitUntil: 'domcontentloaded' });
+      await ctx.surface.open(step.path);
       await event(ctx, attemptId, 'navigated', { to: step.path });
       await screenshot(ctx, attemptId);
       await end('ok');
@@ -99,7 +99,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       const ref = step.value;
       const value = ref.from === 'input' ? ctx.inputs[ref.value] ?? ''
         : ref.from === 'literal' && ref.literal.type === 'text' ? ref.literal.text : '';
-      await found.locator.fill(value);
+      await found.it.fill(value);
       await event(ctx, attemptId, 'entered', { into: step.into.label, by: found.by });
       await screenshot(ctx, attemptId);
       await end('ok'); return 'ok';
@@ -110,8 +110,8 @@ async function runStep(ctx: Ctx, step: Step, position: number,
         const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
-      await found.locator.click();
-      await ctx.page.waitForLoadState('domcontentloaded');
+      await found.it.activate();
+      await ctx.surface.settle();
       await event(ctx, attemptId, 'activated', { control: step.control.label, by: found.by });
       await screenshot(ctx, attemptId);
       await end('ok'); return 'ok';
@@ -131,7 +131,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
         const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
-      const text = (await found.locator.innerText()).trim();
+      const text = (await found.it.text()).trim();
       ctx.values.set(name, text);
       await event(ctx, attemptId, 'read', { value: name, read: text, by: found.by });
       await screenshot(ctx, attemptId);
@@ -176,11 +176,16 @@ async function runStep(ctx: Ctx, step: Step, position: number,
   }
 }
 
+/**
+ * Runs a version's steps against a surface.
+ *
+ * The surface is handed in rather than made here. That is what makes the ten
+ * step kinds surface-neutral by construction: this function contains no way of
+ * discovering what it is driving, so it cannot come to depend on one.
+ */
 export async function execute(db: PoolClient, runId: string, steps: Step[],
-  inputs: Record<string, string>, origin: string) {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  const ctx: Ctx = { db, runId, page, origin, values: new Map(), inputs, reached: null };
+  inputs: Record<string, string>, surface: Surface) {
+  const ctx: Ctx = { db, runId, surface, values: new Map(), inputs, reached: null };
   const positionOf = new Map(steps.map((s, i) => [s.id, i + 1]));
   try {
     let position = 1;
@@ -208,6 +213,6 @@ export async function execute(db: PoolClient, runId: string, steps: Step[],
     }
     return { halted: null, values: ctx.values, reached: ctx.reached };
   } finally {
-    await page.close(); await browser.close();
+    await surface.close();
   }
 }

@@ -87,7 +87,12 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
   if (blockers.length > 0) return { outcome: 'refused', blockers };
 
   const { rows: apps } = await db.query(
-    `SELECT DISTINCT ON (a.id) a.name, r.revision, r.addresses, r.sign_in_as, r.credential_name, r.formats
+    // a.surface is copied because Decision 5 requires the version to be
+    // "wholly self-contained: surface, host lists and credential name are
+    // inside the version". Without it the worker would have to ask the live
+    // application what it is driving, and editing that application later would
+    // silently change how an already-published version runs.
+    `SELECT DISTINCT ON (a.id) a.name, a.surface, r.revision, r.addresses, r.sign_in_as, r.credential_name, r.formats
        FROM application a JOIN application_revision r ON r.application_id = a.id
       ORDER BY a.id, r.revision DESC`);
 

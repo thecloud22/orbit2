@@ -10,7 +10,7 @@
 import type { IncomingMessage } from 'node:http';
 import { pool } from './db.ts';
 import { activate, mayStart, pause, queueTests, resume } from './activate.ts';
-import { confirm, type Confirmation } from './confirm.ts';
+import { confirm, confirmation } from './confirm.ts';
 import { mintVersion } from './mint.ts';
 import { cancelRun, retryRun, rerun } from './control.ts';
 import { deleteStep, editStep, insertStep, moveStep } from './edit.ts';
@@ -30,7 +30,15 @@ const inTransaction = async <T>(work: (db: never) => Promise<T>): Promise<T> => 
 
 export const actions = {
   async confirm(workflowId: string, body: unknown) {
-    const result = await inTransaction((db) => confirm(db, workflowId, body as Confirmation));
+    // Checked before it reaches the rule, so a malformed request is answered
+    // rather than raised. A 400 is the honest code: nothing was wrong with the
+    // workflow, the request did not say what it was asking for.
+    const given = confirmation.safeParse(body);
+    if (!given.success) {
+      return { status: 400, body: { why: 'This confirmation is not complete: '
+        + given.error.issues.map((i) => `${i.path.join('.') || 'the body'} — ${i.message}`).join('; ') } };
+    }
+    const result = await inTransaction((db) => confirm(db, workflowId, given.data));
     return result.outcome === 'confirmed'
       ? { status: 200, body: result }
       : { status: 409, body: { ...result, blockers: result.blockers.map(describeBlocker) } };

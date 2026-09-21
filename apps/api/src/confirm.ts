@@ -12,15 +12,29 @@
  * is cleared by an edit rather than kept.
  */
 import type { PoolClient } from 'pg';
-import { type Blocker, describeBlocker } from '@orbit/contract';
+import { object, z, type Blocker, describeBlocker } from '@orbit/contract';
 
-export interface Confirmation {
+/**
+ * Declared rather than asserted, because a request body is a boundary.
+ *
+ * It was taken on trust and cast, so a request missing `answers` reached
+ * `c.answers.map` and came back as a raw TypeError — an internal fault where a
+ * refusal belonged. Persistence is validated on the way out of the store for
+ * exactly this reason; an HTTP body has travelled further and deserves it more.
+ */
+export const confirmation = object({
   /** Which step ends which way, and what that conclusion is called. */
-  endings: Array<{ stepId: string; outcome: string; label: string; example: Record<string, string> }>;
+  endings: z.array(object({
+    stepId: z.uuid(),
+    outcome: z.string().min(1).max(120),
+    label: z.string().min(1).max(120),
+    example: z.record(z.string(), z.string()),
+  })).max(64),
   /** Answers to the questions Orbit raised. Every one must be answered. */
-  answers: Array<{ noteId: string }>;
-  attested: boolean;
-}
+  answers: z.array(object({ noteId: z.uuid() })).max(256),
+  attested: z.boolean(),
+});
+export type Confirmation = z.infer<typeof confirmation>;
 
 export type ConfirmResult =
   | { outcome: 'confirmed'; outcomes: number }
