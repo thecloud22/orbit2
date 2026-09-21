@@ -138,3 +138,53 @@ export const outcome = object({
 export type Outcome = z.infer<typeof outcome>;
 
 export { valueType };
+
+/**
+ * How a step finds the thing it acts on, said in words.
+ *
+ * The interface showed only the strategy — "by structural" — which names the
+ * rung of Decision 15's ladder and tells a reader nothing about what will
+ * actually be touched. The whole claim is that you can be sure the agent could
+ * not have done anything else, and that is unreadable if the binding is a word
+ * nobody outside this codebase knows.
+ *
+ * Kept here rather than in the screen that renders it, because the run page,
+ * the draft and a refusal must not describe the same binding three ways.
+ */
+export interface BindingShape {
+  strategy?: string;
+  name?: string;
+  role?: string;
+  row?: string;
+  column?: string;
+  frame?: string;
+  within?: { frame?: string };
+  corroborate?: { tag?: string; text?: string };
+}
+
+export function describeBinding(binding: unknown): string {
+  const b = (binding ?? {}) as BindingShape;
+  const named = b.name ? `“${b.name}”` : 'something unnamed';
+
+  const how =
+    b.strategy === 'roleAndName' ? `the ${b.role ?? 'control'} named ${named}`
+    : b.strategy === 'label' ? `the field labelled ${named}`
+    : b.strategy === 'formName' ? `the field the page calls ${named} internally`
+    : b.strategy === 'controlBeside' ? `the control sitting beside ${named}`
+    : b.strategy === 'rowAndColumn' ? `the cell where row “${b.row ?? '?'}” meets column “${b.column ?? '?'}”`
+    : b.strategy === 'structural' ? `whatever sits immediately after the label ${named}`
+    : b.strategy === 'text' ? `the text ${named}`
+    : 'nothing yet — this step is not configured';
+
+  // Corroboration is not a detail. It is the difference between a rung that
+  // may return the wrong element and one that is allowed to be published, so
+  // it is said in the same breath rather than tucked away.
+  const also = b.corroborate?.tag && b.corroborate.text
+    ? `, and it must be a <${b.corroborate.tag}> containing “${b.corroborate.text}”`
+    : b.corroborate?.tag ? `, and it must be a <${b.corroborate.tag}>`
+    : b.corroborate?.text ? `, and it must contain “${b.corroborate.text}”`
+    : '';
+
+  const where = b.within?.frame ? ` inside the frame “${b.within.frame}”` : '';
+  return `${how}${where}${also}`;
+}

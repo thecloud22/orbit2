@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { describeBinding } from '@orbit/contract';
 import { Action, Page, Refusal, Section } from '../Page.tsx';
 import { Chip, EmptyState, Row } from '../ui.tsx';
 import { send, useFetch } from '../fetching.ts';
@@ -22,6 +23,85 @@ interface Turn { turn: number; model: string; verdict: string; why: string;
   shown: { elements: number }; tokens_in: number; tokens_out: number }
 
 const summary = (d: Record<string, unknown>) => String(d['summary'] ?? '');
+
+/** The one thing on the page this step acts on, if it acts on one. */
+const targetOf = (d: Record<string, unknown>): { label: string; binding: unknown } | null => {
+  for (const k of ['region', 'into', 'control', 'table']) {
+    const t = d[k] as { label?: string; binding?: unknown } | undefined;
+    if (t?.label) return { label: t.label, binding: t.binding };
+  }
+  return null;
+};
+
+const ref = (r: unknown): string => {
+  const v = r as { from?: string; value?: string; literal?: Record<string, unknown> };
+  if (v?.from === 'step') return `the ${v.value} this run read`;
+  if (v?.from === 'input') return `the ${v.value} the run was started with`;
+  if (v?.from === 'literal') {
+    const l = v.literal ?? {};
+    return String(l['text'] ?? l['number'] ?? l['date'] ?? (l['yesNo'] ? 'yes' : 'no'));
+  }
+  return 'nothing';
+};
+
+const OPERATORS: Record<string, string> = {
+  is: 'is', isNot: 'is not', contains: 'contains', startsWith: 'starts with',
+  isMoreThan: 'is more than', isAtLeast: 'is at least',
+  isLessThan: 'is less than', isAtMost: 'is at most',
+  isBefore: 'is before', isAfter: 'is after',
+  isAbsent: 'was not there', isNotAbsent: 'was there',
+};
+
+/**
+ * What a step will actually do, in one paragraph.
+ *
+ * The list showed "by structural", which names a rung of Decision 15's ladder
+ * and tells a reader nothing about what gets touched. Orbit's claim is that
+ * you can say what the agent did and be sure it could not have done anything
+ * else; the second half of that is unreadable unless the binding is legible.
+ */
+function Detail({ step }: { step: Draft['steps'][number] }) {
+  const d = step.declares;
+  const target = targetOf(d);
+  const lines: Array<[string, React.ReactNode]> = [];
+
+  if (target) lines.push(['Finds', describeBinding(target.binding)]);
+
+  if (step.kind === 'open') lines.push(['Goes to', String(d['path'] ?? '')]);
+  if (step.kind === 'enter') lines.push(['Puts in', ref(d['value'])]);
+  if (step.kind === 'read') {
+    const p = d['produces'] as { name?: string; type?: string; required?: boolean } | undefined;
+    lines.push(['Keeps it as', `${p?.name} (${p?.type})${p?.required ? '' : ', and may legitimately find nothing'}`]);
+  }
+  if (step.kind === 'branch' || step.kind === 'check') {
+    const c = (step.kind === 'branch' ? d['when'] : d['that']) as
+      { of?: string; operator?: string; left?: unknown; right?: unknown } | undefined;
+    lines.push(['Compares', `${ref(c?.left)} ${OPERATORS[c?.operator ?? ''] ?? c?.operator} `
+      + (c?.of === 'absence' ? '' : ref(c?.right))]);
+  }
+  if (step.kind === 'end') {
+    const publishes = (d['publishes'] as string[] | undefined) ?? [];
+    lines.push(['Reports', String(d['outcome'] ?? '')]);
+    if (publishes.length) lines.push(['Carrying', publishes.join(', ')]);
+  }
+  if (d['changesARecord'] !== undefined) {
+    lines.push(['Changes a record', d['changesARecord']
+      ? 'Yes — this commits something a person would have to undo'
+      : 'No']);
+  }
+
+  return (
+    <div style={{ padding: '2px 0 13px 101px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {lines.map(([label, body]) => (
+        <div key={label} style={{ display: 'flex', gap: 12, fontSize: 12.5, lineHeight: 1.5 }}>
+          <span style={{ width: 130, flexShrink: 0, color: 'var(--ink-2)' }}>{label}</span>
+          <span style={{ color: label === 'Changes a record' && d['changesARecord']
+            ? 'var(--failed-ink)' : 'var(--ink)' }}>{body}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Which side of a branch each step sits on.
@@ -211,6 +291,7 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const [editRefusal, setEditRefusal] = useState<string | null>(null);
   const [adding, setAdding] = useState({ kind: 'read' as string, after: 0 });
   const [confirming, setConfirming] = useState(false);
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
   const [showWhy, setShowWhy] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -302,8 +383,10 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
         </button>}>
         <div style={{ borderTop: '1px solid var(--ink)' }}>
           {steps.map((s, i) => (
-            <div key={s.id} style={{ borderBottom: i === steps.length - 1 ? 'none' : '1px solid var(--rule)',
-              padding: '11px 0', display: 'flex', alignItems: 'center', gap: 13 }}>
+            <div key={s.id} style={{ borderBottom: i === steps.length - 1 ? 'none' : '1px solid var(--rule)' }}>
+            <div
+              onClick={() => setOpened((o) => ({ ...o, [s.id]: !o[s.id] }))}
+              style={{ padding: '11px 0', display: 'flex', alignItems: 'center', gap: 13, cursor: 'pointer' }}>
               <span style={{ width: 18, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right' }}>{s.position}</span>
               <span style={{ width: 70, fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
                 color: 'var(--running-ink)' }}>{s.kind}</span>
@@ -317,8 +400,13 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
               {strategy(s.declares) && <span style={{ fontSize: 11.5, color: 'var(--ink-2)',
                 fontFamily: 'var(--mono)' }}>by {strategy(s.declares)}</span>}
               {!s.complete && <Chip state="attention">not finished</Chip>}
+              <span aria-hidden style={{ width: 12, flexShrink: 0, fontSize: 11, color: 'var(--ink-2)',
+                transform: opened[s.id] ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>›</span>
               {editable && (
-                <span style={{ display: 'flex', gap: 1, flexShrink: 0 }}>
+                <span style={{ display: 'flex', gap: 1, flexShrink: 0 }}
+                  // The row opens on click; these do their own thing and must
+                  // not also open it.
+                  onClick={(e) => e.stopPropagation()}>
                   <button type="button" style={quiet} disabled={i === 0 || busy}
                     title={`Move step ${s.position} earlier`}
                     onClick={() => edit('move-step', { stepId: s.id, to: s.position - 1 })}>↑</button>
@@ -330,6 +418,8 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
                     onClick={() => edit('delete-step', { stepId: s.id })}>remove</button>
                 </span>
               )}
+            </div>
+            {opened[s.id] && <Detail step={s} />}
             </div>
           ))}
         </div>
