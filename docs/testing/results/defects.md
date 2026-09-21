@@ -1,5 +1,19 @@
 # Defects found testing Write It Out
 
+> **Fifteen of these are not on this branch.** They were held back as design
+> changes rather than defect fixes: they add to the model's vocabulary, to the
+> contract, or to what Orbit refuses. They are preserved in full on
+> `held/design-changes`, with their tests, and nothing about them is lost.
+>
+> Held: 10, 11, 15 (in part), 16, 17, 18, 19 (in part), 20, 21, 22, 23, 24, 25,
+> 26, 27, 28, 29 — see "What is held and why" at the end.
+>
+> What that means for this branch: a conditional procedure can still name its
+> two endings the wrong way round, an act whose condition was dropped is still
+> kept, and a walk that cannot reach the page a procedure names will still act
+> on the page it is on. Those are recorded below as found, because they were
+> found; they are not fixed here.
+
 One entry per defect. Each names the run and the prompt that exposed it, the
 root cause, the fix, the commit, and confirmation that the suite restarted
 from prompt 1 afterwards.
@@ -304,3 +318,55 @@ Two of these (25, 29) are commits that mostly *add a sentence*: a vocabulary
 for saying a page is out of reach, and a question where there had only been a
 line on the session record. Neither changes what Orbit does. Both change what
 an author is told, which is the difference between a refusal and a wrong agent.
+
+
+---
+
+# What is held and why
+
+Fifteen commits are on `held/design-changes` and not on `main`. They fall into
+four kinds.
+
+**New vocabulary for the model** — extends what authoring can express.
+
+- `A page the walk cannot reach is said, not substituted` — the `open` act.
+- `A note mentions a thing; it does not equal it` — the `contains` operator.
+- `Say that the nearest similar thing is not the thing` — the instruction that
+  goes with `open`.
+
+**A new question put to the model.**
+
+- `Name the conclusions by the condition, not by an absence` — a second
+  conclusions call, asked about the condition rather than about a missing
+  value. Without it, a guarded workflow's two endings are named by a call that
+  knows nothing about the condition, and roughly half come out reversed. This
+  is the one whose absence is most visible: a credit score of 762 reported as
+  "declined for a low credit score".
+
+**New refusals** — Orbit declining where it had been doing something.
+
+- `Something that commits is not committed twice in a row`
+- `Two alternatives are not one condition and its opposite`
+- `The same threshold, whichever way it was written`
+- `An act is kept with its condition, or it is not kept`
+- `A workflow that lost its conditional part does not keep its conclusion`
+- `Commit nothing after the procedure asked for something that was not there`
+- `No conclusion from a walk that did not follow the procedure`
+- `A comparison decided before it is made is not a comparison`
+- `A read bound to a heading is circular too`
+- `A refused second press is said, not only recorded`
+
+**Carried with them, because they only make sense on top.**
+
+- `Arriving somewhere new clears the lost thread` — fixes a regression in
+  `Commit nothing after…`, which is itself held.
+
+## One design change is already on `main` and was not reverted
+
+`2da372e`, pushed earlier in the session, adds `{ from: 'account' }` to the
+contract and the `@orbit/credentials` package. It is a design change by the
+same standard as the rest. It is also the commit that stopped the worker
+typing an **empty string into every password field** — the top item of
+`pilot-readiness.md` — and reverting it would reopen that. It came from a bug
+report during the session ("It still asks me for the user id") and it stays,
+flagged here rather than undone quietly.

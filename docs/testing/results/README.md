@@ -44,7 +44,9 @@ Defect-by-defect detail, with root cause, fix, commit and restart
 confirmation, is in `defects.md`. Per-run detail is in `run-NN.md`;
 screenshots under `run-NN/`.
 
-**29 defects found and fixed so far, across the first 23 of 50 prompts.**
+**30 defects found across the first 23 of 50 prompts. 15 of the fixes are on
+this branch; 15 are held on `held/design-changes` as design changes rather
+than defect fixes — see the end of `defects.md`.**
 Unit tests went from 156 to 191 (`author.ts` and `snapshot.ts` had no test
 files at all before this; they have 25 and 9 now).
 
