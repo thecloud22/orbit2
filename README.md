@@ -61,30 +61,67 @@ after publication works with nothing configured here.
 
 ```
 ORBIT_MODEL_PROVIDER=bedrock
-ORBIT_MODEL=eu.anthropic.claude-sonnet-4-5-20250929-v1:0
-ORBIT_MODEL_REGION=eu-west-1
+ORBIT_MODEL=us.anthropic.claude-sonnet-4-5-20250929-v1:0
+ORBIT_MODEL_REGION=us-east-1
 ```
 
 It authenticates through the ambient AWS credential chain — environment, shared
-config, SSO, or an instance role — so whether this machine may call it is a
-question only a real call can answer:
+config, SSO, or an instance role — so no key goes in `.env`, and whether this
+machine may call it is a question only a real call can answer.
+
+Two things about Bedrock that are easier to read than to discover:
+
+- **The newer Claude models need an inference profile.** A bare
+  `anthropic.claude-sonnet-4-5-…` is refused with *"on-demand throughput isn't
+  supported"*. It wants the `us.` or `eu.` in front.
+- **An Anthropic model needs an agreement on the account.** Without one, every
+  call returns *"Model use case details have not been submitted"* — which
+  points at the form even when the form is already on file. What is missing is
+  the agreement, and `aws bedrock create-foundation-model-agreement` restores
+  it, against the **bare** model id rather than the profile.
+
+### Checking a model before you trust it
 
 ```
 pnpm verify:model
 ```
 
-That makes one call doing the shape of work authoring actually needs: read a
-page as structure, say which control an instruction means. It prints what came
-back, which model answered, and what it cost. A 200 from a provider says the
-key works and says nothing about whether the model can hold the task.
+One real call, doing the shape of work authoring actually needs: read a page as
+structure, say which control an instruction means. It prints the rate it will
+use *before* it spends anything, then what came back, which model answered, and
+what it cost.
 
-Rates for the Claude, Nova and GPT models are held in `PRICE` in
-[`packages/model/src/index.ts`](packages/model/src/index.ts), on-demand and
-correct as at 2026-05, and a cross-region inference profile is priced as the
-model it routes to. `verify:model` prints the rate it will use *before* it
-spends anything, so a model with no rate held is something you find out in a
-second rather than from a finished agent whose cost reads as unknown. Adding
-one is a line in that table.
+```
+provider=bedrock model=us.anthropic.claude-sonnet-4-5-20250929-v1:0
+rate: $3/M in, $15/M out
+  kept: { "control": "textbox \"Open a file by loan number\"", … }
+  answered by: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  tokens: 868 in, 134 out
+  cost: $0.004614
+```
+
+A 200 from a provider says a key works. It says nothing about whether the model
+can hold the task, which is what this asks instead.
+
+### What a session costs
+
+Worked out from a rate table in
+[`packages/model/src/index.ts`](packages/model/src/index.ts), hard-coded so
+that a rate change is a commit in a diff rather than a number moving under old
+records. Claude is priced **by model family**, so the same model costs the same
+however it was reached, and a cross-region inference profile is priced as the
+model it routes to.
+
+A model with no rate held is still metered in tokens, and its cost recorded as
+**unknown** rather than as zero — a spend record must not assert that something
+was free when nobody knows. Adding a rate is a line in that table.
+
+Rough sizes for one authoring session, which is the only thing that spends:
+
+| | per 1M tokens | a session |
+|---|---|---|
+| `gpt-4.1-mini` | $0.40 / $1.60 | ~$0.005 |
+| `claude-sonnet-4-5` | $3 / $15 | ~$0.07 |
 
 `anthropic` as a provider has no adapter and refuses at start-up; an Anthropic
 model reached through Bedrock is the supported way to that.
@@ -164,11 +201,11 @@ rather than taken and judged safe.
 ## Working on it
 
 ```
-pnpm test        # 209 tests: contract, model, api, worker
+pnpm test        # 216 tests: contract, model, api, worker
 pnpm typecheck
 ```
 
-Tests need `orbit2_test`, which `scripts/setup` creates from
+Tests need `orbit2_test`, which `pnpm run setup` creates from
 `ORBIT_TEST_DATABASE_URL`. Some drive a real
 Chromium and some need the demo portal running on 4101; those skip themselves
 with a reason rather than passing quietly when the thing they test is absent.
