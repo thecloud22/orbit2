@@ -20,6 +20,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium, type Browser, type Page } from 'playwright';
 import { snapshot } from './snapshot.ts';
+import { resolve } from './binder.ts';
 
 const PAGE = `<!doctype html><body>
   <span id="lbl">Loan number</span>
@@ -125,4 +126,56 @@ test('values are still read from the page, which the accessibility tree does not
   const score = seen.find((s) => s.name === '762');
   assert.ok(score, 'a labelled figure was lost');
   assert.equal(score.labelledBy, 'Credit score');
+});
+
+test('a form laid out in a table resolves to one field per label, not two', async () => {
+  // The whole point, end to end: what Orbit collected, resolved back through
+  // Playwright, finding exactly the field it meant.
+  //
+  // A field contributes no text, so a row holding a label and a field
+  // normalises to just the label — and `//*[normalize-space()="User"]` matched
+  // the cell AND the row, whose next sibling is the NEXT row. Every label on
+  // every table-laid-out form matched twice, and the second match was the
+  // field belonging to the line below. Ambiguity is a refusal, so a page laid
+  // out the way these all are could not be signed in to at all.
+  const old = await browser.newPage();
+  await old.setContent(`<table>
+    <tr><td>User</td><td><input type="text" id="u"></td></tr>
+    <tr><td><b>Password</b></td><td><input type="password" id="p"></td></tr>
+    <tr><td></td><td><input type="submit" value="Sign on"></td></tr>
+  </table>`);
+
+  const fields = (await snapshot(old)).filter((s) => s.what === 'field');
+  assert.deepEqual(fields.map((f) => f.name), ['User', 'Password']);
+
+  for (const [i, field] of fields.entries()) {
+    const found = await resolve(old, field.binding);
+    assert.equal(found.found, 'one', `"${field.name}" resolved ${found.found}`);
+    // And to the right one. Matching the row below would also be exactly one.
+    // Typed loosely here because this package is not compiled against the
+    // DOM: the only code that touches one runs in the browser.
+    const id = await (found as { locator: { evaluate: (f: (e: { id: string }) => string) => Promise<string> } })
+      .locator.evaluate((e) => e.id);
+    assert.equal(id, ['u', 'p'][i], `"${field.name}" found the wrong field`);
+  }
+  await old.close();
+});
+
+test('a label carrying a quote makes a locator, not a broken expression', async () => {
+  // XPath has no escape character, so a name with a quote in it cannot be
+  // written as a literal and has to be assembled with concat(). These names
+  // come off the page, so this is not hypothetical — and the bad outcome is
+  // not a crash but an expression that still parses and matches something
+  // else.
+  const odd = await browser.newPage();
+  await odd.setContent(`<table>
+    <tr><td>Borrower"s agent</td><td><input id="want"></td></tr>
+    <tr><td>Other</td><td><input id="other"></td></tr>
+  </table>`);
+
+  const field = (await snapshot(odd)).find((s) => s.name.startsWith('Borrower'));
+  assert.ok(field, 'the field beside an awkward label was not collected');
+  const found = await resolve(odd, field.binding);
+  assert.equal(found.found, 'one');
+  await odd.close();
 });

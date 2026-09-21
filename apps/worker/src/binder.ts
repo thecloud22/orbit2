@@ -71,6 +71,21 @@ export type Resolution =
 
 const CONTROLS = 'input, select, textarea, button, a';
 
+/**
+ * A string, safely, inside an XPath expression.
+ *
+ * XPath has no escape character, so a name carrying a quote cannot be written
+ * as a literal at all — it has to be assembled with concat(). These names come
+ * off the page, and a column headed `Borrower"s agent` or a cell containing an
+ * apostrophe produced an expression that was either malformed or, worse, still
+ * valid and matching something else.
+ */
+function xpathLiteral(value: string): string {
+  if (!value.includes('"')) return `"${value}"`;
+  if (!value.includes("'")) return `'${value}'`;
+  return `concat(${value.split('"').map((part) => `"${part}"`).join(', \'"\', ')})`;
+}
+
 function scope(page: Page | Frame, binding: Binding): Page | Frame | Locator {
   if (binding.within?.frame) {
     const frame = (page as Page).frame?.({ name: binding.within.frame });
@@ -94,21 +109,41 @@ function candidate(root: Page | Frame | Locator, b: Binding): Locator | null {
       return b.name ? root.getByLabel(b.name, { exact: true }) : null;
     case 'formName':
       return b.name ? root.locator(`[name="${b.name}"]`) : null;
-    case 'controlBeside':
+    case 'controlBeside': {
       // The rung an old two-column form leaves you on, and the fix for
       // `structural`'s wrong binds: the sibling must actually BE a control,
       // so the wrapping cell can no longer be returned in its place.
-      return b.name
-        ? root.locator(`xpath=//*[normalize-space()="${b.name}"]/following-sibling::*[1]`).locator(CONTROLS)
-        : null;
+      //
+      // Two things this has to say that the obvious expression does not.
+      //
+      // The label must be the innermost element carrying that text. A form
+      // laid out in a table puts the label in a cell and the field in the
+      // next one, and a field contributes no text — so the whole ROW also
+      // normalises to just the label, and the row's next sibling is the next
+      // row. Every label on every table form matched twice, and the second
+      // match was the field belonging to the line below. Ambiguous, so
+      // Decision 12 refused it, so a page laid out the way these all are
+      // could not be signed in to at all.
+      //
+      // And then it is not the innermost element that has the sibling: in
+      // `<td><b>User</b></td>` the bold tag is innermost and has no sibling,
+      // while its cell does. So it climbs to the nearest ancestor-or-self
+      // that has one, which is that cell.
+      if (!b.name) return null;
+      const label = xpathLiteral(b.name);
+      return root.locator(
+        `xpath=//*[normalize-space()=${label} and not(.//*[normalize-space()=${label}])]`
+        + `/ancestor-or-self::*[following-sibling::*][1]/following-sibling::*[1]`,
+      ).locator(CONTROLS);
+    }
     case 'rowAndColumn':
       // A grid cell named the way a person names one. Measured 52 unique,
       // nothing ambiguous and nothing wrong — the only rung with no failure
       // mode at all, which is why it sits above every rung that can lie.
       return b.row && b.column
         ? root.locator(
-            `xpath=//tr[td[normalize-space()="${b.row}"]]/td[` +
-            `position() = count((ancestor::table[1]//tr)[1]/*[normalize-space()="${b.column}"]` +
+            `xpath=//tr[td[normalize-space()=${xpathLiteral(b.row)}]]/td[` +
+            `position() = count((ancestor::table[1]//tr)[1]/*[normalize-space()=${xpathLiteral(b.column)}]` +
             `/preceding-sibling::*) + 1]`)
         : null;
     case 'text':
