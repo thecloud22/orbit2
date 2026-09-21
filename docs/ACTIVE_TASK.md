@@ -16,9 +16,9 @@ evidence a stranger can read. Fourteen decisions are closed in `docs/decisions.m
 | | |
 |---|---|
 | `packages/contract` | The closed sets, declared once. Ten step kinds, five value types, the error and event vocabularies. Unknown keys refused; a secret accepted in one field of one kind. |
-| `apps/api` | Six migrations. Immutability enforced by revoked privileges **and** a trigger, proved by a test that asserts the owner is refused too. Artefacts verified against their digest when served. |
+| `apps/api` | Nine migrations. Immutability enforced by revoked privileges **and** a trigger, proved by a test that asserts the owner is refused too. Artefacts verified against their digest when served. Publication refuses an unconfirmed workflow, a half-written step and a step no path can reach. §6 step editing, gated on whether a change makes the draft worse rather than on whether it leaves it perfect. §10's run controls: cancel, retry, re-run. |
 | `apps/worker` | Claims a run with a lease, drives Chromium, records every attempt, event and screenshot. Consults no model, and cannot. |
-| `apps/web` | The run page, reading real records. Status and outcome as two facts; only the technical one is coloured. |
+| `apps/web` | Ten screens on a real router. The run page reads real records — status and outcome as two facts, only the technical one coloured — and carries the run controls, naming the reason a retry is not offered rather than hiding the button. The draft screen is a place you work: steps move, delete and insert, and a refused edit says why in the contract's own words. |
 | `demo/*` | Four portals Orbit is pointed at. |
 
 **Proved against a real page, not a fixture:** two runs of one version differing only in their input.
@@ -76,7 +76,16 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | The locator's stored shape | Claude | One typed column on `step`, and the only hole left in Decision 14. To be settled from **measurement** against `apps/legacy-portal`, not from argument. |
 | The surface interface | Claude | **A debt.** Decision 2 asks that execution sit behind an interface so a second surface is a new file rather than a rewrite. `execute.ts` imports Chromium directly, so the ten step kinds are surface-neutral by assertion rather than by construction. |
 | The terminal path | Claude | Not built. `demo/terminal-portal` warns how: drive a real emulator, never decode the datastream, or a misreading on Orbit's side is cancelled by the same misreading in the fixture. |
-| The locator ladder, from measurement | Claude | **In progress.** Being measured against `demo/legacy-portal` — which strategies resolve to exactly one thing, and which shapes nothing reaches. |
+| The locator ladder, from measurement | Claude | **Closed** as Decision 15. 181 elements measured against `demo/legacy-portal`; the ladder is ordered by how often each rung is *wrong*, and `text` and `structural` are refused outright without corroboration because 28 of 54 structural matches were confidently wrong. |
+
+## Outstanding in slice 1, not yet built
+
+| Item | Note |
+|---|---|
+| Criterion 2 — a failed interpretation stores **nothing** | Not proved. A partial parse must leave no trace, not the parts that happened to validate. |
+| Criterion 12 — each §13 authoring row behaves as its table states | Not walked row by row. |
+| Retry as a *step-level* policy | §9 lets a designer configure attempts, delay and which kinds are worth retrying per step. Slice 1 has the operator-initiated retry only, and one contract-wide set of retryable kinds. |
+| Waiting on a person | `waitingForAPerson` is a status the schema allows and nothing produces. `handOff` halts instead. |
 
 ## Open, not blocking
 
@@ -106,4 +115,10 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | 2026-09-20 | Amendments: redaction deferred with a sign-in interlock; S3 named as the eventual store; a registered credential held encrypted and written out of band; provider and model moved to configuration. |
 | 2026-09-20 | Decision 14 recorded: ten step kinds, five value types, how a step names a value, the authority flag, `for each` semantics, and calculation deferred. |
 | 2026-09-20 | Practice portals moved to `apps/`; ADR references from another project removed; repo made a pnpm workspace with a strict shared tsconfig. |
+| 2026-09-20 | Decision 15 recorded: the locator ladder from 181 measured elements, ordered by how often each rung is wrong rather than by how specific it looks. |
+| 2026-09-20 | §6 editing built, then corrected twice. An inserted step is deliberately incomplete and could not be parsed by the published schema, so inserting one made the draft unreadable; a draft's steps are now carried as they are. And the gate refused any edit whose result was broken, which trapped an author in the state they were trying to leave — it now refuses an edit that makes things *worse*. |
+| 2026-09-20 | Publication was minting versions of workflows nobody had confirmed. §4's status table is explicit — "cannot be published until confirmed" — and with attribution deferred, confirmation is the only human act on the whole record. |
+| 2026-09-20 | A step no path can reach is now a blocker. An ending dragged to the front stranded everything behind it and nothing objected, because an unreachable step is on no path that could run out. |
+| 2026-09-20 | §10's run controls built. Cancellation proved cooperative against a live run: asked to stop part-way, it stopped before step 3 with two steps and their evidence complete. |
+| 2026-09-20 | Two evidence faults found by looking at the screen. The store was cwd-relative, so the worker wrote where the API did not read; and the run page reported *every* image failure as an integrity failure, telling an operator that absent evidence had been altered. A false provenance alarm teaches people to discount the real one. |
 | 2026-09-20 | Decision 13 recorded (a judged step). Amendments: Decision 5 takes a set of applications; Decision 4 adds the authoring reasoning record and rules out video; Decision 8 fixes `us-east-1`, United States only; Decision 10 makes tokens swappable at run time; Decision 11 records the recording route and its three cautions. |
