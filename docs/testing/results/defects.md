@@ -234,3 +234,50 @@ produces the correct seven steps. What was wrong is that nothing said so —
 Orbit knew, at the moment it typed nothing, that everything after that step was
 a response to an empty box. It cannot ask beforehand, because an input is named
 by the model part way through the walk, but it can say so when it happens.
+
+---
+
+# Defects 9–23 — found by sections A and B, runs 10 to 23
+
+Each was found by the suite, fixed, validated against the full unit suites, and
+the suite restarted from prompt 1. Listed by the commit that closed it.
+
+| # | What was wrong | Found by | Commit |
+|---|---|---|---|
+| 9 | A label and its value were paired across prose, so `read the borrower name` returned the **co-borrower**. The borrower itself was offered as nothing at all. | Run 12, prompt 4 | `5188e8e` |
+| 10 | `Decline file` was kept **twice**, both `changesARecord`, behind two identical branches — a run reaching that branch would decline the file twice. | Run 11, prompt 5 | `11fb8c3` |
+| 11 | One branch per guarded *step* rather than per distinct condition: `Is Loan-to-value above 80?` evaluated twice, written to the record twice. | Run 12, prompts 7/11/13 | `b12b36f` |
+| 12 | A labelled value longer than 60 characters was dropped, so the income analyst's note was invisible and the model bound the read to a heading instead. | Run 13, prompt 10 | `e27647a` |
+| 13 | **A refused publication showed "That did not work (409)."** The blockers were computed, described in plain words, serialised, and thrown away one function short of the screen. | Run 14, prompts 4/6 | `84b6346` |
+| 14 | The collector wrote `tag: 'div'` for a selector matching `div, span, p`, so a binding corroborated on a tag the snapshot had invented and the run halted with *"found a `<p>`, expected a `<div>`"*. | Run 14, prompt 10 | `b069e4a` |
+| 15 | A comparison was typed by its **threshold**, so a paragraph of prose was compared to the number 1 and the run halted with `valueNotOfDeclaredType`. | Run 15, prompt 10 | `f3aa2c0` |
+| 16 | The ending that leaves *before* the guarded steps published values only read *after* them, so every conditional procedure that reads while deciding was unpublishable. | Run 15, prompt 6 | `f3aa2c0` |
+| 17 | **The two endings of a guarded workflow were named by a model call about absence.** A credit score of 762 was read, `below 620` correctly decided false — and the run reported *"Decline the loan due to low credit score"*. | Run 16, prompt 5 | `1a0121e` |
+| 18 | Two alternatives were chained as one condition and its opposite (`at most 80 and above 80`), so the guarded path could never run and the gate caught it several steps later as an unreachable conclusion. | Run 17, prompts 7/11/13/14 | `20a0599` |
+| 19 | A read declared `type: 'text'` for everything, so typing comparisons by the declared type made **794 not "at least 700"**. Every conditional agent decided the wrong way. *(A regression I introduced in 15.)* | Run 18, prompts 7/9/12 | `e1fdfc7` |
+| 20 | `contains` was carried out by `compare.ts` and never offered to authoring, so a note *describing* seasonal income satisfied "is not seasonal". And a condition on a value read after the act it governs was placed behind its own branch. | Run 19, prompts 10/6 | `348e79d` |
+| 21 | Dropping a condition kept the act it governed, so a $396,000 file was **referred** on the strength of not being a jumbo. | Run 20, prompt 14 | `1074530` |
+| 22 | Thresholds were compared as strings, so `at most 80%` and `above 80` were not seen to contradict, and a file at 72.73% failed "above 80". | Run 21, prompt 13 | `184581d` |
+| 23 | A workflow whose conditional part was dropped kept its conclusion — *"Reserves under 6 months"* against a file holding 26 — and went on publishing values whose reads had gone with it. | Run 22, prompts 11/6 | `c19b13c` |
+
+## The pattern
+
+Three families account for almost all of it.
+
+**A name is not an identifier on its own** (1, 7, 9, 11, 22): the same mistake
+at five layers — the author's candidate matching, the ladder's uniqueness
+count, the label/value pairing, the branch chain, the threshold comparison.
+
+**Orbit stating a rule and not enforcing it** (2, 5, 10, 21, 23): "never repeat
+a step", "an act kept without its condition is worse than no act at all", "a
+run reports the conclusion by name and nothing may invent one" — all written
+down, all left to the model.
+
+**Silence** (1, 4, 5, 8, 23): running out of turns, giving up after a
+rejection, walking with an empty required value, dropping a clause, losing the
+conditional part — each produced a draft that looked finished.
+
+Two defects (13, 17) were of a different kind and the most serious: the product
+knew the right answer and reported a different one. The publish gate described
+every blocker and the screen showed a status code; the branch decided correctly
+and the conclusion said the opposite.
