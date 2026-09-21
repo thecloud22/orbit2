@@ -52,25 +52,29 @@ with stubbed data throughout.
 
 **New workflow surfaces**
 
-- [ ] **Loan application intake** — a multi-step form (borrower/co-borrower,
-      employment & income, assets, property, loan program) that creates a new
-      file and drops it into the pipeline. All 9 loans today are pre-seeded;
-      there is no way to originate one. Biggest single win for input
-      diversity: currency fields, SSN-style masked input, dropdowns, radio
-      groups, date pickers, add/remove co-borrower rows.
-- [ ] **Document checklist / stipulations tracker** — pay stubs, tax returns,
-      bank statements, appraisal, each with a status (needed → received →
-      reviewed → cleared) and a due date. Different shape from the existing
-      "conditions" buttons: per-item state transitions and a completion gate
-      ("can't approve until required docs are cleared").
-- [ ] **Automated underwriting run (AUS simulation)** — a "Run AUS" action
-      that reads the file's existing figures (LTV, DTI, credit score,
-      reserves) against program-specific rules and returns Approve/Eligible,
-      Refer, or Ineligible with findings.
-- [ ] **Rate lock / pricing** — pick a rate/term from a sheet, lock it, see a
-      lock-expiration countdown (pairs with the session-expiry fixture
-      already built). Real-time computed fields: APR, points, monthly P&I
-      recalculated as inputs change.
+- [x] **Loan application intake** — `/applications/new`. A four-step form
+      (borrower/co-borrower, employment & income, property & program, review)
+      that assigns a loan number, dates and unassigns the file, and drops it
+      into `findLoan` for the current session. All 9 seeded loans were
+      previously the only ones that existed; this is where a tenth one comes
+      from. The review step shows the same rule chips (credit floor, LTV,
+      DTI, conforming limit) the underwriting screen is judged against, and
+      submitting hands off to the real, unmodified `/underwriting?loan=`
+      review page.
+- [x] **Document checklist / stipulations tracker** — `/underwriting/documents?loan=`.
+      Five required stipulations plus one conditional one, each advancing
+      needed → received → reviewed → cleared one step per click. Approve is
+      disabled until every *required* item (not every item) is cleared.
+- [x] **Automated underwriting run (AUS simulation)** — `/underwriting/aus?loan=`.
+      "Run AUS" reads the file's LTV, DTI, credit score, program, and flood
+      zone against fixed thresholds and returns Approve/Eligible, Refer, or
+      Ineligible with a findings list. Deterministic and re-runnable, unlike
+      the flaky-decision fixture — a real AUS gives the same file the same
+      answer every time.
+- [x] **Rate lock / pricing** — `/underwriting/pricing?loan=&lockSeconds=`.
+      A rate sheet filtered to the file's program, real amortization-based
+      monthly P&I per option, a lock that counts down and expires (same
+      mechanism as session-expiry, different domain), and a re-lock action.
 - [ ] **Decline reasons (adverse action)** — declining a file opens a
       reason-code multi-select (required, minimum one) before the decision
       commits, mirroring real ECOA adverse-action requirements.
@@ -91,9 +95,10 @@ with stubbed data throughout.
 
 **Rules to layer onto existing data**
 
-- [ ] Program-specific eligibility (FHA minimum credit score, VA no-PMI,
-      jumbo minimum reserves) surfaced as pass/fail chips rather than left
-      implicit in the branch-matrix test.
+- [x] Program-specific credit floor, surfaced as pass/fail chips on the
+      application review step and as findings on the AUS run, rather than
+      left implicit in the branch-matrix test. (VA no-PMI and jumbo minimum
+      reserves are not yet separately modeled.)
 - [ ] PMI requirement/removal logic tied to LTV crossing 80%, shown as a
       computed flag rather than a manual condition button.
 - [ ] Ability-to-repay / DTI hard-stop above a threshold (blocks approval

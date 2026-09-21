@@ -1,9 +1,13 @@
 import { AmbiguousDecisionPage } from '../pages/AmbiguousDecisionPage';
+import { ApplicationIntakePage } from '../pages/ApplicationIntakePage';
+import { AusPage } from '../pages/AusPage';
+import { DocumentsPage } from '../pages/DocumentsPage';
 import { FlakyDecisionPage } from '../pages/FlakyDecisionPage';
 import { LoanPage } from '../pages/LoanPage';
 import { LoginPage } from '../pages/LoginPage';
 import { PipelinePage } from '../pages/PipelinePage';
 import { PipelineStatesPage } from '../pages/PipelineStatesPage';
+import { PricingPage } from '../pages/PricingPage';
 import { ReferencePage } from '../pages/ReferencePage';
 import { SessionExpiryPage } from '../pages/SessionExpiryPage';
 import { SlowDecisionPage } from '../pages/SlowDecisionPage';
@@ -56,6 +60,22 @@ export function App() {
 
   if (path === '/underwriting/reference') {
     return <ReferencePage />;
+  }
+
+  if (path === '/underwriting/documents') {
+    return <DocumentsPage />;
+  }
+
+  if (path === '/underwriting/aus') {
+    return <AusPage />;
+  }
+
+  if (path === '/underwriting/pricing') {
+    return <PricingPage />;
+  }
+
+  if (path === '/applications/new') {
+    return <ApplicationIntakePage />;
   }
 
   return (

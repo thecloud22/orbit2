@@ -370,8 +370,77 @@ export function isSpecialFloodHazardArea(zone: FloodZone): boolean {
 
 export function findLoan(loanNumber: string): Loan | undefined {
   const wanted = loanNumber.trim().toUpperCase();
-  return LOANS.find((loan) => loan.loanNumber.toUpperCase() === wanted);
+  return [...LOANS, ...readSubmittedLoans()].find(
+    (loan) => loan.loanNumber.toUpperCase() === wanted,
+  );
 }
+
+const SUBMITTED_LOANS_KEY = 'mortgage-portal:submitted-loans';
+
+/** Everything the intake form collects; the rest of a `Loan` is system-assigned. */
+export type LoanApplicationInput = Omit<Loan, 'loanNumber' | 'status' | 'submittedOn' | 'underwriter'>;
+
+function readSubmittedLoans(): Loan[] {
+  try {
+    const raw = window.sessionStorage.getItem(SUBMITTED_LOANS_KEY);
+    return raw === null ? [] : (JSON.parse(raw) as Loan[]);
+  } catch {
+    return [];
+  }
+}
+
+function writeSubmittedLoans(loans: readonly Loan[]): void {
+  try {
+    window.sessionStorage.setItem(SUBMITTED_LOANS_KEY, JSON.stringify(loans));
+  } catch {
+    // Storage can be unavailable (private browsing, quota); the submission
+    // still succeeds for the current page render, it just won't survive a reload.
+  }
+}
+
+function nextLoanNumber(taken: ReadonlySet<string>): string {
+  let candidate: string;
+  do {
+    const serial = 10_000 + Math.floor(Math.random() * 90_000);
+    candidate = `ML-26-${serial}`;
+  } while (taken.has(candidate));
+  return candidate;
+}
+
+/** Files created through the intake form, kept for this browser session. */
+export function getSubmittedLoans(): readonly Loan[] {
+  return readSubmittedLoans();
+}
+
+/**
+ * Turns an intake submission into a file on the pipeline.
+ *
+ * Dated today and left unassigned -- exactly the state a freshly submitted
+ * application is in before anyone has picked it up. Stored for the current
+ * browser session only: the point of this fixture is that the form and
+ * everything downstream of it (underwriting review, documents, AUS, pricing)
+ * works end to end, not that it survives a server restart.
+ */
+export function submitApplication(input: LoanApplicationInput): Loan {
+  const existing = readSubmittedLoans();
+  const loan: Loan = {
+    ...input,
+    loanNumber: nextLoanNumber(new Set([...LOANS, ...existing].map((one) => one.loanNumber))),
+    status: 'in_underwriting',
+    submittedOn: new Date().toISOString().slice(0, 10),
+    underwriter: 'Unassigned',
+  };
+  writeSubmittedLoans([...existing, loan]);
+  return loan;
+}
+
+/** Program-specific credit floor, the way an investor overlay states it. */
+export const PROGRAM_MIN_CREDIT_SCORE: Readonly<Record<LoanProgram, number>> = {
+  conventional: 620,
+  fha: 580,
+  va: 580,
+  jumbo: 700,
+};
 
 function round(places: number, value: number): number {
   const factor = 10 ** places;
