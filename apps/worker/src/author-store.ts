@@ -14,6 +14,7 @@
 import type { PoolClient } from 'pg';
 import { step as stepSchema } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
+import { readCredential } from '@orbit/credentials';
 import { authorFromProcedure, type AuthoredDraft } from './author.ts';
 
 export interface Stored { stored: true; workflowId: string; draft: AuthoredDraft }
@@ -57,9 +58,20 @@ export async function authorAndStore(db: PoolClient, opts: {
     `SELECT r.credential_name, r.sign_in_as FROM application_revision r
       WHERE r.application_id = $1 ORDER BY r.revision DESC LIMIT 1`, [opts.applicationId]);
 
+  // The password itself, for the walk to type into the page and for nothing
+  // else. A written procedure begins by signing in, and a walk that cannot
+  // sign in maps the rest of the procedure against the login page. It is read
+  // here rather than inside the walk so that the one place a credential is
+  // decrypted stays a query in a file that already talks to the store, and it
+  // is never passed on: `storeDraft` receives the draft, not the options.
+  const signsInWith = registered?.credential_name
+    ? await readCredential(db as never, registered.credential_name).catch(() => null)
+    : null;
+
   return storeDraft(db, opts, await authorFromProcedure({ ...opts,
     credentialName: registered?.credential_name ?? null,
-    signsInAs: registered?.sign_in_as ?? null }));
+    signsInAs: registered?.sign_in_as ?? null,
+    signsInWith }));
 }
 
 /**
