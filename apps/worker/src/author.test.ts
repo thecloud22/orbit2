@@ -148,12 +148,20 @@ describe('after a click, the walk is on the page the click led to',
 
 const cond = (value: string, is: string, than: string) => ({ value, is, than });
 
-test('a value declared as text is compared as text, whatever the threshold looks like', () => {
+test('a value that is text is compared as text, whatever the threshold looks like', () => {
   // This read only the threshold, so a condition on the income analyst's note
   // against "1" compared a paragraph of prose to the number one. It published,
   // and the run halted: "was compared as a number, and it is not one".
-  const c = forTest.comparisonFor(cond('note', 'isAtLeast', '1'), { type: 'text' });
+  const c = forTest.comparisonFor(cond('note', 'is', 'seasonal'), { type: 'text' });
   assert.equal(c?.of, 'text');
+  assert.equal(c?.operator, 'is');
+});
+
+test('an ordering operator against text is no comparison at all', () => {
+  // "at least" against a sentence cannot be carried out, and making it
+  // equality would build a branch that can never hold. Dropped, and said.
+  assert.equal(forTest.comparisonFor(cond('note', 'isAtLeast', '1'), { type: 'text' }), null);
+  assert.equal(forTest.comparisonFor(cond('note', 'isLessThan', 'x'), { type: 'text' }), null);
 });
 
 test('a value declared as a number still compares as a number', () => {

@@ -933,8 +933,11 @@ function comparisonFor(
       left, right: { from: 'literal', literal: { type: 'number', number: n } } };
   }
   // Text, and anything else Orbit does not yet compare as itself. Only `is`
-  // and `isNot` are meaningful, which is what the contract allows for text.
-  return { of: 'text', operator: c.is === 'isNot' ? 'isNot' : 'is',
+  // and `isNot` are meaningful, which is what the contract allows for text —
+  // "at least" against a sentence is not a comparison that can be carried out,
+  // and turning it into equality would make a branch that can never hold.
+  if (c.is !== 'is' && c.is !== 'isNot') return null;
+  return { of: 'text', operator: c.is,
     left, right: { from: 'literal', literal: { type: 'text', text: said } } };
 }
 
@@ -989,8 +992,18 @@ function makeStep(p: Proposal, element: Seen, procedure: string,
   if (p.act === 'read') {
     if (!p.value) return null;
     const region = regionFor(element);
+    // What kind of value this is, from what the page is showing.
+    //
+    // It was `text` for every read, so the declared type carried no
+    // information — and a comparison typed by it made a text match out of
+    // "credit score at least 700", which decided false against 794. Typing it
+    // by the threshold instead is how a paragraph of prose came to be compared
+    // to the number one. Neither guess is needed: the value is on the page,
+    // and whether it is a number is a fact about it.
+    const showing = element.what === 'value' ? element.name : '';
     return { id, kind: 'read', summary: `${region.label}, into ${p.value}`, region,
-      produces: { name: p.value, label: region.label, type: 'text', required: !p.optional } };
+      produces: { name: p.value, label: region.label,
+        type: asNumber(showing) !== null ? 'number' : 'text', required: !p.optional } };
   }
   return null;
 }
