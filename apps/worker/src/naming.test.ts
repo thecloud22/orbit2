@@ -63,18 +63,52 @@ test('a button holding an icon and a label is still one button', async () => {
   assert.equal(decline.role, 'button');
 });
 
-test('every name Orbit reports is one getByRole can find again', async () => {
-  // The property the whole change is for. A name that cannot be looked up is
-  // a step that resolves to nothing at run time, after publication, which is
+test('every binding by role and name is one getByRole can find again', async () => {
+  // The property the whole change is for. A binding that cannot be looked up
+  // is a step resolving to nothing at run time, after publication, which is
   // the worst moment to discover it.
+  //
+  // Only the bindings that claim a role and a name, because those are the
+  // ones getByRole answers. A field with no accessible name is displayed by
+  // whatever else identifies it and bound by a different rung — asserting
+  // getByRole could find *that* would be asserting the bug this avoids.
   const seen = await snapshot(page);
-  const controls = seen.filter((s) => s.what === 'button' || s.what === 'field' || s.what === 'link');
-  assert.ok(controls.length >= 3, `expected the three controls, saw ${controls.length}`);
+  const byRoleAndName = seen.filter((s) => s.binding.strategy === 'roleAndName');
+  assert.ok(byRoleAndName.length >= 3, `expected at least the three controls, saw ${byRoleAndName.length}`);
 
-  for (const control of controls) {
-    const found = await page.getByRole(control.role as 'button', { name: control.name, exact: true }).count();
-    assert.equal(found, 1, `getByRole('${control.role}', { name: '${control.name}' }) found ${found}`);
+  for (const control of byRoleAndName) {
+    const { role, name } = control.binding as { role: string; name: string };
+    const found = await page.getByRole(role as 'button', { name, exact: true }).count();
+    assert.equal(found, 1, `getByRole('${role}', { name: '${name}' }) found ${found}`);
   }
+});
+
+test('an old two-column form is a page an agent can sign in to', async () => {
+  // Exactly what a corporate sign-in page looks like: no label element, no
+  // aria-label, no placeholder, and the only thing naming the field is the
+  // cell to its left. Both inputs used to be discarded for having no
+  // accessible name, leaving a page that showed the word "Userid" and no box
+  // to type it into.
+  const old = await browser.newPage();
+  await old.setContent(`<table>
+    <tr><td>Userid</td><td><input name="username"></td></tr>
+    <tr><td>Password</td><td><input type="PASSWORD" name="password"></td></tr>
+    <tr><td colspan="2"><input type="submit" value="Logon"></td></tr>
+  </table>`);
+
+  const fields = (await snapshot(old)).filter((s) => s.what === 'field');
+  assert.deepEqual(fields.map((f) => f.name), ['Userid', 'Password']);
+  // Bound by the name the form itself uses, which is the one thing on that
+  // markup that identifies the field and does not move when the layout does.
+  assert.deepEqual(fields.map((f) => f.binding.strategy), ['formName', 'formName']);
+  assert.deepEqual(fields.map((f) => (f.binding as { name: string }).name), ['username', 'password']);
+
+  // type="PASSWORD" in capitals is still a password. The DOM lower-cases it;
+  // this asserts that rather than trusting it, because getting it wrong means
+  // a keystroke that should never have left the page.
+  assert.equal(fields[1]?.secret, true);
+  assert.notEqual(fields[0]?.secret, true);
+  await old.close();
 });
 
 test('values are still read from the page, which the accessibility tree does not offer', async () => {

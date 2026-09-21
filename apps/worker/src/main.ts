@@ -6,7 +6,7 @@
  * lease is what makes a second a deployment change rather than a redesign.
  */
 import { Pool } from 'pg';
-import { step as stepSchema, type Step } from '@orbit/contract';
+import { step as stepSchema, type Step, originOf } from '@orbit/contract';
 import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
@@ -72,7 +72,7 @@ async function authorOne(sessionId: string) {
       name: string; procedure: string; application_id: string; start_path: string;
       inputs: Record<string, string>; host: string;
     }>(`SELECT s.name, s.procedure, s.application_id, s.start_path, s.inputs,
-               (r.addresses->0->>'host') AS host
+               (r.addresses->0->>'host') AS host, (r.addresses->0->>'scheme') AS scheme
           FROM authoring_session s
           JOIN application_revision r ON r.application_id = s.application_id
          WHERE s.id = $1
@@ -90,7 +90,7 @@ async function authorOne(sessionId: string) {
       name: s.name,
       procedure: s.procedure,
       applicationId: s.application_id,
-      origin: `http://${s.host}`,
+      origin: originOf(s),
       startPath: s.start_path,
       inputs: s.inputs,
       model: modelFromEnvironment(),
@@ -162,7 +162,7 @@ async function recordOne(sessionId: string) {
   try {
     const { rows: [s] } = await db.query<{ name: string; start_path: string; host: string;
       credential_name: string | null; sign_in_as: string | null }>(
-      `SELECT s.name, s.start_path, (r.addresses->0->>'host') AS host, r.credential_name, r.sign_in_as
+      `SELECT s.name, s.start_path, (r.addresses->0->>'host') AS host, (r.addresses->0->>'scheme') AS scheme, r.credential_name, r.sign_in_as
          FROM recording_session s
          JOIN application_revision r ON r.application_id = s.application_id
         WHERE s.id = $1 ORDER BY r.revision DESC LIMIT 1`, [sessionId]);
@@ -194,7 +194,7 @@ async function recordOne(sessionId: string) {
     });
 
     const recording = await record({
-      origin: `http://${s.host}`,
+      origin: originOf(s),
       startPath: s.start_path,
       credentialName: s.credential_name,
       signsInAs: s.sign_in_as,
@@ -270,7 +270,7 @@ async function runOne(runId: string) {
     // boundary like any other (Decision 9).
     const steps: Step[] = (row.body.steps as unknown[]).map((s) => stepSchema.parse(s));
     const app = row.applications[0];
-    const origin = `http://${app.addresses[0].host}`;
+    const origin = originOf(app.addresses[0]);
 
     // Read from the version's own copy, never from the live application: a
     // version that could be made to run somewhere else by editing a row

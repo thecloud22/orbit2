@@ -18,34 +18,59 @@
  * to the value itself. See credentials.ts for where it goes and how.
  */
 import type { PoolClient } from 'pg';
-import { object, z } from '@orbit/contract';
+import { object, scheme as schemeOf, z } from '@orbit/contract';
 import { setCredential } from './credentials.ts';
 
 /**
  * The host and port, out of whatever somebody pasted.
  *
- * A run opens the application at `http://` + this, so a scheme typed here
- * produced `http://http://localhost:4101` and every run and every recording
- * failed with a name that could not be resolved — after the registration had
- * been accepted, which is the wrong place to find out.
- *
- * A scheme is stripped rather than refused: copying the address out of a
- * browser's bar is the obvious thing to do, and there is only one thing it
- * could have meant. A path is not stripped, because there is a field for it
- * beside this one and quietly dropping it would point every run at the wrong
- * page instead of at no page — a failure nobody would see.
+ * A run opens the application at the scheme plus this, so a scheme left in
+ * here produced `http://http://localhost:4101` and every run and every
+ * recording failed with a name that could not be resolved — after the
+ * registration had been accepted, which is the wrong place to find out.
  */
 const host = z.string().trim().min(1).max(255)
-  .transform((given) => given.replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, '').replace(/\/+$/, ''))
   .refine((h) => h.length > 0, 'needs a host')
   .refine((h) => !h.includes('/'), 'is the host and port only — a path belongs in the box beside it')
   .refine((h) => /^(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9._-]+)(:\d{1,5})?$/.test(h),
     'does not look like a host and port');
 
-const address = object({
+/**
+ * The scheme is taken out of what was pasted, not thrown away.
+ *
+ * It used to be stripped, on the grounds that copying an address out of a
+ * browser's bar is the obvious thing to do and there was only one thing it
+ * could have meant. There was not. Every origin was then built as `http://`,
+ * so registering an https system was accepted and the recorder opened it over
+ * http and hit an error page — the scheme had been read, understood, and
+ * discarded.
+ *
+ * Absent, it is http, which is what every address registered before this
+ * meant. Port 443 is taken as https, because nothing else is served there and
+ * a bare `portal.example.com:443` is somebody who did not think to type the
+ * scheme rather than somebody asking for cleartext.
+ */
+const address = z.preprocess((given) => {
+  if (!given || typeof given !== 'object' || Array.isArray(given)) return given;
+  const a = given as Record<string, unknown>;
+  if (typeof a['host'] !== 'string') return given;
+
+  const pasted = a['host'].trim().replace(/\/+$/, '');
+  const written = pasted.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\//);
+  const rest = written ? pasted.slice(written[0].length) : pasted;
+  const named = written?.[1]?.toLowerCase();
+
+  return {
+    ...a,
+    host: rest,
+    scheme: a['scheme'] ?? (named === 'https' || named === 'http' ? named
+      : /:443$/.test(rest) ? 'https' : 'http'),
+  };
+}, object({
   host,
   pathPrefix: z.string().trim().max(255).default('/'),
-});
+  scheme: schemeOf.default('http'),
+}));
 
 const connectionFields = {
   addresses: z.array(address).min(1, 'needs at least one address').max(8),
@@ -92,10 +117,29 @@ const issues = (error: z.ZodError) =>
 type Connection = { addresses: unknown; signInAs: string | undefined; credentialName: string | undefined };
 type StoredConnection = { addresses: unknown; sign_in_as: string | null; credential_name: string | null };
 
+/**
+ * An address as a list, so comparing two of them cannot depend on key order.
+ *
+ * `JSON.stringify` was being compared directly, and jsonb does not store keys
+ * in the order they were written — it orders them by length. With `host` and
+ * `pathPrefix` that happened to match the order the schema declares, so it
+ * worked; adding `scheme` put the stored form at host, scheme, pathPrefix and
+ * the given form at host, pathPrefix, scheme. Every edit then looked like a
+ * reconnection and minted a revision nobody asked for, which for an immutable
+ * record is not a cosmetic fault.
+ *
+ * It was working by coincidence, and the coincidence was one field away.
+ */
+const canonical = (addresses: unknown): string =>
+  JSON.stringify((Array.isArray(addresses) ? addresses : []).map((given) => {
+    const a = (given ?? {}) as Record<string, unknown>;
+    return [a['host'] ?? '', a['pathPrefix'] ?? '/', a['scheme'] ?? 'http'];
+  }));
+
 /** Whether an edit actually changes what a revision would carry, so an edit
  *  that only renames the application does not mint a revision nobody asked for. */
 function sameConnection(stored: StoredConnection, given: Connection): boolean {
-  return JSON.stringify(stored.addresses) === JSON.stringify(given.addresses)
+  return canonical(stored.addresses) === canonical(given.addresses)
     && (stored.sign_in_as ?? null) === (given.signInAs ?? null)
     && (stored.credential_name ?? null) === (given.credentialName ?? null);
 }

@@ -236,7 +236,15 @@ function bindingFor(raw: Raw, seenNames: Map<string, number>): Binding {
   // called "Approve" — the rung is still refused, exactly as before.
   const unique = (key: string) => (seenNames.get(key) ?? 0) === 1;
 
-  if (raw.name && raw.role && unique(`${raw.role}|${raw.name}`)) {
+  // `text` is Orbit's own word for a bit of text on a page, not an ARIA role.
+  // getByRole('text') matches nothing at all, so a labelled figure with a
+  // name nothing else shared went out bound by a role the page cannot have,
+  // and the read resolved to nothing — at run time, after publication, which
+  // is the whole class of failure the publish gate exists to prevent. It now
+  // falls to `structural`, which is the rung a labelled figure belongs on.
+  const resolvable = raw.role && raw.role !== 'text';
+
+  if (raw.name && resolvable && unique(`${raw.role}|${raw.name}`)) {
     return { strategy: 'roleAndName' as Strategy, role: raw.role, name: raw.name };
   }
   if (raw.formName) return { strategy: 'formName', name: raw.formName };
@@ -350,10 +358,31 @@ export function shape(raw: Raw[]): Seen[] {
   }
 
   return raw
-    .filter((r) => r.name.length > 0)
+    // A control with no accessible name is not a control nobody can act on.
+    //
+    // This kept only what had one, which on an application written this
+    // decade is everything. On the ones Orbit exists for it is not:
+    //
+    //     <td>User</td><td><input name="username"></td>
+    //
+    // That input has no label element, no aria-label and no placeholder, so
+    // its accessible name is empty and it was thrown away here — leaving a
+    // sign-in page showing the word "User" as a table cell and no box to type
+    // it into. The ladder below has had a rung for exactly this since it was
+    // measured, `formName`, and nothing ever reached it.
+    //
+    // So what survives is what can still be found again: an accessible name,
+    // the name the form itself uses, or the label in the cell beside it.
+    .filter((r) => r.name.length > 0 || r.formName || r.labelledBy)
     .map((r, index) => {
       const seen: Seen = {
-        index: index + 1, what: r.what, role: r.role, name: r.name,
+        index: index + 1, what: r.what, role: r.role,
+        // What a person calls it, which is not always what the page calls it.
+        // The binding is still derived from the raw element below, so a field
+        // with no accessible name binds by the form's name and not by this —
+        // putting this in the binding would send getByRole looking for a name
+        // the page does not have.
+        name: r.name || r.labelledBy || r.formName || '',
         binding: bindingFor(r, counts),
       };
       if (r.labelledBy) seen.labelledBy = r.labelledBy;

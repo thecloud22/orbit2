@@ -10,13 +10,14 @@
 import { Pool } from 'pg';
 import { modelFromEnvironment } from '@orbit/model';
 import { authorAndStore } from './author-store.ts';
+import { originOf } from '@orbit/contract';
 
 const pool = new Pool({ connectionString: process.env['ORBIT_OWNER_DATABASE_URL']
   ?? `postgres://${process.env['USER']}@localhost/orbit2_dev` });
 const db = await pool.connect();
 
 const { rows: [app] } = await db.query<{ id: string; host: string }>(
-  `SELECT a.id, (r.addresses->0->>'host') AS host
+  `SELECT a.id, (r.addresses->0->>'host') AS host, (r.addresses->0->>'scheme') AS scheme
      FROM application a JOIN application_revision r ON r.application_id = a.id
     ORDER BY r.revision DESC LIMIT 1`);
 
@@ -37,7 +38,7 @@ const inputs = Object.fromEntries(given.map((pair) => {
 const result = await authorAndStore(db, {
   name, procedure,
   applicationId: app!.id,
-  origin: `http://${app!.host}`,
+  origin: originOf(app),
   startPath: '/pipeline',
   inputs,
   model: modelFromEnvironment(),
