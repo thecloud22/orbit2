@@ -528,10 +528,21 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
 function Stages({ confirmed, published, live, outstanding }: {
   confirmed: boolean; published: boolean; live: boolean; outstanding: number;
 }) {
+  // Four stages, each one a fact the store holds: the workflow exists, it was
+  // attested to, a version was minted, a version is live.
+  //
+  // "Checked" was a fifth, and it was not a state. Checking is something a
+  // person does, and the questions it raises are answered while confirming —
+  // so it could never be false while Confirmed was true. It survives as an
+  // instruction on the bring-in page, which is where a thing you do belongs,
+  // and the count it carried is now the reason confirmation is blocked, which
+  // is what §4 asks for: the status, and what is stopping the next act.
   const stages = [
-    { name: 'Brought in', done: true, why: '' },
-    { name: 'Checked', done: outstanding === 0, why: `${outstanding} outstanding` },
-    { name: 'Confirmed', done: confirmed, why: 'nobody has attested to it yet' },
+    { name: 'Recorded', done: true, why: '' },
+    { name: 'Confirmed', done: confirmed,
+      why: outstanding > 0
+        ? `${outstanding} ${outstanding === 1 ? 'question' : 'questions'} to answer first`
+        : 'nobody has attested to it yet' },
     { name: 'Published', done: published, why: 'confirm it first' },
     { name: 'Active', done: live, why: 'every ending must be proved by a run' },
   ];
