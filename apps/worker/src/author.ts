@@ -255,6 +255,39 @@ const CONCLUDE = [
   'A second conclusion is not a failure. "There is no such file" is a correct result.',
 ].join('\n');
 
+/**
+ * The same two fields, asked about a condition rather than about a missing
+ * value.
+ *
+ * A guarded procedure finishes one of two ways: every condition held, or one
+ * of them did not. That is not the question CONCLUDE asks — it asks which
+ * value's absence separates two conclusions — and the answer was being used
+ * to label the two sides of the branch anyway. So an agent for "if the credit
+ * score is below 620, decline the file; otherwise approve it outright" read a
+ * score of 762, took the branch the right way, and reported "Decline the loan
+ * due to low credit score". The comparison was correct and the label on the
+ * ending was the opposite of what had happened.
+ *
+ * Orbit knows which ending is which; only the words belong to the model. So
+ * it asks about the thing it actually needs named.
+ */
+const CONCLUDE_GUARDED = [
+  'You are naming the two ways a conditional business procedure can finish.',
+  'An outcome is a short camelCase name; a label is how it reads to a person.',
+  '',
+  'whenFound  = the conclusion reached when EVERY condition listed below holds,',
+  '             and the guarded steps are therefore carried out.',
+  'whenAbsent = the conclusion reached when ANY of them does not hold, and those',
+  '             steps are skipped.',
+  '',
+  'Read the conditions carefully before naming either. If the condition is',
+  '"credit score is below 620" and the procedure says to decline in that case,',
+  'then whenFound is the decline and whenAbsent is the approval — not the other',
+  'way round.',
+  '',
+  'Set missingValue to null. Nothing here turns on a value being absent.',
+].join('\n');
+
 const shape = {
   type: 'object',
   properties: {
@@ -714,15 +747,24 @@ export async function authorFromProcedure(opts: {
         return true;
       });
 
+    const isGuarded = allConditions.length > 0;
+    const asksAbout = isGuarded
+      ? ['THE CONDITIONS, all of which must hold for the guarded steps to happen:',
+         ...allConditions.map((c) => `- ${c.of.label} ${readable(c.is)} ${c.than}`), '',
+         'THE STEPS THEY GUARD (carried out only when every condition above holds):',
+         ...steps.slice(guardedAt).map((x) => `- ${x.kind} — ${x.summary}`), '',
+         'What is this procedure\'s conclusion when they all hold, and when one does not?']
+      : [`VALUES PRODUCED: ${produced.map((v) => `${v.name}${v.required ? '' : ' (may be absent)'}`).join(', ') || 'none'}`,
+         '', 'How can this procedure finish?'];
+
     const answered = await model.propose(
       {
         purpose: 'name the conclusions',
-        instruction: CONCLUDE,
+        instruction: isGuarded ? CONCLUDE_GUARDED : CONCLUDE,
         shown: [`PROCEDURE:\n${procedure}`, '',
                 'THE STEPS THAT WERE MAPPED:',
                 ...steps.map((s, i) => `${i + 1}. ${s.kind} — ${s.summary}`), '',
-                `VALUES PRODUCED: ${produced.map((v) => `${v.name}${v.required ? '' : ' (may be absent)'}`).join(', ') || 'none'}`,
-                '', 'How can this procedure finish?'].join('\n'),
+                ...asksAbout].join('\n'),
       },
       conclusions, conclusionsShape,
     );
@@ -745,6 +787,9 @@ export async function authorFromProcedure(opts: {
       !said ? (answered.refusedBecause ?? 'the model gave no answer')
       : !found ? 'it did not name the conclusion the procedure reaches when the work is done'
       : said.whenAbsent && !absent ? 'it described a second conclusion without naming it'
+      // What separates the two is the condition, which Orbit already has.
+      // Demanding a missing value here asked for something irrelevant.
+      : isGuarded ? (absent ? null : 'it did not name the conclusion reached when the conditions do not hold')
       : said.whenAbsent && !said.missingValue ? 'it described a second conclusion without saying what distinguishes it'
       : said.missingValue && !separator
         ? `it named "${said.missingValue}" as the value that would be missing, and no step produces a value by that name`
@@ -760,8 +805,17 @@ export async function authorFromProcedure(opts: {
       const prefix = steps.slice(0, guardedAt);
       const guarded = steps.slice(guardedAt);
 
+      // Each ending says which side of the condition it is on.
+      //
+      // The confirmation screen shows these summaries and asks the author to
+      // name each conclusion. Two labels reading "Approve the loan outright"
+      // and "Decline the loan due to low credit score", in an order nothing
+      // explains, invite exactly the mistake Orbit made here first: naming
+      // them the wrong way round. The condition is the thing that tells them
+      // apart, so the condition is on them.
+      const whenAll = allConditions.map((c) => `${c.of.label} ${readable(c.is)} ${c.than}`).join(' and ');
       const passEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
+        summary: `${said?.whenFound.label || 'Finish — this conclusion has no name yet'} — when ${whenAll}`,
         outcome: found || 'unnamed', publishes: published };
       // The path that leaves before the guarded steps can only report what
       // was read before them.
@@ -775,7 +829,7 @@ export async function authorFromProcedure(opts: {
       // all, and the author was sent to fix something Orbit had built.
       const beforeGuard = new Set(prefix.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : [])));
       const failEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said?.whenAbsent?.label || 'Finish — this conclusion has no name yet',
+        summary: `${said?.whenAbsent?.label || 'Finish — this conclusion has no name yet'} — otherwise`,
         outcome: absent || 'unnamedOtherwise',
         publishes: published.filter((v) => beforeGuard.has(v)) };
 
