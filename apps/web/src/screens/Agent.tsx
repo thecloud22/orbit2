@@ -189,6 +189,12 @@ function Confirm({ draft, onDone, onCancel }: {
   // to learn it is before you press the button that carries your name.
   const noEnding = endings.length === 0;
 
+  // The acts that commit something a person would have to undo.
+  const commits = [...new Set(steps
+    .filter((s) => s.kind === 'activate' && (s.declares as { changesARecord?: boolean }).changesARecord)
+    .map((s) => String((s.declares as { control?: { label?: string }; summary?: string })
+      .control?.label ?? (s.declares as { summary?: string }).summary ?? 'an action')))];
+
   const missing = [
     ...(noEnding ? ['a conclusion for this workflow to reach'] : []),
     ...outstanding.filter((n) => !settled(n)).map((n) =>
@@ -202,6 +208,28 @@ function Confirm({ draft, onDone, onCancel }: {
     <Section title="Confirm this is the procedure"
       note="Nothing here is filled in for you. What you write is the record.">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22, paddingTop: 4, maxWidth: 780 }}>
+
+        {/* What attesting to this authorises.
+            §7 makes this the flag that decides what authority a version needs,
+            and the screen where somebody puts their name to it said nothing
+            about it. An agent that had never reached the page its procedure
+            named still pressed "Approve file", and the person confirming it
+            was shown a list of steps and asked for a conclusion. Named here,
+            in the acts themselves, so agreeing to it is deliberate. */}
+        {commits.length > 0 && (
+          <div style={{ border: '1px solid var(--rule-2)', borderLeft: '3px solid var(--primary)',
+            borderRadius: 4, padding: '13px 15px', background: 'var(--panel)' }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 5 }}>
+              This agent changes records
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.6 }}>
+              Every run of it will press {commits.map((c, i) => (
+                <span key={i}>{i > 0 ? (i === commits.length - 1 ? ' and ' : ', ') : ''}
+                  <strong style={{ color: 'var(--ink)' }}>{c}</strong></span>
+              ))}. Check the steps below reach that on the right record.
+            </div>
+          </div>
+        )}
 
         {noEnding && (
           <Refusal title="There is nothing here to attest to"

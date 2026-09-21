@@ -438,6 +438,9 @@ export async function authorFromProcedure(opts: {
 
     let finished = false;
     let lastRejection: string | null = null;
+    // Set once the procedure asks for something this page does not offer. From
+    // that moment the walk is somewhere the procedure does not describe.
+    let lostTheThread: string | null = null;
     for (let turn = 1; turn <= maxTurns; turn++) {
       const seen = await snapshot(page);
       // Only an act that is *supposed* to move the page counts towards being
@@ -575,6 +578,7 @@ export async function authorFromProcedure(opts: {
         // existence: the session's record is evidence either way.
         turns.push(record('rejected', `named "${wanted}", which was not on the page`));
         questions.push(asQuestion(`At turn ${turn} the page did not offer what the procedure asked for.`));
+        lostTheThread ??= wanted;
         continue;
       }
       if (named.length > 1) {
@@ -648,6 +652,32 @@ export async function authorFromProcedure(opts: {
       // Pressing search, or a filter, or the same "Advance" again is left
       // alone — it only refuses where the cost of being wrong is a second
       // decision on somebody's file.
+      // Nothing is committed after the procedure asked for something that was
+      // not there.
+      //
+      // Test case 16 — "open the session-expiry page for loan ML-26-04471 with
+      // a 3-second expiry, wait 5 seconds, then try to approve the file and
+      // confirm it is refused" — could not find that page, said so, and then
+      // pressed "Approve file" on the ordinary loan file. It approved a real
+      // loan and reported "Approval refused due to session expiry".
+      //
+      // Orbit knew. The turn before was rejected with `named "session-expiry",
+      // which was not on the page`, so at that moment the walk was somewhere
+      // the procedure does not describe — and the one act you cannot take back
+      // is the one it went on to take. Reading and typing are recoverable;
+      // approving somebody's file on the wrong page is not.
+      if (lostTheThread && made.kind === 'activate' && made.changesARecord) {
+        turns.push(record('rejected',
+          `the procedure asked for "${lostTheThread}", which this page did not offer, so Orbit is not where`
+          + ` the procedure describes — and "${made.control.label}" commits something`));
+        questions.push(asQuestion(
+          `The procedure asks for "${lostTheThread}", and Orbit could not find it here. It then reached`
+          + ` "${made.control.label}", which commits something a person would have to undo, so it stopped`
+          + ' rather than press it somewhere the procedure does not describe. Say how to get to'
+          + ` "${lostTheThread}" from here, and it can carry on.`));
+        continue;
+      }
+
       if (repeatsACommit(steps[steps.length - 1], made)) {
         turns.push(record('rejected',
           `"${(made as Extract<Step, { kind: 'activate' }>).control.label}" commits something and was pressed`
