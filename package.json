@@ -8,6 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "verify:model": "node --env-file=.env --experimental-strip-types packages/model/src/verify.ts",

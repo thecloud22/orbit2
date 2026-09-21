@@ -18,10 +18,14 @@ with. Then:
 ```
 git clone git@github.com:thecloud22/orbit2.git
 cd orbit2
-scripts/setup
+pnpm run setup
 ```
 
-`scripts/setup` checks what is installed, writes `.env` from `.env.example`,
+(`pnpm run setup`, not `pnpm setup` — pnpm has a built-in command by that name
+which manages pnpm's own installation, and it wins. `scripts/setup` still
+works too.)
+
+Setup checks what is installed, writes `.env` from `.env.example`,
 installs the workspace and Chromium, creates `orbit2_dev` and `orbit2_test`,
 and runs the migrations on both. It is safe to run twice.
 
@@ -33,7 +37,7 @@ cp .env.example .env
 ```
 
 and set the three database lines to the role the image was started with —
-`.env.example` shows the shape. Then `scripts/setup`. It creates and migrates
+`.env.example` shows the shape. Then `pnpm run setup`. It creates and migrates
 whatever those URLs name; it no longer assumes a socket, a port or a role. If
 it cannot reach them it stops and says which URL it tried.
 
