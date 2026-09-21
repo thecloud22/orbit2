@@ -360,6 +360,8 @@ const INSTRUCTION = [
   'below one — put every one of them in onlyIf. Each names a value an EARLIER step already read.',
   'Do not press a button the procedure conditions and leave onlyIf empty: that drops the condition.',
   'onlyIf is null when the procedure puts no condition on the act.',
+  'When a value is a passage of prose — a note, a comment, a description — a condition on it',
+  'is "contains", never "is" or "is not": a paragraph is never equal to a single word.',
   'act=read    take a value off the screen. element=the value. value=a short camelCase name for it.',
   '            Orbit binds a read to whatever labels the value, not to the value, so that the',
   '            step reads what the page says now rather than checking it still says what it said.',
@@ -425,7 +427,13 @@ export async function authorFromProcedure(opts: {
   // what it can honestly claim to have concluded is nothing.
   let lostTheThread: string | null = null;
 
-  const guards = new Map<string, Array<{ value: string; is: string; than: string;
+  // What each read value actually looked like on the page. A comparison
+  // against a passage of prose is decided before it is made — a paragraph is
+  // never equal to the word "seasonal" — and knowing the shape of the value is
+  // what lets Orbit say so.
+  const samples = new Map<string, string>();
+
+  const guards = new Map<string, Array<{ value: string; is: string; than: string; sample: string;
     of: { name: string; label: string; type: string } }>>();
   const turns: Turn[] = [];
   const questions: Note[] = [];
@@ -739,8 +747,10 @@ export async function authorFromProcedure(opts: {
           + ' the application did with nothing in that box — check they are the ones a real value would produce.'));
       }
 
+      if (made.kind === 'read') samples.set(made.produces.name, element.name);
+
       steps.push(made);
-      if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)! })));
+      if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)!, sample: samples.get(c.value) ?? '' })));
       turns.push(record('kept', conditions.length > 0
         ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
         : `step ${steps.length}: ${made.summary}`));
@@ -1205,7 +1215,7 @@ function readable(is: string): string {
  * condition rather than inventing one that cannot hold.
  */
 function comparisonFor(
-  c: { value: string; is: string; than: string },
+  c: { value: string; is: string; than: string; sample?: string },
   produces?: { type: string } | null,
 ): Extract<Step, { kind: 'branch' }>['when'] | null {
   const said = (c.than ?? '').trim();
@@ -1230,6 +1240,18 @@ function comparisonFor(
   // never offered it, so the model said `isNot` and a paragraph that plainly
   // described seasonal income satisfied "is not seasonal".
   if (c.is !== 'is' && c.is !== 'isNot' && c.is !== 'contains') return null;
+
+  // A comparison decided before it is made is not a comparison. The income
+  // analyst's note is a paragraph, and "is not seasonal" is true of it however
+  // plainly it describes seasonal income — so test case 10 read the note, took
+  // the branch that ignores it, and approved with no extra condition. Equality
+  // against a passage is refused; `contains` is the thing that was meant, and
+  // it is now offered.
+  const sample = c.sample ?? '';
+  if ((c.is === 'is' || c.is === 'isNot') && sample.length > 80 && sample.length > said.length * 3) {
+    return null;
+  }
+
   return { of: 'text', operator: c.is,
     left, right: { from: 'literal', literal: { type: 'text', text: said } } };
 }

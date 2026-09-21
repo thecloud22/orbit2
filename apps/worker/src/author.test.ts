@@ -221,3 +221,29 @@ test('a condition on a note means it mentions the thing, not that it equals it',
   assert.equal(c?.of, 'text');
   assert.equal(c?.operator, 'contains');
 });
+
+test('equality against a passage of prose is no comparison at all', () => {
+  // The income analyst's note is a paragraph, and "is not seasonal" is true of
+  // it however plainly it describes seasonal income. Test case 10 read the
+  // note, took the branch that ignores it, and approved with no extra
+  // condition. A comparison decided before it is made is not one.
+  const note = 'Borrower is sole member of Whitfield Grounds & Landscape LLC, operating 3 years. '
+    + 'Income is materially seasonal and the analyst flagged the swing as unresolved.';
+  assert.equal(forTest.comparisonFor({ value: 'note', is: 'isNot', than: 'seasonal', sample: note },
+    { type: 'text' }), null);
+  assert.equal(forTest.comparisonFor({ value: 'note', is: 'is', than: 'seasonal', sample: note },
+    { type: 'text' }), null);
+});
+
+test('contains against a passage is exactly what was meant, and is kept', () => {
+  const note = 'Income is materially seasonal and the analyst flagged the swing as unresolved on a single year.';
+  const c = forTest.comparisonFor({ value: 'note', is: 'contains', than: 'seasonal', sample: note },
+    { type: 'text' });
+  assert.equal(c?.operator, 'contains');
+});
+
+test('equality against a short value is untouched', () => {
+  const c = forTest.comparisonFor({ value: 'floodZone', is: 'isNot', than: 'X', sample: 'AE' },
+    { type: 'text' });
+  assert.equal(c?.operator, 'isNot');
+});
