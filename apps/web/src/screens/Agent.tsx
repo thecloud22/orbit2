@@ -169,6 +169,9 @@ function Confirm({ draft, onDone, onCancel }: {
   const inputs = workflow.declared_inputs ?? [];
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [acknowledged, setAcknowledged] = useState<Record<string, boolean>>({});
+  const settled = (n: { id: string; kind: string }) =>
+    n.kind === 'risk' ? Boolean(acknowledged[n.id]) : Boolean(answers[n.id]?.trim());
   const [named, setNamed] = useState<Record<string, { outcome: string; label: string }>>(
     Object.fromEntries(endings.map((e) => {
       const already = String((e.declares as { outcome?: string }).outcome ?? '');
@@ -186,7 +189,8 @@ function Confirm({ draft, onDone, onCancel }: {
 
   const missing = [
     ...(noEnding ? ['a conclusion for this workflow to reach'] : []),
-    ...outstanding.filter((n) => !answers[n.id]?.trim()).map(() => 'an answer'),
+    ...outstanding.filter((n) => !settled(n)).map((n) =>
+      n.kind === 'risk' ? 'an acknowledgement' : 'an answer'),
     ...endings.filter((e) => !named[e.id]?.outcome.trim()).map(() => 'a name for a conclusion'),
     ...endings.flatMap((e) => inputs.filter((i) => i.required && !examples[e.id]?.[i.name]?.trim())
       .map(() => 'an example value')),
@@ -202,12 +206,26 @@ function Confirm({ draft, onDone, onCancel }: {
             blockers={['This workflow reaches no conclusion, so there is nothing a run could report or a test could prove. Add an ending before confirming it.']} />
         )}
 
+        {/* A question is answered, a risk is acknowledged. §4 names four kinds
+            and four different acts, and a caution shown with a text box under
+            it asks for prose that does not exist — whatever gets typed lets
+            somebody past a warning that typing cannot address. */}
         {outstanding.map((n) => (
           <div key={n.id}>
             <div style={{ fontSize: 13.5, marginBottom: 6 }}>{n.body}</div>
-            <input style={field} value={answers[n.id] ?? ''} placeholder="Your answer"
-              aria-label={n.body}
-              onChange={(e) => setAnswers((a) => ({ ...a, [n.id]: e.target.value }))} />
+            {n.kind === 'risk' ? (
+              <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', fontSize: 13,
+                color: 'var(--ink-2)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={Boolean(acknowledged[n.id])} aria-label={n.body}
+                  onChange={(e) => setAcknowledged((a) => ({ ...a, [n.id]: e.target.checked }))}
+                  style={{ marginTop: 2 }} />
+                <span>I have read this and it is still the procedure.</span>
+              </label>
+            ) : (
+              <input style={field} value={answers[n.id] ?? ''} placeholder="Your answer"
+                aria-label={n.body}
+                onChange={(e) => setAnswers((a) => ({ ...a, [n.id]: e.target.value }))} />
+            )}
           </div>
         ))}
 
@@ -255,7 +273,11 @@ function Confirm({ draft, onDone, onCancel }: {
             why={`Still needed: ${[...new Set(missing)].join(', ')}`}
             onClick={() => void onDone(`/api/workflows/${workflow.id}/confirm`, {
               attested: true,
-              answers: outstanding.map((n) => ({ noteId: n.id, answer: answers[n.id]! })),
+              answers: outstanding.map((n) => ({
+                noteId: n.id,
+                answer: answers[n.id] ?? '',
+                acknowledged: Boolean(acknowledged[n.id]),
+              })),
               endings: endings.map((e) => ({
                 stepId: e.id,
                 outcome: named[e.id]!.outcome.trim(),

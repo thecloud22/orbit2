@@ -110,10 +110,10 @@ export async function storeDraft(
 
     // What the model could not work out. §4 and acceptance criterion 3: any
     // outstanding one blocks confirmation, with a link to it.
-    for (const question of draft.questions) {
+    for (const note of draft.questions) {
       await db.query(
-        `INSERT INTO workflow_note (workflow_id, kind, body) VALUES ($1, 'question', $2)`,
-        [workflowId, question]);
+        `INSERT INTO workflow_note (workflow_id, kind, body) VALUES ($1, $2, $3)`,
+        [workflowId, note.kind, note.body]);
     }
 
     for (const turn of draft.turns) {

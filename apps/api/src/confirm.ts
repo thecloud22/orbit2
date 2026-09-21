@@ -35,10 +35,19 @@ export const confirmation = object({
    *  question without settling it. */
   answers: z.array(object({
     noteId: z.uuid(),
-    /** Trimmed first, so a space bar is not an answer. */
-    answer: z.string().max(2000).transform((a) => a.trim()).refine((a) => a.length > 0, {
-      message: 'An answer cannot be blank — this is the record of what was decided.',
-    }),
+    /**
+     * What settles it, in the author's own words.
+     *
+     * Blank for a risk, which §4 settles by acknowledgement rather than by an
+     * answer: "answer the questions, confirm the assumptions, decide the
+     * exceptions, acknowledge the risks". A caution raised by the recorder —
+     * that a demonstration shows one path — has no answer, and demanding one
+     * meant the author typed something meaningless to get past a warning that
+     * typing cannot address.
+     */
+    answer: z.string().max(2000).transform((a) => a.trim()),
+    /** Set where there was nothing to answer and something to have seen. */
+    acknowledged: z.boolean().default(false),
   })).max(256),
   attested: z.boolean(),
 });
@@ -58,9 +67,15 @@ export async function confirm(db: PoolClient, workflowId: string, c: Confirmatio
 
   const { rows: notes } = await db.query<{ id: string; kind: string; body: string }>(
     `SELECT id, kind, body FROM workflow_note WHERE workflow_id = $1 AND resolved_at IS NULL`, [workflowId]);
-  const answered = new Set(c.answers.map((a) => a.noteId));
+  // A question needs words; a risk needs somebody to have seen it. Both are
+  // settled acts and both are recorded — what differs is what counts as one.
+  const settled = new Map(c.answers.map((a) => [a.noteId, a]));
   for (const note of notes) {
-    if (!answered.has(note.id)) {
+    const given = settled.get(note.id);
+    const enough = note.kind === 'risk'
+      ? Boolean(given?.acknowledged || given?.answer)
+      : Boolean(given?.answer);
+    if (!enough) {
       blockers.push({ kind: 'outstanding', note: note.kind as 'question', body: note.body });
     }
   }
@@ -108,7 +123,9 @@ export async function confirm(db: PoolClient, workflowId: string, c: Confirmatio
       // the timestamp only says a question stopped being asked.
       await db.query(
         `UPDATE workflow_note SET resolved_at = now(), answer = $2 WHERE id = $1 AND workflow_id = $3`,
-        [answer.noteId, answer.answer, workflowId]);
+        // A risk acknowledged without words still records that it was seen,
+        // because the column is what proves the act happened.
+        [answer.noteId, answer.answer || 'Acknowledged.', workflowId]);
     }
     await db.query(
       `UPDATE workflow

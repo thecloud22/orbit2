@@ -8,7 +8,8 @@
       "Read(//Users/karthik/.claude/skills/**)",
       "Bash(rm -rf claude-code)",
       "Bash(find ~/.claude/plugins/marketplaces -name \"plugin.json\" -o -name \"PLUGIN.md\" 2>/dev/null | head -20)",
-      "Read(//Users/karthik/.claude/plugins/marketplaces/**)"
+      "Read(//Users/karthik/.claude/plugins/marketplaces/**)",
+      "Bash(git checkout *)"
     ],
     "additionalDirectories": [
       "/Users/karthik/labs/orbit2/claude-code"

@@ -19,6 +19,7 @@
 import { z, type Step } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
 import { chromium, type Page } from 'playwright';
+import { asQuestion, type Note } from './note.ts';
 import { asNumber } from './compare.ts';
 import { asText, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
 
@@ -189,7 +190,15 @@ export interface AuthoredDraft {
   steps: Step[];
   turns: Turn[];
   /** What it could not work out, which blocks confirmation until answered. */
-  questions: string[];
+  /**
+   * What Orbit could not settle, each with the kind of thing it is.
+   *
+   * §4 treats the four differently — a question is answered, an assumption
+   * confirmed, an exception decided, a risk acknowledged — and everything was
+   * being filed as a question. A caution then arrived on the confirmation
+   * screen with a text box under it and no answer that could go in it.
+   */
+  questions: Note[];
   /** Derived from the steps rather than proposed: an input is a value an
    *  `enter` step takes from outside, and nothing else can be one. */
   declaredInputs: Array<{ name: string; label: string; type: 'text'; required: true }>;
@@ -248,7 +257,7 @@ export async function authorFromProcedure(opts: {
    *  are named at the end. */
   const guards = new Map<string, Array<{ value: string; is: string; than: string; of: { name: string; label: string } }>>();
   const turns: Turn[] = [];
-  const questions: string[] = [];
+  const questions: Note[] = [];
 
   // How many turns in a row the page has looked the same. A session that keeps
   // acting on an unchanged page is stuck, and saying so is more useful than
@@ -278,7 +287,7 @@ export async function authorFromProcedure(opts: {
       }
       lastFingerprint = fingerprint;
       if (unchanged >= 2) {
-        questions.push('The page stopped changing, so the rest of the procedure could not be worked out here.');
+        questions.push(asQuestion('The page stopped changing, so the rest of the procedure could not be worked out here.'));
         break;
       }
       const done = steps.slice(1).map((s, i) => `${i + 1}. ${s.kind} — ${s.summary}`);
@@ -323,7 +332,7 @@ export async function authorFromProcedure(opts: {
         // It named something it was not shown. Rejected, not retried into
         // existence: the session's record is evidence either way.
         turns.push(record('rejected', `named "${wanted}", which was not on the page`));
-        questions.push(`At turn ${turn} the page did not offer what the procedure asked for.`);
+        questions.push(asQuestion(`At turn ${turn} the page did not offer what the procedure asked for.`));
         continue;
       }
       if (named.length > 1) {
@@ -364,7 +373,7 @@ export async function authorFromProcedure(opts: {
       if (unknown.length > 0) {
         turns.push(record('rejected',
           `it conditioned this on ${unknown.map((c) => `"${c.value}"`).join(', ')}, which no earlier step reads`));
-        questions.push(`The procedure conditions "${made.summary}" on ${unknown.map((c) => c.value).join(', ')}, and no step reads that. What should be read first?`);
+        questions.push(asQuestion(`The procedure conditions "${made.summary}" on ${unknown.map((c) => c.value).join(', ')}, and no step reads that. What should be read first?`));
         continue;
       }
 
@@ -480,13 +489,13 @@ export async function authorFromProcedure(opts: {
         + allConditions.map((c) => `${c.value} ${readable(c.is)} ${c.than}`).join(' and ')));
 
       if (!found || !absent) {
-        questions.push('What are the two ways this finishes called? A run reports the conclusion by name, and nothing may invent one.');
+        questions.push(asQuestion('What are the two ways this finishes called? A run reports the conclusion by name, and nothing may invent one.'));
       }
       // Orbit watched one path. Where the procedure says to *do* something on
       // the other — decline the file, send it back — it has not seen that act
       // and will not guess at it.
       if (guarded.some((x) => x.kind === 'activate' && x.changesARecord)) {
-        questions.push('When the conditions do not hold, this reports the conclusion and takes no action. If something must be done instead, say what, and it can be recorded.');
+        questions.push(asQuestion('When the conditions do not hold, this reports the conclusion and takes no action. If something must be done instead, say what, and it can be recorded.'));
       }
     } else if (refusal || !said || !said.whenAbsent || !separator || !absent) {
       // One ending. Either the procedure has one, or the model's account of the
@@ -497,12 +506,12 @@ export async function authorFromProcedure(opts: {
         outcome: found || 'unnamed', publishes: published });
       if (refusal) {
         turns.push(record('rejected', refusal));
-        questions.push(`Orbit could not use the second conclusion it was offered, because ${refusal}. Is there more than one way this finishes?`);
+        questions.push(asQuestion(`Orbit could not use the second conclusion it was offered, because ${refusal}. Is there more than one way this finishes?`));
       } else {
         turns.push(record('kept', `one conclusion: ${found}`));
       }
       if (!found) {
-        questions.push('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.');
+        questions.push(asQuestion('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.'));
       }
     } else {
       // Two conclusions, separated by whether a value the steps already produce

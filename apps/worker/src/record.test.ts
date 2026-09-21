@@ -120,6 +120,9 @@ test('a demonstration against the real application becomes steps', async () => {
 
   // One recording is one path, and it cannot know what the ending is called.
   assert.equal(result.steps.at(-1)?.kind, 'end');
-  assert.ok(result.questions.some((q) => /one way the procedure can end/.test(q)),
-    'and it says so rather than implying the other paths do not exist');
+  // Raised as a risk, not a question: there is no sentence a person can type
+  // that makes a second path exist.
+  const caution = result.questions.find((q) => /one way the procedure can end/.test(q.body));
+  assert.ok(caution, 'it says so rather than implying the other paths do not exist');
+  assert.equal(caution!.kind, 'risk');
 });

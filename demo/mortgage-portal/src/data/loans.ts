@@ -15,6 +15,8 @@
  * genuinely different paths rather than the same path with different numbers.
  */
 
+import { appendAuditEntry } from './auditLog';
+
 export type EmploymentType = 'w2' | 'self_employed' | 'contract' | 'retired';
 export type Occupancy = 'primary' | 'second_home' | 'investment';
 export type PropertyType = 'single_family' | 'condo' | 'multi_family_2_4' | 'manufactured';
@@ -419,8 +421,8 @@ export function getSubmittedLoans(): readonly Loan[] {
  * application is in before anyone has picked it up. Stored for the current
  * browser session only: the point of this fixture is that the form and
  * everything downstream of it (underwriting review, documents, automated
- * underwriting, pricing)
- * works end to end, not that it survives a server restart.
+ * underwriting, pricing) works end to end, not that it survives a server
+ * restart.
  */
 export function submitApplication(input: LoanApplicationInput): Loan {
   const existing = readSubmittedLoans();
@@ -432,6 +434,7 @@ export function submitApplication(input: LoanApplicationInput): Loan {
     underwriter: 'Unassigned',
   };
   writeSubmittedLoans([...existing, loan]);
+  appendAuditEntry(loan.loanNumber, loan.borrowerName, 'Application submitted');
   return loan;
 }
 

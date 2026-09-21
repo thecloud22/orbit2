@@ -27,6 +27,7 @@
  */
 import type { Step } from '@orbit/contract';
 import { chromium, type Page } from 'playwright';
+import { asQuestion, asRisk, type Note } from './note.ts';
 import { COLLECT, shape, type Raw, type Seen } from './snapshot.ts';
 
 export interface Touched {
@@ -41,7 +42,7 @@ export interface Touched {
 export interface Recording {
   steps: Step[];
   /** What Orbit could not turn into a step, said plainly rather than dropped. */
-  questions: string[];
+  questions: Note[];
   touched: number;
 }
 
@@ -113,7 +114,7 @@ export async function record(opts: {
 }): Promise<Recording> {
   const { page, close } = await (opts.open ?? aWindowTheyCanSee)();
   const steps: Step[] = [];
-  const questions: string[] = [];
+  const questions: Note[] = [];
   let touched = 0;
 
   steps.push({
@@ -136,7 +137,7 @@ export async function record(opts: {
     // turned every demonstration into a list of questions.
     const element = seen.find((s) => s.touched);
     if (!element) {
-      questions.push(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not name on the page. It needs a name before this can publish.`);
+      questions.push(asQuestion(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not name on the page. What is it called?`));
       return;
     }
 
@@ -148,7 +149,7 @@ export async function record(opts: {
       // demonstration could be watched from end to end and produce nothing at
       // all — with no question to say why, which is the worst way to fail:
       // silently, and looking like the person did nothing.
-      questions.push(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not record: ${String(error)}`);
+      questions.push(asQuestion(`Something was ${event.kind === 'click' ? 'pressed' : 'filled in'} that Orbit could not record: ${String(error)}`));
     }
   });
 
@@ -164,8 +165,11 @@ export async function record(opts: {
   if (!steps.some((s) => s.kind === 'end')) {
     steps.push({ id: crypto.randomUUID(), kind: 'end',
       summary: 'Finish — this conclusion has no name yet', outcome: 'unnamed', publishes: [] });
-    questions.push('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.');
-    questions.push('This recording shows one way the procedure can end. The others must be recorded or described before it can publish.');
+    questions.push(asQuestion('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.'));
+    // Not a question. There is no sentence a person can type that makes a
+    // second path exist — it is something to have seen before attesting, which
+    // §4 calls a risk and settles by acknowledgement rather than by an answer.
+    questions.push(asRisk('This recording shows one way the procedure can end. Any other way it can finish has to be recorded or described separately.'));
   }
 
   return { steps, questions, touched };

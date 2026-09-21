@@ -15,6 +15,7 @@ import { after, before, test } from 'node:test';
 import { Client } from 'pg';
 import { migrate } from '../../api/src/migrate.ts';
 import { storeDraft } from './author-store.ts';
+import { asQuestion } from './note.ts';
 import type { AuthoredDraft } from './author.ts';
 
 const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.env['USER']}@localhost/orbit2_test`;
@@ -57,7 +58,7 @@ test('an interpretation with one bad step stores none of the good ones', async (
   const { opts, draft } = interpretation({
     steps: [aStep('the status'), { id: crypto.randomUUID(), kind: 'activate', summary: 'press it' } as never,
             aStep('the queue')],
-    declaredInputs: [], questions: ['something the model could not settle'],
+    declaredInputs: [], questions: [asQuestion('something the model could not settle')],
     turns: [{ turn: 1, provider: 'test', model: 'test', shown: { page: '/pipeline', elements: 3, asking: 'what next?' }, answered: null,
               verdict: 'kept', why: 'a step', tokensIn: 1, tokensOut: 1, costMicros: 1 }],
   });
@@ -114,7 +115,7 @@ test('an interpretation that holds together is stored, with its reasoning', asyn
   const { opts, draft } = interpretation({
     steps: [aStep('the status')],
     declaredInputs: [{ name: 'reference', label: 'Reference', type: 'text', required: true }],
-    questions: ['what should this be called when it finishes this way?'],
+    questions: [asQuestion('what should this be called when it finishes this way?')],
     turns: [{ turn: 1, provider: 'test', model: 'test', shown: { page: '/pipeline', elements: 3, asking: 'what next?' }, answered: null,
               verdict: 'kept', why: 'a step', tokensIn: 1, tokensOut: 1, costMicros: 1 },
             { turn: 2, provider: 'test', model: 'test', shown: { page: '/pipeline', elements: 3, asking: 'what next?' }, answered: null,

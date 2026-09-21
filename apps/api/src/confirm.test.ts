@@ -53,9 +53,15 @@ test('a question cannot be closed by citing it — an answer is something somebo
 });
 
 test('a space bar is not an answer', () => {
+  // The schema trims and accepts; the rule decides whether what is left is
+  // enough. That split is what lets a risk be settled by acknowledgement with
+  // no words at all, while a question still needs some — sufficiency is a
+  // question about the note's kind, which the shape cannot see.
   const given = confirmation.safeParse({
     endings: [], answers: [{ noteId: crypto.randomUUID(), answer: '   ' }], attested: true });
-  assert.equal(given.success, false, 'trimmed before it is judged');
+  assert.equal(given.success, true, 'the shape is fine');
+  assert.equal(given.success === true && given.data.answers[0]!.answer, '',
+    'and what survives trimming is nothing, which confirm() refuses for a question');
 });
 
 test('an ending needs an example only for what the workflow actually asks for', () => {
