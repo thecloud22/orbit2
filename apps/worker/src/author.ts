@@ -575,6 +575,26 @@ export async function authorFromProcedure(opts: {
         continue;
       }
 
+      // A value the run will supply, that this walk had nothing to supply.
+      //
+      // The walk types what the run will type, and when an author gives no
+      // example for a declared input it types an empty string — then carries
+      // on mapping whatever the page does in response. Test case 2 searched
+      // the pipeline with an empty box, stayed on the list, and recorded a
+      // step pressing a loan number that a real search would have navigated
+      // past; it published, and the run halted on `controlNotFound`.
+      //
+      // Orbit cannot know which inputs a procedure will declare until the
+      // model names them, so it cannot ask beforehand. It can say so at the
+      // moment it happens, which is the step the rest of the walk hangs off.
+      if (made.kind === 'enter' && made.value.from === 'input'
+          && !(made.value.value in inputs)) {
+        questions.push(asQuestion(
+          `"${made.value.value}" is supplied when a run starts, and no example was given for it, so Orbit`
+          + ' walked the rest of this procedure with that field left empty. The steps after it are whatever'
+          + ' the application did with nothing in that box — check they are the ones a real value would produce.'));
+      }
+
       steps.push(made);
       if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)! })));
       turns.push(record('kept', conditions.length > 0
