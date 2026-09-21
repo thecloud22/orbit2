@@ -416,6 +416,11 @@ export async function authorFromProcedure(opts: {
    *  are named at the end. */
   // `of` carries the whole declared value, type included: a comparison is
   // typed by what the read produces, not by what the threshold looks like.
+  // Set once the procedure asks for something the page does not offer. From
+  // that moment the walk is somewhere the procedure does not describe, and
+  // what it can honestly claim to have concluded is nothing.
+  let lostTheThread: string | null = null;
+
   const guards = new Map<string, Array<{ value: string; is: string; than: string;
     of: { name: string; label: string; type: string } }>>();
   const turns: Turn[] = [];
@@ -440,9 +445,6 @@ export async function authorFromProcedure(opts: {
 
     let finished = false;
     let lastRejection: string | null = null;
-    // Set once the procedure asks for something this page does not offer. From
-    // that moment the walk is somewhere the procedure does not describe.
-    let lostTheThread: string | null = null;
     for (let turn = 1; turn <= maxTurns; turn++) {
       const seen = await snapshot(page);
       // Only an act that is *supposed* to move the page counts towards being
@@ -1033,18 +1035,28 @@ export async function authorFromProcedure(opts: {
       // a file holding 26. A conclusion asserting a business fact the steps
       // never establish is the worst thing this can produce, so there is no
       // name and the author is asked for one.
+      // The model's name for the conclusion is not used where the walk did not
+      // follow the procedure. Test case 16 asks Orbit to open the
+      // session-expiry page and confirm an approval is refused; it could not
+      // reach the page, pressed nothing, and still ended
+      // `approvalRefusedDueToExpiry`. A conclusion is what a run reports, and
+      // a run that never went where the procedure said cannot report that the
+      // procedure's outcome happened.
+      const unfollowed = anyDropped || lostTheThread !== null;
       steps.push({ id: crypto.randomUUID(), kind: 'end',
-        summary: anyDropped
-          ? 'Finish — what this concludes has to be said, now the conditional part is not here'
-          : (said?.whenFound.label || 'Finish — this conclusion has no name yet'),
-        outcome: anyDropped ? 'unnamed' : (found || 'unnamed'), publishes: published });
+        summary: lostTheThread
+          ? `Finish — what this concludes has to be said, since "${lostTheThread}" was never reached`.slice(0, 120)
+          : anyDropped
+            ? 'Finish — what this concludes has to be said, now the conditional part is not here'
+            : (said?.whenFound.label || 'Finish — this conclusion has no name yet'),
+        outcome: unfollowed ? 'unnamed' : (found || 'unnamed'), publishes: published });
       if (refusal) {
         turns.push(record('rejected', refusal));
         questions.push(asQuestion(`Orbit could not use the second conclusion it was offered, because ${refusal}. Is there more than one way this finishes?`));
       } else {
         turns.push(record('kept', `one conclusion: ${found}`));
       }
-      if (!found || anyDropped) {
+      if (!found || unfollowed) {
         questions.push(asQuestion('What should this be called when it finishes this way? A run reports the conclusion by name, and nothing may invent one.'));
       }
     } else {
