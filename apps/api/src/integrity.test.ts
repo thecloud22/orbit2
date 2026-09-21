@@ -10,14 +10,20 @@
 import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Client } from 'pg';
 import { migrate } from './migrate.ts';
 import { serveArtefact } from './artefacts.ts';
 
 const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.env['USER']}@localhost/orbit2_test`;
-const root = process.env['ORBIT_EVIDENCE_DIR'] ?? './data/evidence';
+// Anchored the way artefacts.ts anchors it, not to the working directory.
+// They disagreed: this wrote into apps/api/data/evidence and the code read
+// from the repository root, so the test proved that a file it had just
+// written could not be found — which is a true statement about two different
+// directories and nothing about integrity.
+const root = resolve(process.env['ORBIT_EVIDENCE_DIR']
+  ?? join(import.meta.dirname, '..', '..', '..', 'data', 'evidence'));
 let db: Client;
 let honest: string;
 let tampered: string;

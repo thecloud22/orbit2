@@ -76,9 +76,11 @@ export function AdminScreen() {
                       {a.sign_in_as ?? '—'}</span>
                   </span>
                   <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{a.credential_name ?? '—'}</span>
+                    {/* The name a password is filed under is Orbit's
+                        bookkeeping. What a person needs to know is whether
+                        there is one. */}
                     <Chip state={a.credential_set ? 'ok' : 'failed'}>
-                      {a.credential_set ? 'Set by the deployment' : 'Not set. Runs are refused.'}</Chip>
+                      {a.credential_set ? 'Password set' : 'No password. Runs are refused.'}</Chip>
                   </div>
                   <Action kind="ghost" onClick={() => { setAdding(false); setEditingId(a.id); }}>Edit</Action>
                 </div>
@@ -164,7 +166,6 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
   const [addresses, setAddresses] = useState(
     application?.addresses.length ? application.addresses.map((a) => ({ ...a })) : [{ host: '', pathPrefix: '/' }]);
   const [signInAs, setSignInAs] = useState(application?.sign_in_as ?? '');
-  const [credentialName, setCredentialName] = useState(application?.credential_name ?? '');
   const [credentialValue, setCredentialValue] = useState('');
   const [showCredentialValue, setShowCredentialValue] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -180,7 +181,6 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
       ...(mode === 'register' ? { surface } : {}),
       addresses: usableAddresses.map((a) => ({ host: a.host.trim(), pathPrefix: a.pathPrefix.trim() || '/' })),
       ...(signInAs.trim() ? { signInAs: signInAs.trim() } : {}),
-      ...(credentialName.trim() ? { credentialName: credentialName.trim() } : {}),
       ...(credentialValue ? { credentialValue } : {}),
     };
     const result = mode === 'register'
@@ -253,15 +253,10 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
           aria-label="Signs in as" placeholder="svc_account" />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-        <span style={label}>Credential name</span>
-        <input style={{ ...field, maxWidth: 260 }} value={credentialName} onChange={(e) => setCredentialName(e.target.value)}
-          aria-label="Credential name" placeholder="PORTAL_PASSWORD" />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-        <span style={label}>Credential value</span>
+        <span style={label}>Password</span>
         <input type={showCredentialValue ? 'text' : 'password'} style={{ ...field, maxWidth: 260 }}
           value={credentialValue} onChange={(e) => setCredentialValue(e.target.value)} autoComplete="new-password"
-          aria-label="Credential value"
+          aria-label="Password"
           placeholder={mode === 'edit' && application?.credential_set ? 'Leave blank to keep the current value' : ''} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-2)' }}>
           <input type="checkbox" checked={showCredentialValue}
@@ -271,9 +266,13 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
       </div>
 
       <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5, maxWidth: 560 }}>
-        Encrypted the moment you save, and filed under the name above rather than against this application —
-        the same name can be shared by several. Nothing ever reads it back; this page can only tell you
-        whether a name has a value set, never what it is.
+        {/* This described the old arrangement, where the name a password was
+            filed under was typed on this form and could be shared between
+            applications. It is now derived from the application, so the text
+            said the opposite of what happens. */}
+        Encrypted the moment you save, and kept for this application alone. Nothing ever reads it
+        back — not this page, not the audit trail, not a run. All anyone can see afterwards is
+        whether one is set.
       </p>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 4 }}>

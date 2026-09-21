@@ -27,7 +27,7 @@ after(async () => { await db?.end(); });
 const asked = (over: Record<string, unknown> = {}) => ({
   name: 'Underwriting', surface: 'browser',
   addresses: [{ host: 'localhost:4101', pathPrefix: '/' }],
-  signInAs: 'svc_underwriting', credentialName: 'UNDERWRITING_PW',
+  signInAs: 'svc_underwriting',
   ...over,
 });
 
@@ -142,24 +142,40 @@ test('surface is not something an edit can carry — it is fixed at registration
 // from the revision — rotation refers to nothing the registry holds.
 
 test('a value offered alongside registration is encrypted, not stored as it arrived', async () => {
-  const credentialName = `CRED_${crypto.randomUUID().slice(0, 6)}`;
-  const result = await registerApplication(db as never, asked({
-    name: `App ${crypto.randomUUID().slice(0, 6)}`, credentialName, credentialValue: 'hunter2',
-  }));
+  const name = `App ${crypto.randomUUID().slice(0, 6)}`;
+  const result = await registerApplication(db as never, asked({ name, credentialValue: 'hunter2' }));
   assert.equal(result.ok, true);
 
+  // Filed under a name Orbit derived. Nobody was asked to invent one, and the
+  // revision records which it was so the worker can find it again.
+  const { rows: [revision] } = await db.query<{ credential_name: string }>(
+    `SELECT r.credential_name FROM application_revision r JOIN application a ON a.id = r.application_id
+      WHERE a.name = $1`, [name]);
+  assert.ok(revision!.credential_name, 'the revision names where the password went');
+
   const { rows } = await db.query<{ secret_enc: Buffer }>(
-    `SELECT secret_enc FROM credential WHERE name = $1`, [credentialName]);
+    `SELECT secret_enc FROM credential WHERE name = $1`, [revision!.credential_name]);
   assert.equal(rows.length, 1);
   assert.notEqual(rows[0]!.secret_enc.toString('latin1'), 'hunter2');
   assert.equal(decrypt(rows[0]!.secret_enc), 'hunter2');
 });
 
-test('a value with no name to file it under is refused', async () => {
-  const result = await registerApplication(db as never,
-    asked({ credentialName: undefined, credentialValue: 'hunter2' }));
-  assert.equal(result.ok, false);
-  assert.match(result.ok === false ? result.because : '', /needs a credential name/);
+test('the name a password is filed under survives renaming the application', async () => {
+  // Derived from the id, not the name, because renaming is allowed and a
+  // credential that moved when somebody fixed a typo would quietly stop
+  // resolving at run time.
+  const name = `App ${crypto.randomUUID().slice(0, 6)}`;
+  const made = await registerApplication(db as never, asked({ name, credentialValue: 'hunter2' }));
+  assert.equal(made.ok, true);
+  const id = made.ok === true ? made.id : '';
+
+  const before = await db.query<{ credential_name: string }>(
+    `SELECT credential_name FROM application_revision WHERE application_id = $1`, [id]);
+  await editApplication(db as never, id, asked({ name: `${name} renamed` }));
+  const after = await db.query<{ credential_name: string }>(
+    `SELECT credential_name FROM application_revision WHERE application_id = $1 ORDER BY revision DESC`, [id]);
+
+  assert.equal(after.rows[0]!.credential_name, before.rows[0]!.credential_name);
 });
 
 test('setting a value on an edit does not mint a revision — nothing in the registry refers to it', async () => {
@@ -168,7 +184,9 @@ test('setting a value on an edit does not mint a revision — nothing in the reg
   assert.equal(result.ok === true ? result.revision : -1, 1);
 
   const { rows } = await db.query<{ secret_enc: Buffer }>(
-    `SELECT secret_enc FROM credential WHERE name = 'UNDERWRITING_PW'`);
+    `SELECT c.secret_enc FROM credential c
+       JOIN application_revision r ON r.credential_name = c.name
+      WHERE r.application_id = $1`, [applicationId]);
   assert.equal(decrypt(rows[0]!.secret_enc), 'a new value');
 });
 

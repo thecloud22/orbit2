@@ -29,28 +29,37 @@ const address = object({
 const connectionFields = {
   addresses: z.array(address).min(1, 'needs at least one address').max(8),
   signInAs: z.string().trim().max(120).optional(),
-  credentialName: z.string().trim().max(120).optional(),
-  // The value, if this call is also filing one under credentialName. Never
+
+  // The password itself, filed under a name Orbit derives. Never
   // read back by anything — see admin.ts's comment on that.
   credentialValue: z.string().min(1).max(2000).optional(),
 };
 
-const aValueNeedsAName = (data: { credentialName?: string | undefined; credentialValue?: string | undefined }) =>
-  !data.credentialValue || Boolean(data.credentialName?.trim());
-const aValueNeedsANameIssue = {
-  message: 'a credential value needs a credential name to be filed under', path: ['credentialValue'],
-};
+/**
+ * What this application's password is filed under.
+ *
+ * Derived, not typed. It is the key of a row in one table, which is Orbit's
+ * bookkeeping and not a decision anybody registering a system should have to
+ * make — asking for it put a third field on the form whose only correct
+ * answer was "something nobody else used".
+ *
+ * From the id rather than the name, because renaming an application is
+ * allowed and a credential that moved when somebody fixed a typo would
+ * quietly stop resolving at run time. Prefixed because a credential name must
+ * start with a letter and a uuid may not.
+ */
+const credentialFor = (applicationId: string) => `app_${applicationId.replaceAll('-', '')}`;
 
 export const registration = object({
   name: z.string().trim().min(1, 'needs a name').max(120),
   surface: z.enum(['browser', 'terminal']),
   ...connectionFields,
-}).refine(aValueNeedsAName, aValueNeedsANameIssue);
+});
 
 export const edit = object({
   name: z.string().trim().min(1, 'needs a name').max(120),
   ...connectionFields,
-}).refine(aValueNeedsAName, aValueNeedsANameIssue);
+});
 
 export type ApplicationResult =
   | { ok: true; id: string; revision: number }
@@ -73,7 +82,7 @@ function sameConnection(stored: StoredConnection, given: Connection): boolean {
 export async function registerApplication(db: PoolClient, body: unknown): Promise<ApplicationResult> {
   const checked = registration.safeParse(body);
   if (!checked.success) return { ok: false, because: issues(checked.error) };
-  const { name, surface, addresses, signInAs, credentialName, credentialValue } = checked.data;
+  const { name, surface, addresses, signInAs, credentialValue } = checked.data;
 
   await db.query('BEGIN');
   try {
@@ -83,8 +92,8 @@ export async function registerApplication(db: PoolClient, body: unknown): Promis
     await db.query(
       `INSERT INTO application_revision (application_id, revision, addresses, sign_in_as, credential_name)
        VALUES ($1, 1, $2, $3, $4)`,
-      [app!.id, JSON.stringify(addresses), signInAs ?? null, credentialName ?? null]);
-    if (credentialValue && credentialName) await setCredential(db, credentialName, credentialValue);
+      [app!.id, JSON.stringify(addresses), signInAs ?? null, credentialFor(app!.id)]);
+    if (credentialValue) await setCredential(db, credentialFor(app!.id), credentialValue);
     await db.query(
       `INSERT INTO audit_entry (act, object_kind, object_id, changed)
        VALUES ('application registered', 'application', $1, $2)`,
@@ -97,7 +106,7 @@ export async function registerApplication(db: PoolClient, body: unknown): Promis
 export async function editApplication(db: PoolClient, id: string, body: unknown): Promise<ApplicationResult> {
   const checked = edit.safeParse(body);
   if (!checked.success) return { ok: false, because: issues(checked.error) };
-  const { name, addresses, signInAs, credentialName, credentialValue } = checked.data;
+  const { name, addresses, signInAs, credentialValue } = checked.data;
 
   const { rows: [existing] } = await db.query<{ name: string }>(
     `SELECT name FROM application WHERE id = $1`, [id]);
@@ -108,12 +117,12 @@ export async function editApplication(db: PoolClient, id: string, body: unknown)
       WHERE application_id = $1 ORDER BY revision DESC LIMIT 1`, [id]);
   if (!latest) return { ok: false, because: 'There is no such application.', notFound: true };
 
-  const given: Connection = { addresses, signInAs, credentialName };
+  const given: Connection = { addresses, signInAs, credentialName: credentialFor(id) };
   const renamed = existing.name !== name;
   const reconnected = !sameConnection(latest, given);
   // A value can be set with nothing else changing — rotation replaces a value
   // nothing in the registry refers to, so it is not tied to a revision.
-  const settingCredential = Boolean(credentialValue && credentialName);
+  const settingCredential = Boolean(credentialValue);
   if (!renamed && !reconnected && !settingCredential) return { ok: true, id, revision: latest.revision };
 
   await db.query('BEGIN');
@@ -126,9 +135,9 @@ export async function editApplication(db: PoolClient, id: string, body: unknown)
       await db.query(
         `INSERT INTO application_revision (application_id, revision, addresses, sign_in_as, credential_name)
          VALUES ($1, $2, $3, $4, $5)`,
-        [id, revision, JSON.stringify(addresses), signInAs ?? null, credentialName ?? null]);
+        [id, revision, JSON.stringify(addresses), signInAs ?? null, credentialFor(id)]);
     }
-    if (credentialValue && credentialName) await setCredential(db, credentialName, credentialValue);
+    if (credentialValue) await setCredential(db, credentialFor(id), credentialValue);
     await db.query(
       `INSERT INTO audit_entry (act, object_kind, object_id, changed, reason)
        VALUES ('application edited', 'application', $1, $2, $3)`,
