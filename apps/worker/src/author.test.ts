@@ -175,3 +175,32 @@ test('a commit after something else is not a repeat', () => {
   assert.equal(repeatsACommit(press('Open file', false), press('Approve file', true)), false);
   assert.equal(repeatsACommit(undefined, press('Approve file', true)), false);
 });
+
+// ── typing a comparison ──────────────────────────────────────────────────
+
+const cond = (value: string, is: string, than: string) => ({ value, is, than });
+
+test('a value declared as text is compared as text, whatever the threshold looks like', () => {
+  // This read only the threshold, so a condition on the income analyst's note
+  // against "1" compared a paragraph of prose to the number one. It published,
+  // and the run halted: "was compared as a number, and it is not one".
+  const c = forTest.comparisonFor(cond('note', 'isAtLeast', '1'), { type: 'text' });
+  assert.equal(c?.of, 'text');
+});
+
+test('a value declared as a number still compares as a number', () => {
+  const c = forTest.comparisonFor(cond('creditScore', 'isLessThan', '620'), { type: 'number' });
+  assert.equal(c?.of, 'number');
+  assert.equal(c?.operator, 'isLessThan');
+});
+
+test('a number against something that is not one is no comparison at all', () => {
+  // Not turned into a text comparison that could never hold. The caller drops
+  // the condition and raises a question naming it.
+  assert.equal(forTest.comparisonFor(cond('creditScore', 'isLessThan', 'good'), { type: 'number' }), null);
+});
+
+test('a comparison against nothing is refused', () => {
+  assert.equal(forTest.comparisonFor(cond('note', 'isNot', ''), { type: 'text' }), null);
+  assert.equal(forTest.comparisonFor(cond('note', 'isNot', '   '), { type: 'text' }), null);
+});
