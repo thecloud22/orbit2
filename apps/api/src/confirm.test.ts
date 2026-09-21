@@ -29,10 +29,31 @@ test('a complete confirmation parses, and keeps the example values', () => {
   const given = confirmation.safeParse({
     endings: [{ stepId: crypto.randomUUID(), outcome: 'found', label: 'Found',
                 example: { loanNumber: 'ML-26-04471' } }],
-    answers: [{ noteId: crypto.randomUUID() }],
+    answers: [{ noteId: crypto.randomUUID(), answer: 'Call it "note rate recorded".' }],
     attested: true,
   });
   assert.equal(given.success, true);
   assert.equal(given.success === true && given.data.endings[0]!.example['loanNumber'], 'ML-26-04471',
     'the example the process owner supplied is what the tests before activation run with');
+});
+
+test('a question cannot be closed by citing it — an answer is something somebody said', () => {
+  // Criterion 3 says an outstanding question blocks confirmation and the
+  // blocker is named. Answering by id satisfied that to the letter and settled
+  // nothing: the note went resolved with no record of what was decided. It is
+  // how a version came to be published with its conclusion named "unnamed".
+  const byId = confirmation.safeParse({
+    endings: [], answers: [{ noteId: crypto.randomUUID() }], attested: true });
+  assert.equal(byId.success, false);
+
+  const answered = confirmation.safeParse({
+    endings: [], answers: [{ noteId: crypto.randomUUID(), answer: 'Call it "note rate recorded".' }],
+    attested: true });
+  assert.equal(answered.success, true);
+});
+
+test('a space bar is not an answer', () => {
+  const given = confirmation.safeParse({
+    endings: [], answers: [{ noteId: crypto.randomUUID(), answer: '   ' }], attested: true });
+  assert.equal(given.success, false, 'trimmed before it is judged');
 });

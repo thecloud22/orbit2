@@ -10,14 +10,17 @@ import { pool } from './db.ts';
  */
 export async function readWorkflow(id: string) {
   const { rows: [workflow] } = await pool.query(
-    `SELECT id, name, describe, procedure, confirmed_at, created_at FROM workflow WHERE id = $1`, [id]);
+    `SELECT id, name, describe, procedure, confirmed_at, created_at,
+            coalesce(declared_inputs, '[]'::jsonb) AS declared_inputs,
+            live_version_id, paused_at
+       FROM workflow WHERE id = $1`, [id]);
   if (!workflow) return null;
 
   const { rows: steps } = await pool.query(
     `SELECT id, position, kind, declares, complete FROM workflow_step
       WHERE workflow_id = $1 ORDER BY position`, [id]);
   const { rows: notes } = await pool.query(
-    `SELECT id, step_id, kind, body, resolved_at FROM workflow_note
+    `SELECT id, step_id, kind, body, answer, resolved_at FROM workflow_note
       WHERE workflow_id = $1 ORDER BY created_at`, [id]);
   const { rows: turns } = await pool.query(
     `SELECT turn, provider, model, shown, answered, verdict, why, tokens_in, tokens_out, cost_micros

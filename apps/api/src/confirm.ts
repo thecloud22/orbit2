@@ -30,8 +30,16 @@ export const confirmation = object({
     label: z.string().min(1).max(120),
     example: z.record(z.string(), z.string()),
   })).max(64),
-  /** Answers to the questions Orbit raised. Every one must be answered. */
-  answers: z.array(object({ noteId: z.uuid() })).max(256),
+  /** Answers to the questions Orbit raised. Every one must be answered, and
+   *  an answer is something somebody said — a note id on its own closes a
+   *  question without settling it. */
+  answers: z.array(object({
+    noteId: z.uuid(),
+    /** Trimmed first, so a space bar is not an answer. */
+    answer: z.string().max(2000).transform((a) => a.trim()).refine((a) => a.length > 0, {
+      message: 'An answer cannot be blank — this is the record of what was decided.',
+    }),
+  })).max(256),
   attested: z.boolean(),
 });
 export type Confirmation = z.infer<typeof confirmation>;
@@ -57,6 +65,13 @@ export async function confirm(db: PoolClient, workflowId: string, c: Confirmatio
     }
   }
 
+  // §4: confirmation attests that this is the procedure, and a procedure that
+  // reaches no conclusion is not one. Caught here as well as at publication,
+  // because attesting to it is the act that would carry a person's name.
+  const { rows: [ends] } = await db.query<{ n: string }>(
+    `SELECT count(*) AS n FROM workflow_step WHERE workflow_id = $1 AND kind = 'end'`, [workflowId]);
+  if (Number(ends?.n ?? 0) === 0) blockers.push({ kind: 'workflowHasNoEnding' });
+
   for (const ending of c.endings) {
     if (Object.keys(ending.example).length === 0) {
       // Activation is gated on proving every ending with a real run, and those
@@ -79,7 +94,12 @@ export async function confirm(db: PoolClient, workflowId: string, c: Confirmatio
         [ending.stepId, ending.outcome, workflowId]);
     }
     for (const answer of c.answers) {
-      await db.query(`UPDATE workflow_note SET resolved_at = now() WHERE id = $1`, [answer.noteId]);
+      // Resolved and answered are set together, and the schema will not accept
+      // one without the other. What was decided is the part worth keeping —
+      // the timestamp only says a question stopped being asked.
+      await db.query(
+        `UPDATE workflow_note SET resolved_at = now(), answer = $2 WHERE id = $1 AND workflow_id = $3`,
+        [answer.noteId, answer.answer, workflowId]);
     }
     await db.query(
       `UPDATE workflow

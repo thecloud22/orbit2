@@ -97,3 +97,25 @@ test('an archived agent starts nothing, and keeps everything', async () => {
     `SELECT count(*)::int AS n FROM workflow_version WHERE workflow_id = $1`, [workflowId]);
   assert.equal(rows[0]!.n, 2, 'archiving retires an identity; it never removes a version');
 });
+
+test('a version that declares no conclusion cannot be activated, because nothing could prove it', async () => {
+  // The gate is "every declared ending proved by a run". With no declared
+  // ending the list is empty, every() is vacuously true, and an agent would go
+  // live having demonstrated nothing. An empty gate reads exactly like a
+  // passed one, which is the most dangerous way for a check to fail.
+  const { rows: [w] } = await db.query<{ id: string }>(
+    `INSERT INTO workflow (name, outcomes) VALUES ($1, '[]') RETURNING id`,
+    [`Silent ${crypto.randomUUID().slice(0, 6)}`]);
+  const { rows: [v] } = await db.query<{ id: string }>(
+    `INSERT INTO workflow_version (workflow_id, version, body, digest, outcomes, declared_inputs, applications)
+     VALUES ($1, 1, '{"steps":[]}', $2, '[]', '[]', '[]') RETURNING id`,
+    [w!.id, 'sha256:' + crypto.randomUUID().replaceAll('-', '')]);
+
+  const result = await activate(db as never, v!.id);
+  assert.equal(result.outcome, 'refused');
+  assert.match(result.outcome === 'refused' ? result.unproved.join(' ') : '', /declares no conclusion/);
+
+  const { rows } = await db.query<{ live_version_id: string | null }>(
+    `SELECT live_version_id FROM workflow WHERE id = $1`, [w!.id]);
+  assert.equal(rows[0]!.live_version_id, null, 'and nothing went live');
+});

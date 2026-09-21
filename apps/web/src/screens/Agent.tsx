@@ -6,9 +6,10 @@ import type { Route } from '../router.ts';
 
 interface Draft {
   workflow: { id: string; name: string; procedure: string | null; confirmed_at: string | null;
+              declared_inputs: Array<{ name: string; label: string; required: boolean }>;
               live_version_id?: string | null; paused_at?: string | null };
   steps: Array<{ id: string; position: number; kind: string; declares: Record<string, unknown>; complete: boolean }>;
-  notes: Array<{ id: string; kind: string; body: string; resolved_at: string | null }>;
+  notes: Array<{ id: string; kind: string; body: string; answer: string | null; resolved_at: string | null }>;
   versions: Array<{ version: number; digest: string; published_at: string }>;
   authoring: { turns: Turn[]; producedNothing: number; costMicros: number };
 }
@@ -37,6 +38,144 @@ const strategy = (d: Record<string, unknown>) => {
   return null;
 };
 
+const field: React.CSSProperties = {
+  font: 'inherit', fontSize: 13.5, padding: '8px 10px', width: '100%', boxSizing: 'border-box',
+  border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--paper)', color: 'var(--ink)',
+};
+
+/**
+ * The confirmation stage: the one human act slice 1 records.
+ *
+ * §4 calls confirmation an attestation that this is the procedure, and it is
+ * the gate publication now insists on. Two things had to be real for it to
+ * mean anything.
+ *
+ * A question was answered by citing its id, so it went resolved with no record
+ * of what was decided — which is how a version came to be published with its
+ * conclusion named "unnamed". An answer is now something somebody wrote.
+ *
+ * And the endings were confirmed with `outcome: 'done'` and an example of
+ * `{ reference: 'example' }`, invented by the screen. Those examples are what
+ * the tests before activation run with (§4), so fabricating them made
+ * activation a gate on evidence produced from made-up input. They are asked
+ * for, per declared input, per ending.
+ */
+function Confirm({ draft, onDone, onCancel }: {
+  draft: Draft; onDone: (path: string, body: unknown) => Promise<void>; onCancel: () => void;
+}) {
+  const { workflow, steps, notes } = draft;
+  const outstanding = notes.filter((n) => !n.resolved_at);
+  const endings = steps.filter((s) => s.kind === 'end');
+  const inputs = workflow.declared_inputs ?? [];
+
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [named, setNamed] = useState<Record<string, { outcome: string; label: string }>>(
+    Object.fromEntries(endings.map((e) => {
+      const already = String((e.declares as { outcome?: string }).outcome ?? '');
+      // "unnamed" is what authoring writes when it could not work out what the
+      // conclusion is called. It is a placeholder to replace, not a name.
+      return [e.id, { outcome: already === 'unnamed' ? '' : already, label: '' }];
+    })));
+  const [examples, setExamples] = useState<Record<string, Record<string, string>>>(
+    Object.fromEntries(endings.map((e) => [e.id, {}])));
+
+  // A procedure that reaches no conclusion is not one, and the server refuses
+  // to record an attestation to it. Said here too, because the useful moment
+  // to learn it is before you press the button that carries your name.
+  const noEnding = endings.length === 0;
+
+  const missing = [
+    ...(noEnding ? ['a conclusion for this workflow to reach'] : []),
+    ...outstanding.filter((n) => !answers[n.id]?.trim()).map(() => 'an answer'),
+    ...endings.filter((e) => !named[e.id]?.outcome.trim()).map(() => 'a name for a conclusion'),
+    ...endings.flatMap((e) => inputs.filter((i) => i.required && !examples[e.id]?.[i.name]?.trim())
+      .map(() => 'an example value')),
+  ];
+
+  return (
+    <Section title="Confirm this is the procedure"
+      note="Nothing here is filled in for you. What you write is the record.">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 22, paddingTop: 4, maxWidth: 780 }}>
+
+        {noEnding && (
+          <Refusal title="There is nothing here to attest to"
+            blockers={['This workflow reaches no conclusion, so there is nothing a run could report or a test could prove. Add an ending before confirming it.']} />
+        )}
+
+        {outstanding.map((n) => (
+          <div key={n.id}>
+            <div style={{ fontSize: 13.5, marginBottom: 6 }}>{n.body}</div>
+            <input style={field} value={answers[n.id] ?? ''} placeholder="Your answer"
+              aria-label={n.body}
+              onChange={(e) => setAnswers((a) => ({ ...a, [n.id]: e.target.value }))} />
+          </div>
+        ))}
+
+        {endings.map((e, i) => (
+          <div key={e.id} style={{ borderTop: '1px solid var(--rule)', paddingTop: 16 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 3 }}>
+              Conclusion {i + 1}: {summary(e.declares)}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 9 }}>
+              A run reports this by name, so nothing may invent one.
+            </div>
+            <div style={{ display: 'flex', gap: 9, marginBottom: 11 }}>
+              <input style={field} value={named[e.id]?.outcome ?? ''} aria-label={`Name for conclusion ${i + 1}`}
+                placeholder="noteRateRecorded"
+                onChange={(ev) => setNamed((n) => ({ ...n, [e.id]: { outcome: ev.target.value, label: n[e.id]?.label ?? '' } }))} />
+              <input style={field} value={named[e.id]?.label ?? ''} aria-label={`Label for conclusion ${i + 1}`}
+                placeholder="Note rate recorded"
+                onChange={(ev) => setNamed((n) => ({ ...n, [e.id]: { outcome: n[e.id]?.outcome ?? '', label: ev.target.value } }))} />
+            </div>
+            {inputs.length > 0 && (
+              <>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 7 }}>
+                  A value that reaches this conclusion. The test before activation runs with it,
+                  so it has to be one you would really use.
+                </div>
+                {inputs.map((input) => (
+                  <div key={input.name} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 7 }}>
+                    <span style={{ width: 150, fontSize: 13, color: 'var(--ink-2)' }}>{input.label}</span>
+                    <input style={field} aria-label={`${input.label} for conclusion ${i + 1}`}
+                      value={examples[e.id]?.[input.name] ?? ''}
+                      onChange={(ev) => setExamples((x) => ({ ...x,
+                        [e.id]: { ...x[e.id], [input.name]: ev.target.value } }))} />
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        ))}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11, borderTop: '1px solid var(--rule)', paddingTop: 15 }}>
+          <Action disabled={missing.length > 0}
+            why={`Still needed: ${[...new Set(missing)].join(', ')}`}
+            onClick={() => void onDone(`/api/workflows/${workflow.id}/confirm`, {
+              attested: true,
+              answers: outstanding.map((n) => ({ noteId: n.id, answer: answers[n.id]! })),
+              endings: endings.map((e) => ({
+                stepId: e.id,
+                outcome: named[e.id]!.outcome.trim(),
+                label: named[e.id]!.label.trim() || named[e.id]!.outcome.trim(),
+                example: examples[e.id] ?? {},
+              })),
+            })}>
+            I attest this is the procedure
+          </Action>
+          <button type="button" onClick={onCancel}
+            style={{ font: 'inherit', fontSize: 13, color: 'var(--ink-2)', background: 'transparent',
+              border: 0, cursor: 'pointer' }}>Not yet</button>
+          {missing.length > 0 && (
+            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+              Still needed: {[...new Set(missing)].join(', ')}.
+            </span>
+          )}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 /**
  * One agent, and where it is in its life.
  *
@@ -51,6 +190,7 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const [refused, setRefused] = useState<string[] | null>(null);
   const [editRefusal, setEditRefusal] = useState<string | null>(null);
   const [adding, setAdding] = useState({ kind: 'read' as string, after: 0 });
+  const [confirming, setConfirming] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -101,14 +241,8 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
       title={workflow.name}
       actions={<>
         {!workflow.confirmed_at && (
-          <Action kind="ghost" disabled={outstanding.length > 0}
-            why={`${outstanding.length} outstanding`}
-            onClick={() => void act(`/api/workflows/${id}/confirm`, {
-              attested: true, answers: [],
-              endings: steps.filter((s) => s.kind === 'end').map((s) => ({
-                stepId: s.id, outcome: 'done', label: 'Done', example: { reference: 'example' },
-              })),
-            })}>Confirm the procedure</Action>
+          <Action kind="ghost" disabled={confirming}
+            onClick={() => setConfirming(true)}>Confirm the procedure</Action>
         )}
         {workflow.confirmed_at && !published && (
           <Action disabled={busy} onClick={() => void act(`/api/workflows/${id}/publish`)}>Publish a version</Action>
@@ -122,7 +256,13 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
 
       {refused && <Refusal title="Nothing was changed" blockers={refused} />}
 
-      {outstanding.length > 0 && (
+      {confirming && (
+        <Confirm draft={draft.value}
+          onDone={async (path, body) => { await act(path, body); setConfirming(false); }}
+          onCancel={() => setConfirming(false)} />
+      )}
+
+      {!confirming && outstanding.length > 0 && (
         <Refusal title={outstanding.length === 1 ? 'One thing is outstanding' : `${outstanding.length} things are outstanding`}
           blockers={outstanding.map((n) => n.body)} />
       )}

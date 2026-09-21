@@ -52,6 +52,18 @@ export const blocker = z.discriminatedUnion('kind', [
   object({ kind: z.literal('readIsCircular'), step: z.number().int().positive(),
            value: name, looksFor: z.string().max(200) }),
 
+  /**
+   * The workflow reaches no conclusion at all.
+   *
+   * Distinct from a path that runs out: this one declares nothing to reach.
+   * It matters because so much downstream is quantified over the endings — a
+   * version with none has nothing to prove, so activation's gate ("every
+   * ending proved by a run") passes over an empty list and an agent goes live
+   * having demonstrated nothing. An empty gate reads exactly like a passed
+   * one, which is the most dangerous way for a check to fail.
+   */
+  object({ kind: z.literal('workflowHasNoEnding') }),
+
   /** A step no path can reach. The sibling of outcomeUnreachable, and the
    *  more serious one: §10's claim is that you can say what the agent did and
    *  be sure it could not have done anything else. A step carried into a
@@ -120,6 +132,8 @@ export function describeBlocker(b: Blocker): string {
       return `Step ${b.step} finds "${b.value}" by looking for "${b.looksFor}" — the value it is supposed to read. `
         + `It can only ever report what it searched for, and will find nothing the day the page says something else. `
         + `Name what labels the value instead.`;
+    case 'workflowHasNoEnding':
+      return 'This workflow reaches no conclusion, so there is nothing a run could report or a test could prove.';
     case 'stepUnreachable':
       return `Nothing can reach step ${b.step}, so it would never run.`;
     case 'pathReachesNoEnding':

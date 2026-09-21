@@ -14,14 +14,24 @@ if (!w) { console.log('nothing to confirm'); process.exit(0); }
 
 const { rows: ends } = await db.query<{ id: string }>(
   `SELECT id FROM workflow_step WHERE workflow_id = $1 AND kind = 'end' ORDER BY position`, [w.id]);
-const { rows: notes } = await db.query<{ id: string }>(
-  `SELECT id FROM workflow_note WHERE workflow_id = $1 AND resolved_at IS NULL`, [w.id]);
+const { rows: notes } = await db.query<{ id: string; body: string }>(
+  `SELECT id, body FROM workflow_note WHERE workflow_id = $1 AND resolved_at IS NULL`, [w.id]);
 
 console.log(`Confirming "${w.name}"\n`);
+
+// This tool cannot answer a question, so it does not pretend to. Supplying
+// text here to get past the gate would be the same move as a placeholder
+// actor: it makes the command succeed and the requirement false, and the
+// answer is the record of what a person decided.
+if (notes.length > 0) {
+  console.error(`  ${notes.length} question${notes.length === 1 ? '' : 's'} outstanding. Answer them in the interface:`);
+  for (const n of notes) console.error(`  · ${n.body}`);
+  process.exit(1);
+}
 const confirmed = await confirm(db as never, w.id, {
   endings: [{ stepId: ends[0]!.id, outcome: 'noteRateRecorded', label: 'Note rate recorded',
               example: { loanNumber: 'ML-26-04471' } }],
-  answers: notes.map((n) => ({ noteId: n.id })),
+  answers: [],   // none outstanding by this point, or the command stopped above
   attested: true,
 });
 

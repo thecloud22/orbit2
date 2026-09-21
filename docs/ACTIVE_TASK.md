@@ -74,7 +74,6 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | The application slice 1 runs against | **Karthik** | To be provided. Legacy, server-rendered, WebSEAL-fronted. |
 | One accessibility snapshot of a real WebSEAL page | **Karthik** | Determines whether the locator ladder in Decision 11 needs a rung below structural anchors. Cheap to get, expensive to discover late. |
 | The locator's stored shape | Claude | One typed column on `step`, and the only hole left in Decision 14. To be settled from **measurement** against `apps/legacy-portal`, not from argument. |
-| The surface interface | Claude | **A debt.** Decision 2 asks that execution sit behind an interface so a second surface is a new file rather than a rewrite. `execute.ts` imports Chromium directly, so the ten step kinds are surface-neutral by assertion rather than by construction. |
 | The terminal path | Claude | Not built. `demo/terminal-portal` warns how: drive a real emulator, never decode the datastream, or a misreading on Orbit's side is cancelled by the same misreading in the fixture. |
 | The locator ladder, from measurement | Claude | **Closed** as Decision 15. 181 elements measured against `demo/legacy-portal`; the ladder is ordered by how often each rung is *wrong*, and `text` and `structural` are refused outright without corroboration because 28 of 54 structural matches were confidently wrong. |
 
@@ -83,6 +82,7 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | Item | Note |
 |---|---|
 | Criterion 12 — each §13 authoring row behaves as its table states | Not walked row by row. |
+| `branch` and `check` are not in the authoring vocabulary | The model may propose only `enter`, `activate`, `read`, `done`, so no procedure with two outcomes can be mapped however good the model is. It is why the note-rate workflow comes out with one ending. **The largest gap in authoring**, and not a model-quality problem. |
 | Retry as a *step-level* policy | §9 lets a designer configure attempts, delay and which kinds are worth retrying per step. Slice 1 has the operator-initiated retry only, and one contract-wide set of retryable kinds. |
 | Waiting on a person | `waitingForAPerson` is a status the schema allows and nothing produces. `handOff` halts instead. |
 
@@ -121,4 +121,8 @@ and the requirement false, in a history that cannot afterwards be corrected.
 | 2026-09-20 | §10's run controls built. Cancellation proved cooperative against a live run: asked to stop part-way, it stopped before step 3 with two steps and their evidence complete. |
 | 2026-09-20 | Two evidence faults found by looking at the screen. The store was cwd-relative, so the worker wrote where the API did not read; and the run page reported *every* image failure as an integrity failure, telling an operator that absent evidence had been altered. A false provenance alarm teaches people to discount the real one. |
 | 2026-09-20 | Criterion 2 closed. An interpretation is validated as a whole before anything is written, and a refusal names every bad step. Storing a draft was split from producing one, because a rule that can only be exercised by whatever a model said that day is a rule nobody can rely on. |
+| 2026-09-20 | Execution put behind a `Surface` interface, proved by running the executor against a surface made of arrays. That found a browser assumption a grep would have missed: evidence capture had `image/png` written into it. A version now carries its own surface, and one that does not say what it drives is refused rather than assumed. |
+| 2026-09-20 | Every run had been reporting `noteRate: null`. The read was bound to `6.375%` — the value on the page the day it was authored — so it searched for the answer. The model was not at fault; it named "Note rate" correctly. Reads now bind to what labels the value, and a circular read is refused at publication. Proved by reading 6.625% from a different file. |
+| 2026-09-20 | Confirmation made real. A question was closed by citing its id, so nothing recorded what was decided — which is how a version was published with its conclusion named "unnamed". An answer is now something somebody wrote, and the screen asks for it, for the conclusion's name, and for the example values the activation test will run with, all of which it had been inventing. |
+| 2026-09-20 | A version declaring no conclusion could be activated, because the gate is "every declared ending proved" and an empty list passes. An empty gate is not a passed gate. |
 | 2026-09-20 | Decision 13 recorded (a judged step). Amendments: Decision 5 takes a set of applications; Decision 4 adds the authoring reasoning record and rules out video; Decision 8 fixes `us-east-1`, United States only; Decision 10 makes tokens swappable at run time; Decision 11 records the recording route and its three cautions. |

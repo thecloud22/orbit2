@@ -53,6 +53,14 @@ export type ActivateResult =
 
 export async function activate(db: PoolClient, versionId: string): Promise<ActivateResult> {
   const cases = await testCases(db, versionId);
+  // A version declaring no outcome has nothing unproved, so the gate below
+  // would pass over an empty list and activate it on no evidence. An empty
+  // gate is not a passed gate.
+  if (cases.length === 0) {
+    return { outcome: 'refused',
+      unproved: ['This version declares no conclusion, so no run could prove anything about it.'] };
+  }
+
   const unproved = cases.filter((c) => !c.provedBy).map((c) => c.label);
   // Every ending, not most of them. A path nobody has taken is a path nobody
   // knows the behaviour of, and activation is what lets an operator take it.
