@@ -13,7 +13,7 @@ interface Draft {
   steps: Array<{ id: string; position: number; kind: string; declares: Record<string, unknown>; complete: boolean }>;
   notes: Array<{ id: string; kind: string; body: string; resolved_at: string | null }>;
   versions: Array<{ version: number; digest: string; activated_at: string | null }>;
-  authoring: { turns: Turn[]; producedNothing: number; costMicros: number };
+  authoring: { turns: Turn[]; producedNothing: number; costMicros: number; costUnknown?: boolean };
 }
 
 const summaryOf = (d: Record<string, unknown>) => String(d['summary'] ?? '');
@@ -152,7 +152,9 @@ export function DraftPage({ id }: { id: string }) {
             ))}
           </div>
           <div style={{ paddingTop: 14, display: 'flex', gap: 30 }}>
-            <Row label="Cost to build">${(authoring.costMicros / 1e6).toFixed(6)}</Row>
+            <Row label="Cost to build">{authoring.costUnknown
+              ? 'not known — no price is held for this model'
+              : `$${(authoring.costMicros / 1e6).toFixed(6)}`}</Row>
           </div>
         </section>
       )}

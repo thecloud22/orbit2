@@ -30,9 +30,9 @@ for (const [i, s] of draft.steps.entries()) {
 }
 
 console.log('\nTURNS\n');
-let cost = 0, nothing = 0;
+let cost = 0, nothing = 0, costUnknown = false;
 for (const t of draft.turns) {
-  cost += t.costMicros;
+  if (t.costMicros === null) costUnknown = true; else cost += t.costMicros;
   if (t.verdict !== 'kept') nothing += 1;
   const mark = t.verdict === 'kept' ? ' ' : '!';
   console.log(`  ${mark} ${String(t.turn).padStart(2)}  ${t.verdict.padEnd(9)} ${t.why}`);
@@ -40,7 +40,8 @@ for (const t of draft.turns) {
 }
 
 console.log(`\n  ${draft.turns.length} turns, ${nothing} produced nothing usable`);
-console.log(`  $${(cost / 1e6).toFixed(6)} on ${model.model}`);
+console.log(`  ${costUnknown ? `cost not known — no price is held for ${model.model}`
+  : `$${(cost / 1e6).toFixed(6)} on ${model.model}`}`);
 if (draft.questions.length) {
   console.log('\n  QUESTIONS, which block confirmation until answered:');
   for (const q of draft.questions) console.log(`    · ${q}`);

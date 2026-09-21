@@ -53,6 +53,10 @@ export async function readWorkflow(id: string) {
        *  many produced nothing usable is the flattering half of the number. */
       producedNothing: turns.filter((t) => t.verdict !== 'kept').length,
       costMicros: turns.reduce((sum, t) => sum + Number(t.cost_micros ?? 0), 0),
+      /** A null cost is a turn whose model has no price held, not a free one.
+       *  Summed as zero it reads as "this cost nothing to build", which is a
+       *  figure nobody can act on and one the spend record must not assert. */
+      costUnknown: turns.some((t) => t.cost_micros === null),
     },
   };
 }

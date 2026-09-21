@@ -20,7 +20,7 @@ interface Draft {
                  missing: string[] }>;
   notes: Array<{ id: string; kind: string; body: string; answer: string | null; resolved_at: string | null }>;
   versions: Array<{ id: string; version: number; digest: string; published_at: string }>;
-  authoring: { turns: Turn[]; producedNothing: number; costMicros: number };
+  authoring: { turns: Turn[]; producedNothing: number; costMicros: number; costUnknown?: boolean };
 }
 interface Turn { turn: number; model: string; verdict: string; why: string;
   /** The model's answer as it came back. `element` is what it named on the
@@ -648,7 +648,9 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
             ))}
           </div>
           <div style={{ paddingTop: 14 }}>
-            <Row label="Cost to build">${(authoring.costMicros / 1e6).toFixed(6)}</Row>
+            <Row label="Cost to build">{authoring.costUnknown
+              ? 'not known — no price is held for this model'
+              : `$${(authoring.costMicros / 1e6).toFixed(6)}`}</Row>
           </div>
         </Section>
       )}
