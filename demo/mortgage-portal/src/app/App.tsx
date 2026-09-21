@@ -1,11 +1,17 @@
 import { AmbiguousDecisionPage } from '../pages/AmbiguousDecisionPage';
 import { ApplicationIntakePage } from '../pages/ApplicationIntakePage';
+import { AuditTrailPage } from '../pages/AuditTrailPage';
 import { AutomatedUnderwritingPage } from '../pages/AutomatedUnderwritingPage';
+import { BorrowerDashboardPage } from '../pages/BorrowerDashboardPage';
+import { BorrowerLoginPage } from '../pages/BorrowerLoginPage';
+import { CommitmentLetterPage } from '../pages/CommitmentLetterPage';
+import { DeclinePage } from '../pages/DeclinePage';
 import { DocumentsPage } from '../pages/DocumentsPage';
 import { FeaturesPage } from '../pages/FeaturesPage';
 import { FlakyDecisionPage } from '../pages/FlakyDecisionPage';
 import { LoanPage } from '../pages/LoanPage';
 import { LoginPage } from '../pages/LoginPage';
+import { PipelineBrowsePage } from '../pages/PipelineBrowsePage';
 import { PipelinePage } from '../pages/PipelinePage';
 import { PipelineStatesPage } from '../pages/PipelineStatesPage';
 import { PricingPage } from '../pages/PricingPage';
@@ -37,6 +43,10 @@ export function App() {
 
   if (path === '/pipeline/states') {
     return <PipelineStatesPage />;
+  }
+
+  if (path === '/pipeline/browse') {
+    return <PipelineBrowsePage />;
   }
 
   if (path === '/underwriting') {
@@ -75,8 +85,28 @@ export function App() {
     return <PricingPage />;
   }
 
+  if (path === '/underwriting/decline') {
+    return <DeclinePage />;
+  }
+
+  if (path === '/underwriting/commitment-letter') {
+    return <CommitmentLetterPage />;
+  }
+
+  if (path === '/underwriting/audit-trail') {
+    return <AuditTrailPage />;
+  }
+
   if (path === '/applications/new') {
     return <ApplicationIntakePage />;
+  }
+
+  if (path === '/borrower/login') {
+    return <BorrowerLoginPage />;
+  }
+
+  if (path === '/borrower') {
+    return <BorrowerDashboardPage />;
   }
 
   if (path === '/features') {

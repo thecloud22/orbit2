@@ -122,6 +122,58 @@ const GROUPS: readonly FeatureGroup[] = [
         description: 'Pick a rate, lock it, watch the lock expire and re-lock at current pricing.',
         href: `/underwriting/pricing?loan=${SAMPLE_LOAN}&lockSeconds=60`,
       },
+      {
+        id: 'decline',
+        label: 'Decline with reasons',
+        description:
+          'A stricter decline than the file review’s own button: requires at least one adverse-action reason code before it commits.',
+        href: `/underwriting/decline?loan=${SAMPLE_LOAN}`,
+      },
+      {
+        id: 'commitment-letter',
+        label: 'Commitment letter',
+        description:
+          'A generated, read-only closing disclosure preview -- terms and closing costs computed from the file’s own numbers.',
+        href: `/underwriting/commitment-letter?loan=${SAMPLE_LOAN}`,
+      },
+      {
+        id: 'audit-trail',
+        label: 'File audit trail',
+        description: 'A seeded history plus an append-only log -- entries can be added, never edited or removed.',
+        href: `/underwriting/audit-trail?loan=${SAMPLE_LOAN}`,
+      },
+    ],
+  },
+  {
+    title: 'Pipeline, another way',
+    description: 'An alternate pipeline view, off the real /pipeline lookup-by-number flow.',
+    items: [
+      {
+        id: 'pipeline-browse',
+        label: 'Filter and sort',
+        description:
+          'Filter by underwriter, status, and program; sort by LTV, DTI, credit score, or submitted date.',
+        href: '/pipeline/browse',
+      },
+    ],
+  },
+  {
+    title: 'Borrower portal',
+    description:
+      'A second persona with a genuinely narrower view -- no LTV, DTI, credit score, or underwriter name.',
+    items: [
+      {
+        id: 'borrower-login',
+        label: 'Borrower sign-in',
+        description: 'A separate dummy sign-on: loan number, user ID, and password, all required.',
+        href: '/borrower/login',
+      },
+      {
+        id: 'borrower-dashboard',
+        label: 'Borrower dashboard',
+        description: 'Plain-language status and a document upload checklist, nothing internal.',
+        href: `/borrower?loan=${SAMPLE_LOAN}`,
+      },
     ],
   },
 ];

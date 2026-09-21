@@ -47,12 +47,14 @@ from the "Features" tab in the header on every page.
 
 None outstanding.
 
-## Not built yet — feature expansion
+## Feature expansion
 
 A fuller loan origination system, not just the mid-pipeline review screen the
 app has today: more input surface (multi-step forms, masked fields, add/remove
 rows) and more business rules (program eligibility, PMI, ability-to-repay),
-with stubbed data throughout.
+with stubbed data throughout. Every page below is its own route, off the real
+pipeline/underwriting/login flow and off each other's nav -- reachable from
+`/features`, not wired into `Shell`'s header or the file-level `FileNav`.
 
 **New workflow surfaces**
 
@@ -80,23 +82,35 @@ with stubbed data throughout.
       A rate sheet filtered to the file's program, real amortization-based
       monthly P&I per option, a lock that counts down and expires (same
       mechanism as session-expiry, different domain), and a re-lock action.
-- [ ] **Decline reasons (adverse action)** — declining a file opens a
-      reason-code multi-select (required, minimum one) before the decision
-      commits, mirroring real ECOA adverse-action requirements.
-- [ ] **Commitment letter / closing disclosure preview** — a dense, read-only
-      generated document (closing costs, cash-to-close, terms) once approved.
-- [ ] **File audit trail** — an append-only, read-only timeline of who did
-      what and when on a file.
+- [x] **Decline reasons (adverse action)** — `/underwriting/decline?loan=`.
+      A stricter decline than the file review's own button: requires at
+      least one reason code, from a fixed ECOA-style list, before it
+      commits. Kept off the file review's decision panel entirely, so the
+      existing single-click decline there still behaves exactly as before.
+- [x] **Commitment letter / closing disclosure preview** — `/underwriting/commitment-letter?loan=`.
+      A generated, read-only document: loan terms plus closing costs (origination
+      fee, appraisal, title insurance, recording, prepaid interest) computed
+      from the file's own loan amount, purchase price, and note rate, down to
+      an estimated cash-to-close figure.
+- [x] **File audit trail** — `/underwriting/audit-trail?loan=`.
+      A few seeded historical entries (generated from the file's own
+      submitted date) plus a genuinely append-only log a person can add to —
+      entries persist for the session and are never edited or removed, only
+      added. `submitApplication` now also writes the one entry that already
+      had a natural single hook: "Application submitted".
 
 **Pipeline / list features**
 
-- [ ] **Filters and sort** — by underwriter, status, program, submitted-date
-      range, LTV/DTI thresholds. Combinable with the existing list-state
-      fixture (loading/error/empty/no-match) instead of only a single query
-      param.
-- [ ] **A second persona: borrower portal** — borrower signs in, sees their
-      own file status and uploaded documents only, not the underwriter's full
-      view. Role-based visibility rather than everyone seeing everything.
+- [x] **Filters and sort** — `/pipeline/browse`.
+      Filters by underwriter, status, and program compose with a sort by
+      submitted date, LTV, DTI, or credit score. Kept off `/pipeline` itself,
+      so the existing lookup-by-loan-number flow there is untouched.
+- [x] **A second persona: borrower portal** — `/borrower/login` then `/borrower?loan=`.
+      A separate dummy sign-on (loan number, user ID, password, all
+      required) leading to a dashboard with no LTV, DTI, credit score, or
+      underwriter name — plain-language status and a document-upload
+      checklist only. Its own minimal header, not the underwriter `Shell`,
+      so the role difference is visible, not just enforced.
 
 **Rules to layer onto existing data**
 
@@ -104,7 +118,10 @@ with stubbed data throughout.
       application review step and as findings on the automated underwriting
       run, rather than left implicit in the branch-matrix test. (VA no-PMI
       and jumbo minimum reserves are not yet separately modeled.)
-- [ ] PMI requirement/removal logic tied to LTV crossing 80%, shown as a
-      computed flag rather than a manual condition button.
-- [ ] Ability-to-repay / DTI hard-stop above a threshold (blocks approval
-      outright rather than just flagging).
+- [x] PMI requirement, surfaced as a computed `info`-severity finding on the
+      automated underwriting run when LTV crosses 80% — not yet a *removal*
+      trigger, since nothing on the file tracks paid-down equity over time.
+- [x] Ability-to-repay hard-stop: the automated underwriting run's existing
+      DTI > 50% block finding is now explicitly labeled and IDed as the
+      ability-to-repay maximum, rather than a generically named "program
+      maximum".

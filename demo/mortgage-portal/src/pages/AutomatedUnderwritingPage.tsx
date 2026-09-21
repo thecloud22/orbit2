@@ -28,7 +28,7 @@ const RECOMMENDATION_TONES: Readonly<Record<Recommendation, string>> = {
 
 interface Finding {
   readonly id: string;
-  readonly severity: 'block' | 'refer';
+  readonly severity: 'block' | 'refer' | 'info';
   readonly text: string;
 }
 
@@ -76,15 +76,23 @@ function evaluate(loan: Loan): { recommendation: Recommendation; findings: Findi
 
   if (dti > 50) {
     findings.push({
-      id: 'dti-block',
+      id: 'ability-to-repay',
       severity: 'block',
-      text: `Debt-to-income ${dti.toFixed(2)}% exceeds the 50% program maximum.`,
+      text: `Debt-to-income ${dti.toFixed(2)}% exceeds the 50% ability-to-repay maximum.`,
     });
   } else if (dti > 43) {
     findings.push({
       id: 'dti-refer',
       severity: 'refer',
       text: `Debt-to-income ${dti.toFixed(2)}% exceeds the 43% qualified-mortgage guideline.`,
+    });
+  }
+
+  if (ltv > 80) {
+    findings.push({
+      id: 'pmi-required',
+      severity: 'info',
+      text: `Loan-to-value ${ltv.toFixed(2)}% is over 80% -- private mortgage insurance is required until equity reaches 78%.`,
     });
   }
 
@@ -203,7 +211,9 @@ export function AutomatedUnderwritingPage() {
                     className={`rounded border px-3 py-2 text-sm ${
                       finding.severity === 'block'
                         ? 'border-rose-200 bg-rose-50 text-rose-900'
-                        : 'border-amber-200 bg-amber-50 text-amber-900'
+                        : finding.severity === 'refer'
+                          ? 'border-amber-200 bg-amber-50 text-amber-900'
+                          : 'border-sky-200 bg-sky-50 text-sky-900'
                     }`}
                     data-testid={`automated-underwriting-finding-${finding.id}`}
                     key={finding.id}
