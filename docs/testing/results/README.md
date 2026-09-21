@@ -37,15 +37,16 @@ restarts it from prompt 1 of the suite as then defined.
 | 10 | A | green — all four pass or refuse clearly |
 | 11–22 | A+B (1–14) | fifteen more defects |
 | 23 | A+B | green — see `run-23.md` |
-| 24– | A+B+C (1–23) | in progress |
+| 24–31 | A+B+C (1–23) | six more defects |
+| 32 | A+B+C | see `run-32.md` — 17 of 23 pass or refuse clearly |
 
 Defect-by-defect detail, with root cause, fix, commit and restart
 confirmation, is in `defects.md`. Per-run detail is in `run-NN.md`;
 screenshots under `run-NN/`.
 
-**23 defects found and fixed so far, across the first 14 of 50 prompts.**
-Unit tests went from 156 to 188 (`author.ts` and `snapshot.ts` had no test
-files at all before this; they have 22 and 9 now).
+**29 defects found and fixed so far, across the first 23 of 50 prompts.**
+Unit tests went from 156 to 191 (`author.ts` and `snapshot.ts` had no test
+files at all before this; they have 25 and 9 now).
 
 ## What the suite has established so far
 

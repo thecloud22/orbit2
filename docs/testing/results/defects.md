@@ -281,3 +281,26 @@ Two defects (13, 17) were of a different kind and the most serious: the product
 knew the right answer and reported a different one. The publish gate described
 every blocker and the screen showed a status code; the branch decided correctly
 and the conclusion said the opposite.
+
+---
+
+# Defects 24–29 — found by section C, runs 24 to 32
+
+| # | What was wrong | Found by | Commit |
+|---|---|---|---|
+| 24 | **Orbit could not reach the session-expiry page, said so, and then pressed "Approve file" on the ordinary loan screen** — publishing an agent that approves a real loan every run and reports "Approval refused due to session expiry". | Run 24, prompt 16 | `cb93de7` |
+| 25 | The model had no way to say "this procedure names a page I cannot reach", so asked to open one it answered with whatever was in front of it. | Run 25, prompts 15–23 | `2fcc930` |
+| 26 | A walk that never went where the procedure said still reported the procedure's outcome as its conclusion. | Run 26, prompt 16 | `813646e` |
+| 27 | The "lost the thread" latch was permanent, so a `UserID`/`User ID` slip on turn one voided a correct agent eight turns later. *(A regression from 24.)* | Run 27, prompt 12 | `14637e8` |
+| 28 | Equality against a 300-character paragraph — `note isNot "seasonal"` — is settled before the run begins, so prompt 10 branched past the note it was told to read. | Run 30, prompt 10 | `fd998a5` |
+| 29 | A committing act refused as a repeat was recorded and not said, so the flaky-decision agent pressed Approve once, was refused the second press it needed, and reported `Decision approved` for a decision that had not gone through. | Run 31, prompt 17 | `7c04c03` |
+
+Defect 24 is the one worth reading twice. Orbit had already told itself, one
+turn earlier, that it was not where the procedure described — and then took the
+single act it could not take back. Reading and typing on the wrong page are
+recoverable; approving somebody's file is not.
+
+Two of these (25, 29) are commits that mostly *add a sentence*: a vocabulary
+for saying a page is out of reach, and a question where there had only been a
+line on the session record. Neither changes what Orbit does. Both change what
+an author is told, which is the difference between a refusal and a wrong agent.
