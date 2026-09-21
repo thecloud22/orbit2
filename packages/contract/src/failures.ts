@@ -115,3 +115,45 @@ export const ERRORS_REACHABLE_IN_SLICE_1: readonly ErrorKind[] = [
   'applicationUnavailable', 'timedOut', 'interruptedByRestart', 'cancelled',
   'integrityFailure', 'pathReachesNothing',
 ];
+
+/**
+ * The failure kinds a retry could plausibly change.
+ *
+ * §10: "Retry re-attempts a failed step within the same run where the failure
+ * kind is retryable", and §9 is blunter — "failures that will not improve on
+ * repetition are not retried". So the test for membership is not whether a
+ * failure is annoying, it is whether the second attempt is doing anything
+ * different from the first.
+ *
+ * Four qualify, and each for the same reason: the failure is about the world
+ * being briefly unavailable rather than about the workflow being wrong.
+ *
+ * Everything else is excluded on purpose, and the exclusions matter more than
+ * the inclusions:
+ *
+ *   controlNotFound, controlAmbiguous, corroborationFailed — a binding that
+ *     found nothing, found two things, or found the wrong thing will do so
+ *     again. Decision 12 makes ambiguity a refusal rather than a tie to break,
+ *     and a retry is exactly the tie-break it refuses.
+ *   checkFailed — not a technical failure at all. It is the workflow saying
+ *     the business condition did not hold, and repeating it to get a different
+ *     answer is the opposite of what the step is for.
+ *   integrityFailure — evidence did not match its digest. Retrying replaces
+ *     the question with a fresh attempt, which is how a tampering signal gets
+ *     lost.
+ *   addressNotPermitted, credentialMissing, ceilingReached — each needs a
+ *     person to change something first. A retry before that is a guess.
+ *   cancelled — somebody asked for it to stop.
+ */
+export const RETRYABLE: ReadonlySet<ErrorKind> = new Set<ErrorKind>([
+  /** The network, not the page. */
+  'navigationFailed',
+  /** Transient by definition; §13 sends the operator to retry once healthy. */
+  'applicationUnavailable',
+  'timedOut',
+  /** A worker died mid-run. The reconciler's whole premise is that this says
+   *  nothing about whether the work would succeed. */
+  'interruptedByRestart',
+]);
+
+export const isRetryable = (kind: ErrorKind): boolean => RETRYABLE.has(kind);

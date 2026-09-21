@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ArtefactView, RunEventView, RunView, StepAttemptView } from '@orbit/contract';
+import { isRetryable, type ArtefactView, type ErrorKind, type RunEventView, type RunView, type StepAttemptView } from '@orbit/contract';
 import { Dot, EmptyState, OutcomePair, Row, Verbatim, type Emptiness } from './ui.tsx';
 
 type Loaded = { kind: 'loaded'; data: RunView } | { kind: 'empty'; of: Emptiness };
@@ -10,8 +10,86 @@ const took = (events: RunEventView[], attemptId: string): number | undefined => 
   return typeof ms === 'number' ? ms : undefined;
 };
 
+/**
+ * §10's run controls, and the reasons one is not offered.
+ *
+ * A retry is offered only where repeating the step could come out differently,
+ * which is a property of the failure rather than of how annoying it was. Where
+ * it cannot, the control is not hidden — a missing button teaches nobody
+ * anything — it is replaced by the reason, so the next thing the operator does
+ * is the thing that would actually help.
+ */
+function Controls({ run, again }: { run: RunView['run']; again: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+
+  const control = async (verb: string) => {
+    setBusy(true); setRefused(null);
+    const res = await fetch(`/api/runs/${run.reference}/${verb}`, { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (res.ok) {
+      // A re-run is a different run, so the operator is taken to it rather
+      // than left looking at the one they just re-ran.
+      if (verb === 'rerun' && body.reference) window.location.assign(`/runs/${body.reference}`);
+      else again();
+    } else setRefused(body.why ?? 'That did not work.');
+  };
+
+  const inFlight = run.status === 'queued' || run.status === 'running';
+  const failure = run.error?.kind as ErrorKind | undefined;
+  const canRetry = run.status === 'failed' && failure !== undefined && isRetryable(failure);
+
+  const button = (label: string, verb: string, kind: 'plain' | 'strong' = 'plain') => (
+    <button type="button" disabled={busy} onClick={() => void control(verb)}
+      style={{ font: 'inherit', fontSize: 13, fontWeight: 600, padding: '7px 14px', borderRadius: 3,
+        cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1,
+        border: kind === 'strong' ? 0 : '1px solid var(--rule-2)',
+        background: kind === 'strong' ? 'var(--ink)' : 'var(--paper)',
+        color: kind === 'strong' ? 'var(--page)' : 'var(--ink)' }}>{label}</button>
+  );
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 0',
+      borderBottom: '1px solid var(--rule)', flexWrap: 'wrap' }}>
+      {inFlight && button('Cancel this run', 'cancel')}
+      {inFlight && (
+        <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+          It stops after the step it is on, so nothing is left half-done.
+        </span>
+      )}
+
+      {canRetry && button(`Retry step ${run.error?.step ?? ''}`.trim(), 'retry', 'strong')}
+      {run.status === 'failed' && !canRetry && (
+        <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+          A {failure ?? 'failure'} will not come out differently on a second attempt, so there is no retry.
+          Repair the workflow, or run it again from the start.
+        </span>
+      )}
+
+      {!inFlight && button('Run it again', 'rerun')}
+      {run.rerun_of_reference && (
+        <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+          This run is a re-run of <a href={`/runs/${run.rerun_of_reference}`}
+            style={{ color: 'var(--ink)' }}>{run.rerun_of_reference}</a>.
+        </span>
+      )}
+      {run.retries > 0 && (
+        <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+          {run.retries === 1 ? 'One step was retried' : `${run.retries} steps were retried`} in this run.
+        </span>
+      )}
+
+      {refused && (
+        <span style={{ fontSize: 12.5, color: 'var(--attention-ink)', width: '100%' }}>{refused}</span>
+      )}
+    </div>
+  );
+}
+
 export function RunPage({ reference }: { reference: string }) {
   const [state, setState] = useState<Loaded>({ kind: 'empty', of: { kind: 'notLoadedYet' } });
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => { setState({ kind: 'empty', of: { kind: 'notLoadedYet' } }); }, [reference]);
 
   useEffect(() => {
@@ -29,7 +107,7 @@ export function RunPage({ reference }: { reference: string }) {
         why: `The record store did not answer. Your runs are unaffected — this screen could not read them. (${String(error)})`,
       } }));
     return () => { live = false; };
-  }, [reference]);
+  }, [reference, refresh]);
 
   return (
     <div>
@@ -39,13 +117,13 @@ export function RunPage({ reference }: { reference: string }) {
           <div style={{ border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel)', marginTop: 24 }}>
             <EmptyState of={state.of} />
           </div>
-        ) : <LoadedRun data={state.data} />}
+        ) : <LoadedRun data={state.data} again={() => setRefresh((n) => n + 1)} />}
       </main>
     </div>
   );
 }
 
-function LoadedRun({ data }: { data: RunView }) {
+function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
   const { run, steps, attempts, events, stepArtefacts, runArtefacts } = data;
   const [selected, setSelected] = useState(0);
   const outcomes = run.outcomes ?? [];
@@ -73,6 +151,8 @@ function LoadedRun({ data }: { data: RunView }) {
       </header>
       <div style={{ height: 2, background: 'var(--ink)' }} />
 
+      <Controls run={run} again={again} />
+
       <OutcomePair state={state} status={run.status[0]!.toUpperCase() + run.status.slice(1)}
         outcome={run.outcome ? label(run.outcome) : 'No conclusion reached'}
         note={`One of ${outcomes.length} conclusions this version declares. Orbit reports it without judging it.`} />
@@ -99,7 +179,15 @@ function LoadedRun({ data }: { data: RunView }) {
         <div style={{ width: 486, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 11 }}>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>What it did, in order</h2>
-            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{attempts.length} steps, all reached</span>
+            {/* "All reached" is only true of a run that ran to an ending. A
+                run that was stopped or that failed reached some of the version
+                and not the rest, and saying otherwise reads as if the
+                procedure completed. */}
+            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+              {run.status === 'succeeded' || run.status === 'handedToAPerson'
+                ? `${attempts.length} steps, all reached`
+                : `${attempts.length} of ${steps.length} steps — it did not get further`}
+            </span>
           </div>
           <div style={{ borderTop: '1px solid var(--ink)' }}>
             {attempts.map((a, i) => (
@@ -228,7 +316,27 @@ function ran(startedAt: string | null, endedAt: string | null): string {
  * reason — never as a broken image — because it is a record, not an absence.
  */
 function Evidence({ artefact }: { artefact: ArtefactView }) {
-  const [failed, setFailed] = useState(false);
+  /**
+   * Why it could not be shown, taken from the server rather than guessed.
+   *
+   * An <img> onError says only that something went wrong, and this used to
+   * render every such failure as "did not match the digest" — accusing the
+   * store of tampering when the bytes were merely missing, or the server
+   * briefly unreachable. In a product whose claim is provenance, a false
+   * integrity alarm is worse than no alarm: it teaches people to discount the
+   * real one. So the reason is asked for.
+   */
+  const [failed, setFailed] = useState<string | null>(null);
+  const askWhy = async () => {
+    try {
+      const res = await fetch(`/api/artefacts/${artefact.id}`);
+      const body = await res.json().catch(() => null);
+      setFailed(body?.describe ?? body?.why
+        ?? 'This could not be shown, and the store did not say why.');
+    } catch {
+      setFailed('This could not be loaded. That is this screen failing to reach the store, not a finding about the evidence.');
+    }
+  };
   if (artefact.withheld) {
     return (
       <div style={{ width: 232, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)',
@@ -247,11 +355,11 @@ function Evidence({ artefact }: { artefact: ArtefactView }) {
           <div style={{ height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: 'var(--failed-wash)', color: 'var(--failed-ink)', fontSize: 12, padding: 14,
             textAlign: 'center', lineHeight: 1.45 }}>
-            This did not match the digest recorded when it was captured, so it is not being shown.
+            {failed}
           </div>
         ) : (
           <img src={`/api/artefacts/${artefact.id}`} alt="The screen at this step"
-            onError={() => setFailed(true)}
+            onError={() => void askWhy()}
             style={{ width: '100%', height: 150, objectFit: 'cover', objectPosition: 'top',
               background: 'var(--panel-2)', display: 'block' }} />
         )}

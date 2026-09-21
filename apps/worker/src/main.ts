@@ -47,12 +47,22 @@ async function runOne(runId: string) {
     const { halted, values, reached } = await execute(db, runId, steps, row.inputs, origin);
 
     if (halted) {
-      await db.query(
-        `UPDATE run SET status = 'failed', error = $2, ended_at = now() WHERE id = $1`,
-        [runId, JSON.stringify(halted)]);
-      await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.failed', $2)`,
-        [runId, JSON.stringify(halted)]);
-      console.log(`  ${row.reference}: halted — ${halted.describe}`);
+      // Cancelling is a decision, not a fault. §13 records a cancelled run as
+      // cancelled, and the schema allows an error only on a failure, so the
+      // two agree: what stopped it is the status, and there is nothing to
+      // diagnose. Recording a person's decision as a technical failure would
+      // put a fault on the record where a choice belongs.
+      const stopped = halted.kind === 'cancelled';
+      if (stopped) {
+        await db.query(`UPDATE run SET status = 'cancelled', ended_at = now() WHERE id = $1`, [runId]);
+      } else {
+        await db.query(
+          `UPDATE run SET status = 'failed', error = $2, ended_at = now() WHERE id = $1`,
+          [runId, JSON.stringify(halted)]);
+      }
+      await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, $2, $3)`,
+        [runId, stopped ? 'run.cancelled' : 'run.failed', JSON.stringify(halted)]);
+      console.log(`  ${row.reference}: ${stopped ? 'cancelled' : 'halted'} — ${halted.describe}`);
       return;
     }
 

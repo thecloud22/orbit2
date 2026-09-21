@@ -9,9 +9,20 @@
  */
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
-const root = process.env['ORBIT_EVIDENCE_DIR'] ?? './data/evidence';
+/**
+ * One store, wherever the process happens to be started from.
+ *
+ * This defaulted to './data/evidence', which is relative to the working
+ * directory — so the worker wrote evidence under apps/worker and the API
+ * looked for it under apps/api, and every screenshot a run captured was
+ * missing by the time anyone tried to look at it. Anchoring the default to
+ * this file's location instead of the caller's cwd makes the two agree by
+ * construction rather than by everyone remembering to set the variable.
+ */
+const root = resolve(process.env['ORBIT_EVIDENCE_DIR']
+  ?? join(import.meta.dirname, '..', '..', '..', 'data', 'evidence'));
 
 export interface Captured { digest: string; bytes: number; mediaType: string }
 

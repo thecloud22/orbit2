@@ -185,6 +185,20 @@ export async function execute(db: PoolClient, runId: string, steps: Step[],
   try {
     let position = 1;
     while (position <= steps.length) {
+      // The safe boundary §10 asks for. Cancellation is cooperative: a run
+      // stops *between* steps, never part-way through one, so what completed
+      // before it stopped is a whole number of steps and the evidence for each
+      // is complete. Killing the browser mid-action would leave a step that
+      // half-happened, which is the one thing the record must never contain.
+      const { rows: [asked] } = await db.query<{ cancel_requested_at: string | null }>(
+        `SELECT cancel_requested_at FROM run WHERE id = $1`, [runId]);
+      if (asked?.cancel_requested_at) {
+        const halt: Halt = { kind: 'cancelled', step: position,
+          describe: `Cancelled before step ${position} ran. Everything before it completed.` };
+        await event(ctx, null, 'run.cancelled', { stoppedBefore: position });
+        return { halted: halt, values: ctx.values };
+      }
+
       const step = steps[position - 1]!;
       const outcome = await runStep(ctx, step, position, positionOf);
       if (typeof outcome === 'object' && 'kind' in outcome) return { halted: outcome, values: ctx.values };

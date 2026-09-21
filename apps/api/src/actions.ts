@@ -12,6 +12,7 @@ import { pool } from './db.ts';
 import { activate, mayStart, pause, queueTests, resume } from './activate.ts';
 import { confirm, type Confirmation } from './confirm.ts';
 import { mintVersion } from './mint.ts';
+import { cancelRun, retryRun, rerun } from './control.ts';
 import { deleteStep, editStep, insertStep, moveStep } from './edit.ts';
 import { describeBlocker } from '@orbit/contract';
 
@@ -118,5 +119,22 @@ export const actions = {
       `INSERT INTO audit_entry (act, object_kind, object_id, changed) VALUES ('run started', 'run', $1, $2)`,
       [versionId, JSON.stringify({ reference })]);
     return { status: 201, body: { reference: run!.reference } };
+  },
+
+  // §10's run controls. Each refusal carries its reason, because "this run is
+  // succeeded, so there is nothing to stop" is an answer rather than a fault.
+  async cancelRun(reference: string) {
+    const result = await inTransaction((db) => cancelRun(db, reference));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async retryRun(reference: string) {
+    const result = await inTransaction((db) => retryRun(db, reference));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async rerun(reference: string) {
+    const result = await inTransaction((db) => rerun(db, reference));
+    return result.ok ? { status: 201, body: result } : { status: 409, body: { why: result.because } };
   },
 };

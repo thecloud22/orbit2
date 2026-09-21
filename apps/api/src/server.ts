@@ -34,6 +34,12 @@ createServer(async (req, res) => {
         if (verb === 'delete-step') { const r = await actions.deleteStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'insert-step') { const r = await actions.insertStep(id, body); return json(res, r.status, r.body); }
       }
+      // Runs are addressed by the reference a person quotes, not by an id.
+      if (kind === 'runs' && id) {
+        if (verb === 'cancel') { const r = await actions.cancelRun(id); return json(res, r.status, r.body); }
+        if (verb === 'retry')  { const r = await actions.retryRun(id); return json(res, r.status, r.body); }
+        if (verb === 'rerun')  { const r = await actions.rerun(id); return json(res, r.status, r.body); }
+      }
       if (kind === 'versions' && id) {
         if (verb === 'tests')    { const r = await actions.queueTests(id); return json(res, r.status, r.body); }
         if (verb === 'activate') { const r = await actions.activate(id); return json(res, r.status, r.body); }

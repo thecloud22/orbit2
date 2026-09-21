@@ -27,6 +27,13 @@ export interface RunHeader {
   error: { kind: string; step: number; describe: string } | null;
   /** Null until identity exists. Shown as absent, never as a placeholder name. */
   started_by: string | null;
+  /** The run this one was started from, if it was. §10 asks for the link, and
+   *  without it two attempts at the same work read as two pieces of work. */
+  rerun_of_reference: string | null;
+  /** How many times a step in THIS run was re-attempted. Kept apart from the
+   *  re-run link because they answer different questions: one is how hard this
+   *  run tried, the other is how many times the work was asked for. */
+  retries: number;
   queued_at: string;
   started_at: string | null;
   ended_at: string | null;

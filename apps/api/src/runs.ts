@@ -10,12 +10,16 @@ import { pool } from './db.ts';
 export async function readRun(reference: string) {
   const { rows: [run] } = await pool.query(
     `SELECT r.id, r.reference, r.status, r.outcome, r.is_test, r.inputs, r.outputs, r.error,
-            r.started_by, r.queued_at, r.started_at, r.ended_at,
+            r.started_by, r.queued_at, r.started_at, r.ended_at, r.retries,
+            -- The reference rather than the id, because the link is for a
+            -- person to follow and a reference is what a person quotes.
+            original.reference AS rerun_of_reference,
             v.version, v.digest, v.outcomes, v.declared_inputs, v.applications, v.published_at,
             v.may_change_records, w.name AS workflow_name, w.id AS workflow_id
        FROM run r
        JOIN workflow_version v ON v.id = r.version_id
        JOIN workflow w ON w.id = v.workflow_id
+       LEFT JOIN run original ON original.id = r.rerun_of
       WHERE r.reference = $1`, [reference]);
   if (!run) return null;
 
