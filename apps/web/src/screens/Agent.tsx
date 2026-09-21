@@ -125,7 +125,6 @@ function sidesOf(steps: Draft['steps']): Map<string, 'yes' | 'no'> {
 }
 
 /** Decision 14's ten. Offered in the order a procedure tends to use them. */
-const KINDS = ['open', 'enter', 'activate', 'read', 'collect', 'check', 'branch', 'forEach', 'handOff', 'end'] as const;
 
 const quiet: React.CSSProperties = {
   font: 'inherit', fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--ink-2)',
@@ -166,6 +165,9 @@ function Confirm({ draft, onDone }: {
 }) {
   const { workflow, steps, notes } = draft;
   const outstanding = notes.filter((n) => !n.resolved_at);
+  /** Readings Orbit took on its own. Settled, so they block nothing — but a
+   *  reading nobody is shown is a reading nobody can disagree with. */
+  const assumed = notes.filter((n) => n.resolved_at && n.kind === 'assumption');
   const sides = sidesOf(steps);
   const endings = steps.filter((s) => s.kind === 'end');
   const inputs = workflow.declared_inputs ?? [];
@@ -196,7 +198,11 @@ function Confirm({ draft, onDone }: {
 
   return (
     <Section title="Confirm this is the procedure"
-      note="Nothing here is filled in for you. What you write is the record.">
+      // "Nothing here is filled in for you" was true when this screen only
+      // ever showed empty boxes. The short names arrive filled with what the
+      // model proposed, so the honest claim is the weaker one: what is left in
+      // them is what the record will say.
+      note="Name how it can finish. Whatever is left in these boxes is the record.">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22, paddingTop: 4, maxWidth: 780 }}>
 
         {noEnding && (
@@ -227,24 +233,52 @@ function Confirm({ draft, onDone }: {
           </div>
         ))}
 
+        {/* What this whole section is for, said once before the boxes.
+            "A run reports this by name, so nothing may invent one" was true
+            and explained nothing: it did not say what a conclusion is, why
+            there are two of them, or what the difference between the two
+            boxes is. Somebody seeing this screen for the first time was being
+            asked to fill in fields whose purpose was never stated. */}
+        {endings.length > 0 && (
+          <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 16 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>
+              How this agent can finish
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.6, maxWidth: 700 }}>
+              {endings.length === 1
+                ? 'It finishes one way. Every run ends there and says so.'
+                : `It finishes one of ${endings.length} ways. Every run ends at exactly one of them and reports which.`}
+              {' '}You name them, because they are decisions about your business and Orbit
+              will not invent a word for one.
+            </div>
+          </div>
+        )}
+
         {endings.map((e, i) => (
           <div key={e.id} style={{ borderTop: '1px solid var(--rule)', paddingTop: 16 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 3 }}>
-              Conclusion {i + 1}: {summary(e.declares)}
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 11 }}>
+              Ending {i + 1} of {endings.length}: {summary(e.declares)}
             </div>
-            <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 9 }}>
-              A run reports this by name, so nothing may invent one.
-            </div>
-            <div style={{ display: 'flex', gap: 9, marginBottom: 11 }}>
-              <input style={field} value={named[e.id]?.outcome ?? ''} aria-label={`Name for conclusion ${i + 1}`}
-                placeholder="aShortName"
-                onChange={(ev) => setNamed((n) => ({ ...n, [e.id]: { outcome: ev.target.value, label: n[e.id]?.label ?? '' } }))} />
+            <div style={{ display: 'flex', gap: 14, marginBottom: 4 }}>
+              <label style={{ flex: 1, display: 'block' }}>
+                <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 5 }}>
+                  Short name, for the record
+                </span>
+                <input style={field} value={named[e.id]?.outcome ?? ''} aria-label={`Name for conclusion ${i + 1}`}
+                  placeholder="approvedWithPMI"
+                  onChange={(ev) => setNamed((n) => ({ ...n, [e.id]: { outcome: ev.target.value, label: n[e.id]?.label ?? '' } }))} />
+              </label>
               {/* Its own summary, not an example borrowed from another
                   workflow — "Note rate recorded" under "Loan Declined" reads
                   like a value somebody left behind. */}
-              <input style={field} value={named[e.id]?.label ?? ''} aria-label={`Label for conclusion ${i + 1}`}
-                placeholder={summary(e.declares)}
-                onChange={(ev) => setNamed((n) => ({ ...n, [e.id]: { outcome: n[e.id]?.outcome ?? '', label: ev.target.value } }))} />
+              <label style={{ flex: 1, display: 'block' }}>
+                <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 5 }}>
+                  How it reads to a person
+                </span>
+                <input style={field} value={named[e.id]?.label ?? ''} aria-label={`Label for conclusion ${i + 1}`}
+                  placeholder={summary(e.declares)}
+                  onChange={(ev) => setNamed((n) => ({ ...n, [e.id]: { outcome: n[e.id]?.outcome ?? '', label: ev.target.value } }))} />
+              </label>
             </div>
           </div>
         ))}
@@ -266,7 +300,7 @@ function Confirm({ draft, onDone }: {
                 example: {},
               })),
             })}>
-            I attest this is the procedure
+            Confirm
           </Action>
           {/* "Not yet" closed the form and left the draft exactly as it was,
               which is what leaving the page does. A control that does nothing
@@ -290,7 +324,6 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const draft = useFetch<Draft>(`/api/workflows/${id}?r=${refresh}`, id);
   const [refused, setRefused] = useState<string[] | null>(null);
   const [editRefusal, setEditRefusal] = useState<string | null>(null);
-  const [adding, setAdding] = useState({ kind: 'read' as string, after: 0 });
   const [opened, setOpened] = useState<Record<string, boolean>>({});
   const [showWhy, setShowWhy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -302,6 +335,9 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
 
   const { workflow, steps, notes, versions, authoring } = draft.value;
   const outstanding = notes.filter((n) => !n.resolved_at);
+  /** Readings Orbit took on its own. Settled, so they block nothing — but a
+   *  reading nobody is shown is a reading nobody can disagree with. */
+  const assumed = notes.filter((n) => n.resolved_at && n.kind === 'assumption');
   const sides = sidesOf(steps);
   const published = versions.length > 0;
   const liveOrLatest = workflow.live_version_id ?? versions[0]?.id ?? null;
@@ -375,6 +411,22 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
           is simply here, until it has been used. */}
       {!workflow.confirmed_at && <Confirm draft={draft.value} onDone={act} />}
 
+      {assumed.length > 0 && (
+        <Section title={assumed.length === 1 ? 'What Orbit assumed' : `What Orbit assumed (${assumed.length})`}
+          note="taken on its own; say so if any of it is wrong">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 760 }}>
+            {assumed.map((n) => (
+              <div key={n.id} style={{ fontSize: 13.5, lineHeight: 1.6 }}>
+                {n.body}
+                {n.answer && (
+                  <span style={{ color: 'var(--ink-2)' }}> {n.answer}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {workflow.procedure && (
         <Section title="What was written">
           <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.75, maxWidth: 760 }}>{workflow.procedure}</p>
@@ -430,30 +482,19 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
           ))}
         </div>
 
-        {editable && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingTop: 13, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>Add a</span>
-            <select value={adding.kind} disabled={busy} aria-label="Kind of step to add"
-              onChange={(e) => setAdding((a) => ({ ...a, kind: e.target.value }))}
-              style={{ font: 'inherit', fontSize: 13, fontFamily: 'var(--mono)', padding: '5px 7px',
-                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
-              {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-            </select>
-            <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>step after</span>
-            <select value={adding.after} disabled={busy} aria-label="Where to add the step"
-              onChange={(e) => setAdding((a) => ({ ...a, after: Number(e.target.value) }))}
-              style={{ font: 'inherit', fontSize: 13, padding: '5px 7px',
-                border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
-              <option value={0}>the beginning</option>
-              {steps.map((s) => <option key={s.id} value={s.position}>step {s.position} · {s.kind}</option>)}
-            </select>
-            <Action kind="ghost" disabled={busy}
-              onClick={() => edit('insert-step', { kind: adding.kind, after: adding.after })}>Add step</Action>
-            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
-              It arrives unfinished, and blocks publication until you configure it.
-            </span>
-          </div>
-        )}
+        {/* Adding a step is hidden until a step can be configured.
+            It inserted one deliberately unfinished — "A new read step — not
+            configured yet" — and then offered no way to say what it reads.
+            Nothing in the product calls `editStep`, so the step could never be
+            completed and publication refused the draft from then on. An action
+            whose only outcome is a draft you cannot publish is worse than no
+            action. Moving, reordering and removing a step still work, because
+            those need nothing from the page.
+
+            What it takes to bring back is a way for an author to point at an
+            element without inventing a locator — Orbit derives a binding from
+            its own view of the page (Decision 15), and a typed one would be
+            the one thing the ladder exists to prevent. Planned separately. */}
 
         {editRefusal && (
           <div style={{ paddingTop: 14 }}>

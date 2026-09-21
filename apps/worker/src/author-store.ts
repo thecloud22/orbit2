@@ -176,9 +176,15 @@ export async function storeDraft(
     // What the model could not work out. §4 and acceptance criterion 3: any
     // outstanding one blocks confirmation, with a link to it.
     for (const note of draft.questions) {
+      // A note Orbit has already answered is settled when it is written. It
+      // is on the record and it blocks nothing — the difference between
+      // saying what was assumed and demanding that somebody type it back.
       await db.query(
-        `INSERT INTO workflow_note (workflow_id, kind, body) VALUES ($1, $2, $3)`,
-        [workflowId, note.kind, note.body]);
+        note.answer
+          ? `INSERT INTO workflow_note (workflow_id, kind, body, answer, resolved_at)
+             VALUES ($1, $2, $3, $4, now())`
+          : `INSERT INTO workflow_note (workflow_id, kind, body, answer) VALUES ($1, $2, $3, $4)`,
+        [workflowId, note.kind, note.body, note.answer ?? null]);
     }
 
     for (const turn of draft.turns) {

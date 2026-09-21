@@ -19,7 +19,7 @@
 import { z, type Step } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
 import { chromium, type Page } from 'playwright';
-import { asQuestion, type Note } from './note.ts';
+import { asAssumption, asQuestion, type Note } from './note.ts';
 import { asNumber } from './compare.ts';
 import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
 
@@ -795,7 +795,16 @@ export async function authorFromProcedure(opts: {
       // the other — decline the file, send it back — it has not seen that act
       // and will not guess at it.
       if (guarded.some((x) => x.kind === 'activate' && x.changesARecord)) {
-        questions.push(asQuestion('When the conditions do not hold, this reports the conclusion and takes no action. If something must be done instead, say what, and it can be recorded.'));
+        // An assumption, not a question. It is a statement about what Orbit
+        // did — it watched one path, so the other reports and acts on
+        // nothing — and there is nothing only a person can supply. Asked as a
+        // question it stopped every conditional procedure at the
+        // confirmation screen to demand prose, and the prose nobody had was
+        // "no, that is fine". Orbit takes that reading, says it took it, and
+        // anyone who disagrees can say so.
+        questions.push(asAssumption(
+          'When the conditions do not hold, this reports the conclusion and takes no action.',
+          'Taken as correct: nothing is done on the other path unless somebody says otherwise.'));
       }
     } else if (refusal || !said || !said.whenAbsent || !separator || !absent) {
       // One ending. Either the procedure has one, or the model's account of the
