@@ -34,7 +34,14 @@ export function StartRun({ version, go }: { version: string; go: (to: Route) => 
     const result = await send<{ reference?: string; why?: string; missing?: string[] }>(
       `/api/versions/${version}/runs`, { inputs: values });
     setBusy(false);
-    if (!result.ok) { setRefused([result.why]); return; }
+    // A refused start says which values are missing, and says it over a
+    // non-2xx status. Reading only the status turned that into a number.
+    const value = result.ok ? result.value : result.value;
+    if (value?.missing?.length) {
+      setRefused(value.missing.map((m) => `"${m}" has to be given before this can start.`));
+      return;
+    }
+    if (!result.ok) { setRefused([value?.why ?? result.why]); return; }
     if (result.value.reference) go({ at: 'run', reference: result.value.reference });
     else setRefused([result.value.why ?? 'That did not work.']);
   };

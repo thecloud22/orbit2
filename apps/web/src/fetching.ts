@@ -38,9 +38,21 @@ export function useFetch<T>(path: string, searched?: string): Loaded<T> {
   return result;
 }
 
-/** Sends something, and says plainly whether it worked. */
+/**
+ * Sends something, and says plainly whether it worked.
+ *
+ * A refusal arrives here as a failure, and it is not one. Publication answers
+ * 409 carrying every blocker in plain words — the API says so in its own
+ * comment — and this used to read the status, invent "That did not work
+ * (409).", and drop the body. So the gate the whole product rests on reported
+ * itself to an author as a number. The reasons were computed, described,
+ * serialised and thrown away one function short of the screen.
+ *
+ * The parsed body comes back either way, so a caller can tell a refusal with
+ * reasons from something that actually went wrong.
+ */
 export async function send<T>(path: string, body: unknown): Promise<
-  { ok: true; value: T } | { ok: false; why: string }> {
+  { ok: true; value: T } | { ok: false; why: string; value?: T }> {
   try {
     const response = await fetch(path, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
@@ -48,7 +60,8 @@ export async function send<T>(path: string, body: unknown): Promise<
     const value: unknown = await response.json();
     return response.ok
       ? { ok: true, value: value as T }
-      : { ok: false, why: (value as { why?: string }).why ?? `That did not work (${response.status}).` };
+      : { ok: false, value: value as T,
+          why: (value as { why?: string }).why ?? `That did not work (${response.status}).` };
   } catch {
     return { ok: false, why: 'Orbit could not be reached. Nothing was changed.' };
   }
