@@ -176,8 +176,11 @@ export function checkForPublication(
   const reached = new Set(steps.filter((s, i) => !unfinished(s) && s.kind === 'end' && reachable.has(i))
     .map((s) => (s as Extract<Step, { kind: 'end' }>).outcome));
   for (const outcome of declared.outcomes) {
+    // An ending with no example used to be refused, because no test could
+    // prove it. There is no test before publication any more — a version is
+    // published and run, and a run is the proof — so an example is no longer
+    // something publication needs.
     if (!reached.has(outcome)) blockers.push({ kind: 'outcomeUnreachable', outcome });
-    else if (!(outcome in declared.examples)) blockers.push({ kind: 'endingHasNoExample', outcome });
   }
 
   return blockers;

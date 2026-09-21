@@ -4,8 +4,10 @@ import { EmptyState, Row } from '../ui.tsx';
 import { send, useFetch } from '../fetching.ts';
 import type { Route } from '../router.ts';
 
-interface TestCase { outcome: string; label: string; example: Record<string, string>;
-  provedBy: { reference: string } | null }
+interface Needs {
+  inputs: Array<{ name: string; label: string; required: boolean }>;
+  outcomes: Array<{ name: string; label: string }>;
+}
 
 /**
  * The request form, generated from what the version declares (§10).
@@ -15,19 +17,21 @@ interface TestCase { outcome: string; label: string; example: Record<string, str
  * with invalid inputs is a run somebody has to explain later.
  */
 export function StartRun({ version, go }: { version: string; go: (to: Route) => void }) {
-  const tests = useFetch<TestCase[]>(`/api/versions/${version}/tests`, version);
+  const needs = useFetch<Needs>(`/api/versions/${version}`, version);
   const [values, setValues] = useState<Record<string, string>>({});
   const [refused, setRefused] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (tests.state === 'empty') {
+  if (needs.state === 'empty') {
     return <Page title="Start a run"><div style={{ marginTop: 18, border: '1px solid var(--rule)',
-      borderRadius: 6, background: 'var(--panel)' }}><EmptyState of={tests.of} /></div></Page>;
+      borderRadius: 6, background: 'var(--panel)' }}><EmptyState of={needs.of} /></div></Page>;
   }
 
-  // The declared inputs are the union of the names every example supplies —
-  // the author's own values, given when they confirmed.
-  const names = [...new Set(tests.value.flatMap((t) => Object.keys(t.example)))];
+  // What the version declares, asked of the version. This used to be the union
+  // of the names every test example supplied, which meant the form was built
+  // out of values an author had typed rather than out of what the agent asks
+  // for — and an input nobody wrote an example for had no field at all.
+  const names = needs.value.inputs.map((i) => i.name);
 
   const start = async () => {
     setBusy(true); setRefused(null);
@@ -73,16 +77,18 @@ export function StartRun({ version, go }: { version: string; go: (to: Route) => 
 
       <Section title="It can end in one of these ways"
         note="fixed when this version was published; a run cannot invent another">
+        {/* The example each ending was given, and whether a test run had
+            reached it, used to sit here. Both belonged to a gate that has been
+            removed: a version is published and run, and the run is the proof.
+            What is left is the fact this section is for — these are the only
+            conclusions a run of this version can report. */}
         <div style={{ borderTop: '1px solid var(--ink)' }}>
-          {tests.value.map((t, i) => (
-            <div key={t.outcome} style={{ borderBottom: i === tests.value.length - 1 ? 'none' : '1px solid var(--rule)',
+          {needs.value.outcomes.map((o, i) => (
+            <div key={o.name} style={{ borderBottom: i === needs.value.outcomes.length - 1 ? 'none' : '1px solid var(--rule)',
               padding: '12px 0', display: 'flex', alignItems: 'center', gap: 16 }}>
-              <span style={{ width: 240, fontSize: 13.5, fontWeight: 600 }}>{t.label}</span>
+              <span style={{ width: 240, fontSize: 13.5, fontWeight: 600 }}>{o.label}</span>
               <span style={{ flexGrow: 1, fontSize: 12.5, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>
-                {Object.entries(t.example).map(([k, v]) => `${k}=${v}`).join(' ') || '—'}
-              </span>
-              <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
-                {t.provedBy ? `proved by ${t.provedBy.reference}` : 'not proved yet'}
+                {o.name}
               </span>
             </div>
           ))}

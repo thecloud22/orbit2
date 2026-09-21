@@ -96,20 +96,16 @@ export async function confirm(db: PoolClient, workflowId: string, c: Confirmatio
   // gate refused what it sent.
   const { rows: [declared] } = await db.query<{ inputs: Array<{ name: string; required: boolean }> }>(
     `SELECT coalesce(declared_inputs, '[]'::jsonb) AS inputs FROM workflow WHERE id = $1`, [workflowId]);
-  const wanted = (declared?.inputs ?? []).filter((i) => i.required).map((i) => i.name);
-
+  // An example per ending was required so that a test could be run against
+  // each one before the version went live. There is no such test any more, and
+  // with it gone the requirement was asking for values nothing would use.
+  //
+  // The check on *uninvited* values stays, because it is not about tests: an
+  // example naming something the workflow never asks for is how a password
+  // came to be sitting in `workflow.examples` in plain text. Nothing may be
+  // stored there that the workflow does not declare.
   const declaredNames = new Set((declared?.inputs ?? []).map((i) => i.name));
   for (const ending of c.endings) {
-    const missing = wanted.filter((name) => !String(ending.example[name] ?? '').trim());
-    if (missing.length > 0) {
-      blockers.push({ kind: 'endingHasNoExample', outcome: ending.outcome });
-    }
-
-    // An example answers "what does a run of this need to be given". A value
-    // the workflow never asks for is not an answer to that, and storing one is
-    // how a password came to be sitting in workflow.examples in plain text and
-    // printed on the activation screen: it was accepted because nothing said
-    // it could not be.
     const uninvited = Object.keys(ending.example).filter((k) => !declaredNames.has(k));
     if (uninvited.length > 0) {
       blockers.push({ kind: 'outstanding', note: 'exception',

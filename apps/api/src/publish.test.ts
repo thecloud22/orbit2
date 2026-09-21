@@ -68,11 +68,13 @@ test('a binding that can return the wrong element is refused without corroborati
   assert.match(describeBlocker(blocker!), /can return the wrong thing/);
 });
 
-test('an ending with no example is refused, because no test could prove it', () => {
+test('an ending with no example publishes, because a run is the proof', () => {
+  // This used to be refused: an ending had to carry an example so a test run
+  // could prove it before the version went live. There is no such test — a
+  // version is published and run — so an example is nothing publication needs,
+  // and demanding one asked for a value nothing would use.
   const steps: Step[] = [read(0, 'status'), end(1, 'done', ['status'])];
-  const blocker = checkForPublication(steps, declared(['done'], {}))
-    .find((b) => b.kind === 'endingHasNoExample');
-  assert.equal(blocker?.kind, 'endingHasNoExample');
+  assert.deepEqual(checkForPublication(steps, declared(['done'], {})), []);
 });
 
 test('every blocker is reported, not the first', () => {

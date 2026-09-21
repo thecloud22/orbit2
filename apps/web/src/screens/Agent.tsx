@@ -181,8 +181,6 @@ function Confirm({ draft, onDone }: {
       // conclusion is called. It is a placeholder to replace, not a name.
       return [e.id, { outcome: already === 'unnamed' ? '' : already, label: '' }];
     })));
-  const [examples, setExamples] = useState<Record<string, Record<string, string>>>(
-    Object.fromEntries(endings.map((e) => [e.id, {}])));
 
   // A procedure that reaches no conclusion is not one, and the server refuses
   // to record an attestation to it. Said here too, because the useful moment
@@ -194,8 +192,6 @@ function Confirm({ draft, onDone }: {
     ...outstanding.filter((n) => !settled(n)).map((n) =>
       n.kind === 'risk' ? 'an acknowledgement' : 'an answer'),
     ...endings.filter((e) => !named[e.id]?.outcome.trim()).map(() => 'a name for a conclusion'),
-    ...endings.flatMap((e) => inputs.filter((i) => i.required && !examples[e.id]?.[i.name]?.trim())
-      .map(() => 'an example value')),
   ];
 
   return (
@@ -250,32 +246,6 @@ function Confirm({ draft, onDone }: {
                 placeholder={summary(e.declares)}
                 onChange={(ev) => setNamed((n) => ({ ...n, [e.id]: { outcome: n[e.id]?.outcome ?? '', label: ev.target.value } }))} />
             </div>
-            {inputs.length > 0 && (
-              <>
-                {/* It said "the test before activation runs with it", and
-                    there is no activation — that stage was taken out, and this
-                    went on describing it. A field whose only explanation names
-                    something that does not exist reads as paperwork. What it
-                    is actually for is unchanged: "Test it" runs the agent once
-                    per conclusion with these, which is the only way to know
-                    this ending is one a run can really reach. Two conclusions
-                    want two different records, and nothing said so. */}
-                <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 7 }}>
-                  A record that really ends this way. &ldquo;Test it&rdquo; runs the agent with it
-                  to show this conclusion can be reached &mdash; so each conclusion wants a
-                  different one.
-                </div>
-                {inputs.map((input) => (
-                  <div key={input.name} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 7 }}>
-                    <span style={{ width: 150, fontSize: 13, color: 'var(--ink-2)' }}>{input.label}</span>
-                    <input style={field} aria-label={`${input.label} for conclusion ${i + 1}`}
-                      value={examples[e.id]?.[input.name] ?? ''}
-                      onChange={(ev) => setExamples((x) => ({ ...x,
-                        [e.id]: { ...x[e.id], [input.name]: ev.target.value } }))} />
-                  </div>
-                ))}
-              </>
-            )}
           </div>
         ))}
 
@@ -293,7 +263,7 @@ function Confirm({ draft, onDone }: {
                 stepId: e.id,
                 outcome: named[e.id]!.outcome.trim(),
                 label: named[e.id]!.label.trim() || named[e.id]!.outcome.trim(),
-                example: examples[e.id] ?? {},
+                example: {},
               })),
             })}>
             I attest this is the procedure
@@ -303,106 +273,6 @@ function Confirm({ draft, onDone }: {
               is one more thing to read. */}
         </div>
       </div>
-    </Section>
-  );
-}
-
-/**
- * Proving a version before it may touch a real system.
- *
- * §4: an agent cannot go live until every ending it declares has been reached
- * by an actual run. The button used to navigate to the agents list and do
- * nothing at all, which made the last gate in the product look like a dead
- * end — the version was published, the control did nothing, and there was
- * nothing on screen to say what was missing.
- *
- * What a person needs here is short: which conclusions this version claims it
- * can reach, which of them a run has actually reached, and one control for the
- * rest.
- */
-function Proving({ versionId, onDone }: { versionId: string; onDone: () => void }) {
-  const [cases, setCases] = useState<Array<{
-    outcome: string; label: string; example: Record<string, string>;
-    provedBy: { reference: string; at: string } | null;
-  }> | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<string[] | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    const poll = async () => {
-      const res = await fetch(`/api/versions/${versionId}/tests`).catch(() => null);
-      if (live && res?.ok) setCases(await res.json());
-    };
-    void poll();
-    const timer = setInterval(() => { void poll(); }, 2000);
-    return () => { live = false; clearInterval(timer); };
-  }, [versionId]);
-
-  const unproved = (cases ?? []).filter((c) => !c.provedBy);
-  const send = async (verb: 'tests' | 'activate') => {
-    setBusy(true); setRefused(null);
-    const result = await send2<{ blockers?: string[]; unproved?: string[] }>(
-      `/api/versions/${versionId}/${verb}`, {});
-    setBusy(false);
-    const value = result.ok ? result.value : result.value;
-    if (value?.blockers?.length) { setRefused(value.blockers); return; }
-    if (value?.unproved?.length) {
-      setRefused(value.unproved.map((u) => `"${u}" has not been proved by a run yet.`));
-      return;
-    }
-    if (!result.ok) { setRefused([result.why]); return; }
-    if (verb === 'activate') onDone();
-  };
-
-  return (
-    <Section title="Prove it, then activate"
-      note="an agent may not touch a real system until every conclusion it declares has been reached">
-      {cases === null ? (
-        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)' }}>Reading what this version claims.</p>
-      ) : (
-        <div style={{ borderTop: '1px solid var(--ink)' }}>
-          {cases.map((c) => (
-            <div key={c.outcome} style={{ borderBottom: '1px solid var(--rule)', padding: '12px 0',
-              display: 'flex', gap: 13, alignItems: 'center' }}>
-              <span style={{ width: 92, flexShrink: 0 }}>
-                <Chip state={c.provedBy ? 'ok' : 'attention'}>{c.provedBy ? 'proved' : 'not yet'}</Chip>
-              </span>
-              <span style={{ flexGrow: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: 13.5 }}>{c.label}</span>
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-2)',
-                  fontFamily: 'var(--mono)', marginTop: 3 }}>
-                  {/* The author's own example, which is what the test runs with. */}
-                  {Object.entries(c.example).map(([k, v]) => `${k}=${v}`).join('  ') || 'no values needed'}
-                </span>
-              </span>
-              {c.provedBy && (
-                <a href={`/runs/${c.provedBy.reference}`}
-                  style={{ fontSize: 12.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}>
-                  {c.provedBy.reference}
-                </a>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 16 }}>
-        <Action kind="ghost" disabled={busy || unproved.length === 0}
-          why="Every conclusion has been reached already"
-          onClick={() => void send('tests')}>
-          {unproved.length === 1 ? 'Run the test that is missing' : `Run the ${unproved.length} tests that are missing`}
-        </Action>
-        <Action disabled={busy || cases === null || unproved.length > 0}
-          why={unproved.length === 1
-            ? `"${unproved[0]?.label}" has not been reached by a run yet`
-            : `${unproved.length} conclusions have not been reached by a run yet`}
-          onClick={() => void send('activate')}>Activate</Action>
-      </div>
-
-      {refused && <div style={{ paddingTop: 14 }}>
-        <Refusal title="Not activated" blockers={refused} />
-      </div>}
     </Section>
   );
 }
@@ -422,7 +292,6 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
   const [editRefusal, setEditRefusal] = useState<string | null>(null);
   const [adding, setAdding] = useState({ kind: 'read' as string, after: 0 });
   const [opened, setOpened] = useState<Record<string, boolean>>({});
-  const [proving, setProving] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -484,22 +353,20 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
         {workflow.confirmed_at && !published && (
           <Action disabled={busy} onClick={() => void act(`/api/workflows/${id}/publish`)}>Publish a version</Action>
         )}
-        {published && (
-          <Action kind="ghost" disabled={busy} onClick={() => setProving((v) => !v)}>
-            {proving ? 'Hide the tests' : 'Test it'}
-          </Action>
-        )}
         {live && <Action onClick={() => go({ at: 'start', version: workflow.live_version_id! })}>Start a run</Action>}
+        {/* Retiring is the strongest thing this screen can do and the least
+            often wanted, so it is last and quiet. It asks why, because the
+            audit trail records the reason and not only the act. */}
+        <Action kind="ghost" disabled={busy} onClick={() => {
+          const why = window.prompt('Retire this agent? Say why — it goes on the audit trail.');
+          if (why?.trim()) void act(`/api/workflows/${id}/archive`, { why: why.trim() });
+        }}>Retire it</Action>
       </>}
     >
       <Stages confirmed={Boolean(workflow.confirmed_at)} published={published}
         outstanding={outstanding.length} />
 
       {refused && <Refusal title="Nothing was changed" blockers={refused} />}
-
-      {proving && published && (
-        <Proving versionId={liveOrLatest!} onDone={() => { setProving(false); setRefresh((n) => n + 1); }} />
-      )}
 
       {/* Confirming was two acts: a button in the header that revealed the
           form, and the attestation at the foot of it. The first decided

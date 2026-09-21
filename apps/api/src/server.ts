@@ -3,7 +3,7 @@ import { serveArtefact } from './artefacts.ts';
 import { listApplications, readRecording, readSession } from './authoring.ts';
 import { listRuns, readRun, readRunSteps } from './runs.ts';
 import { listWorkflows, readWorkflow } from './workflows.ts';
-import { testCases } from './activate.ts';
+import { versionNeeds } from './activate.ts';
 import { actions, readBody } from './actions.ts';
 import { readAdmin, readAudit } from './admin.ts';
 import { pool } from './db.ts';
@@ -44,6 +44,7 @@ createServer(async (req, res) => {
         if (verb === 'confirm') { const r = await actions.confirm(id, body); return json(res, r.status, r.body); }
         if (verb === 'publish') { const r = await actions.publish(id); return json(res, r.status, r.body); }
         if (verb === 'pause')   { const r = await actions.pause(id, body); return json(res, r.status, r.body); }
+        if (verb === 'archive') { const r = await actions.archive(id, body); return json(res, r.status, r.body); }
         if (verb === 'resume')  { const r = await actions.resume(id); return json(res, r.status, r.body); }
         if (verb === 'edit-step')   { const r = await actions.editStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'move-step')   { const r = await actions.moveStep(id, body); return json(res, r.status, r.body); }
@@ -57,8 +58,6 @@ createServer(async (req, res) => {
         if (verb === 'rerun')  { const r = await actions.rerun(id); return json(res, r.status, r.body); }
       }
       if (kind === 'versions' && id) {
-        if (verb === 'tests')    { const r = await actions.queueTests(id); return json(res, r.status, r.body); }
-        if (verb === 'activate') { const r = await actions.activate(id); return json(res, r.status, r.body); }
         if (verb === 'runs')     { const r = await actions.startRun(id, body); return json(res, r.status, r.body); }
       }
       return json(res, 404, { kind: 'noSuchAction', route });
@@ -89,11 +88,16 @@ createServer(async (req, res) => {
         : json(res, 404, { kind: 'nothingMatching', reference: workflow[1] });
     }
 
-    const tests = /^\/api\/versions\/([0-9a-f-]{36})\/tests$/.exec(url.pathname);
-    if (tests) {
+    // What a run of this version has to be given. The screen that starts one
+    // used to get this from the test cases, which meant it was reading an
+    // author's example values to find out what the version declares.
+    const version = /^\/api\/versions\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (version) {
       const db = await pool.connect();
-      try { return json(res, 200, await testCases(db, tests[1]!)); }
-      finally { db.release(); }
+      try {
+        const needs = await versionNeeds(db, version[1]!);
+        return needs ? json(res, 200, needs) : json(res, 404, { kind: 'noSuchVersion' });
+      } finally { db.release(); }
     }
 
     const artefact = /^\/api\/artefacts\/([0-9a-f-]{36})$/.exec(url.pathname);

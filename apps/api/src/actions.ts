@@ -9,7 +9,7 @@
  */
 import type { IncomingMessage } from 'node:http';
 import { pool } from './db.ts';
-import { activate, mayStart, pause, queueTests, resume } from './activate.ts';
+import { archive, mayStart, pause, resume } from './activate.ts';
 import { confirm, confirmation } from './confirm.ts';
 import { mintVersion } from './mint.ts';
 import { bringIn, finishRecording, startRecording } from './authoring.ts';
@@ -55,20 +55,19 @@ export const actions = {
       : { status: 409, body: { ...result, blockers: result.blockers.map(describeBlocker) } };
   },
 
-  async queueTests(versionId: string) {
-    const queued = await inTransaction((db) => queueTests(db, versionId));
-    return { status: 201, body: { queued } };
-  },
-
-  async activate(versionId: string) {
-    const result = await inTransaction((db) => activate(db, versionId));
-    return result.outcome === 'activated' ? { status: 200, body: result } : { status: 409, body: result };
-  },
-
   async pause(workflowId: string, body: unknown) {
     const why = (body as { why?: string }).why ?? 'No reason given.';
     await inTransaction((db) => pause(db, workflowId, why));
     return { status: 200, body: { paused: true, why } };
+  },
+
+  async archive(workflowId: string, body: unknown) {
+    const why = String((body as { why?: unknown })?.why ?? '').trim();
+    if (!why) {
+      return { status: 400, body: { why: 'Say why it is being retired. The audit trail records the reason, not just the act.' } };
+    }
+    await inTransaction((db) => archive(db, workflowId, why));
+    return { status: 200, body: { outcome: 'archived' } };
   },
 
   async resume(workflowId: string) {
