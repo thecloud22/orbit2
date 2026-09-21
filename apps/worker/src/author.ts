@@ -747,10 +747,50 @@ export async function authorFromProcedure(opts: {
         return true;
       });
 
-    const isGuarded = allConditions.length > 0;
+    // Two conditions on the same value, on opposite sides of the same
+    // threshold, cannot both hold.
+    //
+    // "If the loan-to-value is over 80%, attach PMI before approving; if it is
+    // 80% or under, approve with no conditions" is two alternatives, and Orbit
+    // follows one path: it collected both conditions and chained them with
+    // AND, giving "Loan-to-value at most 80 and Loan-to-value above 80". The
+    // guarded path could never run, and the publish gate caught it as an
+    // unreachable conclusion — true, and a long way from what the author
+    // wrote. Said here instead, in terms of the procedure.
+    const OPPOSITES: Record<string, string[]> = {
+      isAtMost: ['isMoreThan'], isMoreThan: ['isAtMost'],
+      isLessThan: ['isAtLeast'], isAtLeast: ['isLessThan'],
+      is: ['isNot'], isNot: ['is'],
+    };
+    const contradicted = allConditions.filter((c) => allConditions.some((o) =>
+      o.value === c.value && o.than === c.than && (OPPOSITES[c.is] ?? []).includes(o.is)));
+    if (contradicted.length > 0) {
+      const one = contradicted[0]!;
+      questions.push(asQuestion(
+        `This procedure describes two alternatives — what to do when ${one.of.label} ${readable(one.is)}`
+        + ` ${one.than}, and what to do otherwise. Orbit followed one of them, so the steps below are that`
+        + ' one. Record the other separately, or say which single path this agent should take.'));
+    }
+
+    // A condition Orbit cannot turn into a comparison is not quietly made into
+    // one that can never hold. It is dropped and said.
+    const buildable = allConditions
+      .filter((c) => !contradicted.includes(c))
+      .filter((c) => {
+        if (comparisonFor(c, c.of) !== null) return true;
+        questions.push(asQuestion(
+          `The procedure conditions this on ${c.of.label} ${readable(c.is)} "${c.than}", and ${c.of.label} is`
+          + ` recorded as ${c.of.type}. Orbit could not make that a comparison it can carry out, so the`
+          + ' condition is not on the steps below. Say it another way, or say what should be compared.'));
+        return false;
+      });
+
+    // No condition survived, so there is nothing to branch on and the workflow
+    // has one ending like any unguarded one.
+    const isGuarded = buildable.length > 0;
     const asksAbout = isGuarded
       ? ['THE CONDITIONS, all of which must hold for the guarded steps to happen:',
-         ...allConditions.map((c) => `- ${c.of.label} ${readable(c.is)} ${c.than}`), '',
+         ...buildable.map((c) => `- ${c.of.label} ${readable(c.is)} ${c.than}`), '',
          'THE STEPS THEY GUARD (carried out only when every condition above holds):',
          ...steps.slice(guardedAt).map((x) => `- ${x.kind} — ${x.summary}`), '',
          'What is this procedure\'s conclusion when they all hold, and when one does not?']
@@ -797,7 +837,7 @@ export async function authorFromProcedure(opts: {
       : absent && absent === found ? 'it gave both conclusions the same name, which names neither'
       : null;
 
-    if (allConditions.length > 0) {
+    if (isGuarded) {
       // The procedure conditions an act, so the workflow has two ways to
       // finish: the conditions held, or one of them did not. Orbit puts a
       // branch in front of the guarded steps for each condition; the model
@@ -813,7 +853,7 @@ export async function authorFromProcedure(opts: {
       // explains, invite exactly the mistake Orbit made here first: naming
       // them the wrong way round. The condition is the thing that tells them
       // apart, so the condition is on them.
-      const whenAll = allConditions.map((c) => `${c.of.label} ${readable(c.is)} ${c.than}`).join(' and ');
+      const whenAll = buildable.map((c) => `${c.of.label} ${readable(c.is)} ${c.than}`).join(' and ');
       const passEnd: Step = { id: crypto.randomUUID(), kind: 'end',
         summary: `${said?.whenFound.label || 'Finish — this conclusion has no name yet'} — when ${whenAll}`,
         outcome: found || 'unnamed', publishes: published };
@@ -833,17 +873,6 @@ export async function authorFromProcedure(opts: {
         outcome: absent || 'unnamedOtherwise',
         publishes: published.filter((v) => beforeGuard.has(v)) };
 
-      // A condition Orbit cannot turn into a comparison is not quietly made
-      // into one that can never hold. It is dropped and said.
-      const buildable = allConditions.filter((c) => comparisonFor(c, c.of) !== null);
-      for (const c of allConditions) {
-        if (comparisonFor(c, c.of) !== null) continue;
-        questions.push(asQuestion(
-          `The procedure conditions this on ${c.of.label} ${readable(c.is)} "${c.than}", and ${c.of.label} is`
-          + ` recorded as ${c.of.type}. Orbit could not make that a comparison it can carry out, so the`
-          + ' condition is not on the steps below. Say it another way, or say what should be compared.'));
-      }
-
       const ids = buildable.map(() => crypto.randomUUID());
       const branches: Step[] = buildable.map((c, i) => ({
         id: ids[i]!, kind: 'branch',
@@ -860,8 +889,8 @@ export async function authorFromProcedure(opts: {
       steps.push(...prefix, ...branches, ...guarded, passEnd, failEnd);
 
       turns.push(record(refusal ? 'rejected' : 'kept',
-        `${allConditions.length} condition${allConditions.length === 1 ? '' : 's'} guard ${guarded.length} step${guarded.length === 1 ? '' : 's'}: `
-        + allConditions.map((c) => `${c.value} ${readable(c.is)} ${c.than}`).join(' and ')));
+        `${buildable.length} condition${buildable.length === 1 ? '' : 's'} guard ${guarded.length} step${guarded.length === 1 ? '' : 's'}: `
+        + buildable.map((c) => `${c.value} ${readable(c.is)} ${c.than}`).join(' and ')));
 
       if (!found || !absent) {
         questions.push(asQuestion('What are the two ways this finishes called? A run reports the conclusion by name, and nothing may invent one.'));
