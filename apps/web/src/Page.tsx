@@ -51,11 +51,25 @@ const look: Record<ButtonKind, React.CSSProperties> = {
   ghost: { color: 'var(--ink)', background: 'transparent', border: '1px solid var(--rule-2)' },
 };
 
+/**
+ * An action, and — when it is not available — the reason, in the interface.
+ *
+ * The reason used to be a `title`, which renders as a tooltip on hover and is
+ * therefore invisible: it cannot be seen on a touch screen, it cannot be read
+ * by somebody who does not think to hover, and it is not there at all for
+ * anyone using a keyboard. A disabled button with no visible reason is
+ * indistinguishable from a broken one, and was reported as broken twice.
+ *
+ * §4 asks that Orbit "name the single next action and what is blocking it".
+ * That is the same rule as a refusal naming its blocker, and a control is not
+ * exempt from it because it is small.
+ */
 export function Action({ kind = 'primary', disabled, why, onClick, children }: {
   kind?: ButtonKind; disabled?: boolean; why?: string; onClick?: () => void; children: ReactNode;
 }) {
-  return (
-    <button type="button" onClick={onClick} disabled={disabled} title={disabled ? why : undefined}
+  const button = (
+    <button type="button" onClick={onClick} disabled={disabled}
+      aria-describedby={disabled && why ? 'why-not' : undefined}
       style={{
         font: 'inherit', fontSize: 13.5, fontWeight: 600, borderRadius: 3, padding: '9px 16px',
         cursor: disabled ? 'not-allowed' : 'pointer',
@@ -65,6 +79,13 @@ export function Action({ kind = 'primary', disabled, why, onClick, children }: {
       }}>
       {children}
     </button>
+  );
+  if (!disabled || !why) return button;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      {button}
+      <span id="why-not" style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.45 }}>{why}</span>
+    </span>
   );
 }
 

@@ -54,6 +54,7 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [recordingId, setRecordingId] = useState<string | null>(null);
 
+  const ready = Boolean(name.trim()) && procedure.trim().length >= 20 && Boolean(chosen);
   const application = apps.state === 'loaded'
     ? apps.value.applications.find((a) => a.id === chosen) : undefined;
 
@@ -182,14 +183,18 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
           </Section>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, paddingTop: 4 }}>
-            <Action disabled={!name.trim() || procedure.trim().length < 20 || !chosen}
+            <Action disabled={!ready}
               why={!chosen ? 'Choose which system it runs against'
                 : !name.trim() ? 'Give the agent a name'
-                : 'Say a little more about the procedure'}
+                : 'Say a little more about the procedure — this is everything Orbit works from'}
               onClick={() => void ask()}>Work through it</Action>
-            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
-              A browser opens and Orbit does it once, against {application?.name ?? 'the system you choose'}.
-            </span>
+            {/* One line beside the button, not two. What is missing matters
+                more than what will happen, so it takes the place. */}
+            {ready && (
+              <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+                A browser opens and Orbit does it once, against {application?.name}.
+              </span>
+            )}
           </div>
           {refused && <div style={{ paddingTop: 16 }}>
             <Refusal title="This was not brought in" blockers={[refused]} />
@@ -210,12 +215,14 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
             <Action disabled={!name.trim() || !chosen}
               why={!chosen ? 'Choose which system it runs against' : 'Give the agent a name'}
               onClick={() => void startRecording()}>Start recording</Action>
-            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
-              {/* Said rather than hidden. The browser opens where the worker
-                  runs, which is this machine today and will not be when Orbit
-                  runs on a server. */}
-              The browser opens on the machine running Orbit, which is this one.
-            </span>
+            {name.trim() && chosen && (
+              <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+                {/* Said rather than hidden. The browser opens where the worker
+                    runs, which is this machine today and will not be when Orbit
+                    runs on a server. */}
+                The browser opens on the machine running Orbit, which is this one.
+              </span>
+            )}
           </div>
           <Refusal title="Three things to know before you record" blockers={[
             'A password is a keystroke. The field is remembered and the value never leaves the page.',

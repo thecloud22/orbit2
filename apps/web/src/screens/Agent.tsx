@@ -343,7 +343,7 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
       title={workflow.name}
       actions={<>
         {!workflow.confirmed_at && (
-          <Action kind="ghost" disabled={confirming}
+          <Action kind="ghost" disabled={confirming} why="The form is open below"
             onClick={() => setConfirming(true)}>Confirm the procedure</Action>
         )}
         {workflow.confirmed_at && !published && (
