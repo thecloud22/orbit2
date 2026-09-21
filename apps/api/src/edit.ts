@@ -207,3 +207,72 @@ export async function insertStep(db: PoolClient, workflowId: string, kind: Step[
     return { ok: true, id };
   } catch (error) { await db.query('ROLLBACK'); throw error; }
 }
+
+/**
+ * Throwing a draft away.
+ *
+ * Allowed only while nothing has been published. A version and the runs
+ * against it are the record — append-only, `UPDATE` and `DELETE` revoked, a
+ * trigger refusing them besides — and an agent whose record could be removed
+ * is an agent whose record proves nothing. Before there is a version there is
+ * nothing of that kind to protect: no run happened, nothing was acted on, and
+ * a draft somebody abandoned is theirs to discard.
+ *
+ * One thing survives, and it is worth knowing rather than discovering. Where a
+ * model authored the draft, `model_call` holds what it was asked and what it
+ * answered, with the cost — and those rows are append-only too, so the
+ * workflow row they point at cannot go either. Everything that made up the
+ * draft is deleted; the shell and the spend record stay, and the agent is
+ * archived so nothing lists or runs it.
+ */
+export async function discardDraft(db: PoolClient, workflowId: string):
+  Promise<{ ok: true; removed: 'everything' | 'all but how it was authored' } | { ok: false; because: string }> {
+  const { rows: [w] } = await db.query<{ name: string; versions: number }>(
+    `SELECT w.name, (SELECT count(*)::int FROM workflow_version v WHERE v.workflow_id = w.id) AS versions
+       FROM workflow w WHERE w.id = $1`, [workflowId]);
+  if (!w) return { ok: false, because: 'There is no such agent.' };
+  if (w.versions > 0) {
+    return { ok: false, because: 'This has been published, so it is not a draft any more. '
+      + 'A published version and the runs against it are the record and cannot be removed.' };
+  }
+
+  const { rows: [calls] } = await db.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM model_call WHERE workflow_id = $1`, [workflowId]);
+
+  await db.query('BEGIN');
+  try {
+    // The audit entry is written first, because after this there may be no row
+    // left to write it against.
+    await db.query(
+      `INSERT INTO audit_entry (act, object_kind, object_id, changed, reason)
+       VALUES ('draft discarded', 'workflow', $1, '{}', $2)`,
+      [workflowId, `"${w.name}" was discarded before anything was published`]);
+
+    if (calls!.n === 0) {
+      // Steps and notes cascade. Nothing referred to this that outlives it.
+      await db.query(`DELETE FROM workflow WHERE id = $1`, [workflowId]);
+      await db.query('COMMIT');
+      return { ok: true, removed: 'everything' };
+    }
+
+    await db.query(`DELETE FROM workflow_step WHERE workflow_id = $1`, [workflowId]);
+    await db.query(`DELETE FROM workflow_note WHERE workflow_id = $1`, [workflowId]);
+    await db.query(
+      `UPDATE workflow SET archived_at = now(), procedure = NULL, outcomes = '[]'::jsonb,
+              declared_inputs = '[]'::jsonb, examples = '{}'::jsonb, confirmed_at = NULL, updated_at = now()
+        WHERE id = $1`, [workflowId]);
+    await db.query('COMMIT');
+    return { ok: true, removed: 'all but how it was authored' };
+  } catch (error) { await db.query('ROLLBACK'); throw error; }
+}
+
+/** Undoing a confirmation, so the steps can be worked on again. */
+export async function backToDraft(db: PoolClient, workflowId: string): Promise<{ ok: true } | { ok: false; because: string }> {
+  const { rows: [w] } = await db.query<{ versions: number }>(
+    `SELECT (SELECT count(*)::int FROM workflow_version v WHERE v.workflow_id = w.id) AS versions
+       FROM workflow w WHERE w.id = $1`, [workflowId]);
+  if (!w) return { ok: false, because: 'There is no such agent.' };
+
+  await returnToDraft(db, workflowId, 'It was taken back to draft');
+  return { ok: true };
+}

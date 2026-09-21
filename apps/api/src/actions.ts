@@ -15,7 +15,7 @@ import { configureStep } from './configure.ts';
 import { mintVersion } from './mint.ts';
 import { bringIn, finishRecording, startRecording } from './authoring.ts';
 import { cancelRun, retryRun, rerun } from './control.ts';
-import { deleteStep, editStep, insertStep, moveStep } from './edit.ts';
+import { backToDraft, discardDraft, deleteStep, editStep, insertStep, moveStep } from './edit.ts';
 import { editApplication, registerApplication } from './applications.ts';
 import { describeBlocker } from '@orbit/contract';
 
@@ -67,6 +67,16 @@ export const actions = {
     const why = (body as { why?: string }).why ?? 'No reason given.';
     await inTransaction((db) => pause(db, workflowId, why));
     return { status: 200, body: { paused: true, why } };
+  },
+
+  async discard(workflowId: string) {
+    const result = await inTransaction((db) => discardDraft(db, workflowId));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async backToDraft(workflowId: string) {
+    const result = await inTransaction((db) => backToDraft(db, workflowId));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
   },
 
   async archive(workflowId: string, body: unknown) {

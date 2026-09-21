@@ -16,7 +16,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { Client } from 'pg';
 import { migrate } from './migrate.ts';
 import { configureStep } from './configure.ts';
-import { insertStep } from './edit.ts';
+import { backToDraft, discardDraft, insertStep } from './edit.ts';
 import { confirm } from './confirm.ts';
 import { mintVersion } from './mint.ts';
 import { asDraftStep } from './publish.ts';
@@ -212,4 +212,83 @@ test('a configured check publishes and the version carries it', async () => {
     `SELECT body FROM workflow_version WHERE workflow_id = $1 ORDER BY version DESC LIMIT 1`, [workflowId]);
   const check = v!.body.steps.find((x) => x.kind === 'check');
   assert.equal(check?.otherwise, 'The credit score is below the program floor');
+});
+
+// ── going back, and throwing away ────────────────────────────────────────
+
+test('a draft nobody published can be discarded', async () => {
+  const { rows: [w] } = await db.query<{ id: string }>(
+    `INSERT INTO workflow (name) VALUES ($1) RETURNING id`, [`Discard ${crypto.randomUUID().slice(0, 6)}`]);
+  await db.query(
+    `INSERT INTO workflow_step (workflow_id, position, kind, declares) VALUES ($1, 1, 'end', $2)`,
+    [w!.id, JSON.stringify({ summary: 'done', outcome: 'done', publishes: [] })]);
+  await db.query(`INSERT INTO workflow_note (workflow_id, kind, body) VALUES ($1, 'question', 'why?')`, [w!.id]);
+
+  const result = await discardDraft(db as never, w!.id);
+  assert.equal(result.ok, true);
+  assert.equal(result.ok === true ? result.removed : '', 'everything');
+
+  const { rows } = await db.query(`SELECT id FROM workflow WHERE id = $1`, [w!.id]);
+  assert.equal(rows.length, 0, 'and the steps and notes went with it');
+});
+
+test('a draft a model authored keeps how it was authored, and says so', async () => {
+  // `model_call` is append-only, so the rows can never go and the foreign key
+  // holds the workflow row. Everything that made up the draft is removed and
+  // the agent is archived; the spend record stays.
+  const { rows: [w] } = await db.query<{ id: string }>(
+    `INSERT INTO workflow (name, procedure) VALUES ($1, 'something written') RETURNING id`,
+    [`Authored ${crypto.randomUUID().slice(0, 6)}`]);
+  await db.query(
+    `INSERT INTO workflow_step (workflow_id, position, kind, declares) VALUES ($1, 1, 'end', $2)`,
+    [w!.id, JSON.stringify({ summary: 'done', outcome: 'done', publishes: [] })]);
+  await db.query(
+    `INSERT INTO model_call (workflow_id, turn, provider, model, shown, answered, verdict, why,
+                             tokens_in, tokens_out, cost_micros)
+     VALUES ($1, 1, 'openai', 'gpt-4.1-mini', '{}', '{}', 'kept', 'step 1', 10, 10, 5)`, [w!.id]);
+
+  const result = await discardDraft(db as never, w!.id);
+  assert.equal(result.ok, true);
+  assert.equal(result.ok === true ? result.removed : '', 'all but how it was authored');
+
+  const { rows: [left] } = await db.query<{ archived_at: string | null; procedure: string | null; steps: number }>(
+    `SELECT w.archived_at, w.procedure,
+            (SELECT count(*)::int FROM workflow_step s WHERE s.workflow_id = w.id) AS steps
+       FROM workflow w WHERE w.id = $1`, [w!.id]);
+  assert.ok(left!.archived_at, 'archived, so nothing lists or runs it');
+  assert.equal(left!.procedure, null);
+  assert.equal(left!.steps, 0);
+
+  const { rows: [kept] } = await db.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM model_call WHERE workflow_id = $1`, [w!.id]);
+  assert.equal(kept!.n, 1, 'and what was spent is still on the record');
+});
+
+test('a published agent is not a draft, and is not discarded', async () => {
+  await db.query(
+    `INSERT INTO workflow_version (workflow_id, version, body, digest, outcomes, declared_inputs, applications)
+     VALUES ($1, 1, '{"steps":[]}', $2, '[]', '[]', '[]')`,
+    [workflowId, 'sha256:' + crypto.randomUUID().replaceAll('-', '')]);
+
+  const result = await discardDraft(db as never, workflowId);
+  assert.equal(result.ok, false);
+  assert.match(result.because, /published/);
+
+  const { rows } = await db.query(`SELECT id FROM workflow_step WHERE workflow_id = $1`, [workflowId]);
+  assert.ok(rows.length > 0, 'and nothing was removed');
+});
+
+test('going back undoes the confirmation', async () => {
+  await db.query(`UPDATE workflow SET confirmed_at = now() WHERE id = $1`, [workflowId]);
+  const result = await backToDraft(db as never, workflowId);
+  assert.equal(result.ok, true);
+
+  const { rows: [w] } = await db.query<{ confirmed_at: string | null }>(
+    `SELECT confirmed_at FROM workflow WHERE id = $1`, [workflowId]);
+  assert.equal(w!.confirmed_at, null);
+
+  const { rows: [entry] } = await db.query<{ reason: string }>(
+    `SELECT reason FROM audit_entry WHERE object_id = $1 AND act = 'returned to draft' ORDER BY id DESC LIMIT 1`,
+    [workflowId]);
+  assert.match(entry!.reason, /taken back to draft/);
 });

@@ -399,7 +399,19 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
    * under it would break the one thing Orbit claims — that you can say what
    * the agent did. Changing a live agent means publishing again.
    */
-  const editable = !live;
+  /**
+   * Read-only once somebody has confirmed it.
+   *
+   * This was `!live`, so between confirming and publishing the steps were
+   * still editable — a page carrying somebody's attestation, with the controls
+   * to change the thing they had attested to sitting on it. The edit did
+   * quietly return the workflow to draft, which is right and invisible: the
+   * screen still said Confirmed while you reordered it.
+   *
+   * Going back is now something you ask for, and the attestation lapses when
+   * you do, in one place, on purpose.
+   */
+  const editable = !live && !workflow.confirmed_at;
   /** Values an earlier step reads, which is all a comparison may compare. */
   const produced = steps.flatMap((s) => {
     const p = s.declares['produces'] as { name?: string; type?: string } | undefined;
@@ -424,13 +436,31 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
           <Action disabled={busy} onClick={() => void act(`/api/workflows/${id}/publish`)}>Publish a version</Action>
         )}
         {live && <Action onClick={() => go({ at: 'start', version: workflow.live_version_id! })}>Start a run</Action>}
-        {/* Retiring is the strongest thing this screen can do and the least
-            often wanted, so it is last and quiet. It asks why, because the
-            audit trail records the reason and not only the act. */}
-        <Action kind="ghost" disabled={busy} onClick={() => {
-          const why = window.prompt('Retire this agent? Say why — it goes on the audit trail.');
-          if (why?.trim()) void act(`/api/workflows/${id}/archive`, { why: why.trim() });
-        }}>Retire it</Action>
+
+        {/* Confirmed and not yet published: the two ways out. Back, which
+            undoes the attestation and lets the steps be worked on again, and
+            discard, which throws the draft away — possible precisely because
+            nothing has been published, so there is no version and no run to
+            protect. */}
+        {workflow.confirmed_at && !published && (
+          <Action kind="ghost" disabled={busy}
+            onClick={() => void act(`/api/workflows/${id}/back-to-draft`)}>Back to editing</Action>
+        )}
+        {!published && (
+          <Action kind="ghost" disabled={busy} onClick={() => {
+            if (!window.confirm('Discard this draft? Nothing has been published, so it goes for good.')) return;
+            // Not `act`: there is nothing left to refresh into. Refreshing a
+            // page whose subject has just been deleted shows "no agent with
+            // that reference" for something the person meant to delete.
+            void (async () => {
+              setBusy(true);
+              const result = await send2(`/api/workflows/${id}/discard`, {});
+              setBusy(false);
+              if (result.ok) go({ at: 'agents' });
+              else setRefused([result.why]);
+            })();
+          }}>Discard it</Action>
+        )}
       </>}
     >
       <Stages confirmed={Boolean(workflow.confirmed_at)} published={published}
