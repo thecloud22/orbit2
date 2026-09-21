@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+#
+# Start, stop and look at the four processes Orbit runs locally.
+#
+#   scripts/orbit start | stop | restart | status | logs [api|worker|web|portal]
+#
+# Written because doing it by hand went wrong twice in one afternoon, in two
+# ways worth encoding rather than remembering:
+#
+#   The worker is the only process that talks to the model. Restarting the API
+#   after changing a key looks like it worked and changes nothing.
+#
+#   Both are started with --env-file so they read .env themselves. Sourcing it
+#   into a shell bakes the values into whatever was launched from that shell,
+#   so the next restart silently keeps the old key.
+#
+# Duplicates are the other hazard: three API servers were running at once, and
+# the one answering was not the one that had been restarted. `stop` kills by
+# command pattern *and* by port, then waits for the ports to actually free.
+
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+ROOT="$PWD"
+LOGS="$ROOT/var/log"
+mkdir -p "$LOGS"
+
+# name | port | directory | command
+SERVICES=(
+  "api|4000|apps/api|node --experimental-strip-types --watch --env-file=$ROOT/.env src/server.ts"
+  "worker|0|apps/worker|node --experimental-strip-types --env-file=$ROOT/.env src/main.ts"
+  "web|5173|apps/web|npx vite --port 5173 --strictPort"
+  "portal|4101|demo/mortgage-portal|npx vite --port 4101 --strictPort"
+)
+
+field() { echo "$1" | cut -d'|' -f"$2"; }
+
+# A port that answers anything at all. Orbit's API returns 404 at / and that is
+# a running server, so this asks for a connection rather than a status.
+listening() { [ -n "$(lsof -ti tcp:"$1" -sTCP:LISTEN 2>/dev/null)" ]; }
+
+alive() { pgrep -f "$1" > /dev/null 2>&1; }
+
+# Matched on the script each process actually runs, not on the directory it was
+# started from. Each is launched after a `cd`, so the path never appears in the
+# command line — patterns like "apps/worker.*src/main.ts" match nothing, and a
+# stop that matches nothing looks exactly like a stop that worked. Two workers
+# were running before this was fixed.
+WORKER_PATTERN='strip-types.*src/main\.ts'
+API_PATTERN='strip-types.*src/server\.ts'
+
+stop_all() {
+  echo "stopping"
+  pkill -f "$API_PATTERN"     2>/dev/null
+  pkill -f "$WORKER_PATTERN"  2>/dev/null
+  pkill -f "vite --port 5173" 2>/dev/null
+  pkill -f "vite --port 4101" 2>/dev/null
+
+  # By port as well, because a stray started another way still holds it and a
+  # start that silently loses the race is worse than one that refuses.
+  for s in "${SERVICES[@]}"; do
+    port=$(field "$s" 2)
+    [ "$port" = "0" ] && continue
+    pids=$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null)
+    [ -n "$pids" ] && kill $pids 2>/dev/null
+  done
+
+  # The worker holds no port, so waiting on ports would declare success while
+  # it is still up. It is waited for by name.
+  for _ in $(seq 1 20); do
+    alive "$WORKER_PATTERN" || break
+    sleep 0.25
+  done
+  alive "$WORKER_PATTERN" && pkill -9 -f "$WORKER_PATTERN" 2>/dev/null
+
+  for _ in $(seq 1 20); do
+    busy=0
+    for s in "${SERVICES[@]}"; do
+      port=$(field "$s" 2)
+      [ "$port" = "0" ] && continue
+      listening "$port" && busy=1
+    done
+    [ "$busy" = "0" ] && break
+    sleep 0.25
+  done
+
+  for s in "${SERVICES[@]}"; do
+    port=$(field "$s" 2)
+    [ "$port" = "0" ] && continue
+    if listening "$port"; then
+      pids=$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null)
+      kill -9 $pids 2>/dev/null
+    fi
+  done
+  sleep 0.5
+}
+
+start_all() {
+  [ -f "$ROOT/.env" ] || echo "  no .env at the root — the worker will refuse to start"
+
+  for s in "${SERVICES[@]}"; do
+    name=$(field "$s" 1); port=$(field "$s" 2)
+    dir=$(field "$s" 3);  cmd=$(field "$s" 4)
+    ( cd "$ROOT/$dir" && nohup $cmd > "$LOGS/$name.log" 2>&1 & )
+  done
+
+  echo "starting"
+  for _ in $(seq 1 60); do
+    ready=1
+    for s in "${SERVICES[@]}"; do
+      port=$(field "$s" 2)
+      [ "$port" = "0" ] && continue
+      listening "$port" || ready=0
+    done
+    [ "$ready" = "1" ] && break
+    sleep 0.5
+  done
+  status
+}
+
+status() {
+  echo
+  for s in "${SERVICES[@]}"; do
+    name=$(field "$s" 1); port=$(field "$s" 2)
+    if [ "$port" = "0" ]; then
+      # The worker listens on nothing. It says its name on the first line of
+      # its log, which is the only evidence that it came up.
+      if alive "$WORKER_PATTERN"; then
+        printf "  %-7s running   %s\n" "$name" "$(head -1 "$LOGS/worker.log" 2>/dev/null)"
+      else
+        printf "  %-7s DOWN      see %s\n" "$name" "var/log/worker.log"
+      fi
+    elif listening "$port"; then
+      printf "  %-7s http://localhost:%s\n" "$name" "$port"
+    else
+      printf "  %-7s DOWN      see var/log/%s.log\n" "$name" "$name"
+    fi
+  done
+  echo
+}
+
+case "${1:-status}" in
+  start)   start_all ;;
+  stop)    stop_all; status ;;
+  restart) stop_all; start_all ;;
+  status)  status ;;
+  logs)    tail -f "$LOGS/${2:-api}.log" ;;
+  *)       echo "usage: scripts/orbit start|stop|restart|status|logs [api|worker|web|portal]"; exit 2 ;;
+esac
