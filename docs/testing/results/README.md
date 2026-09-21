@@ -75,3 +75,21 @@ finished. Five of the eight fixes are Orbit saying what it could not do.
 - **UW01 and its two runs predate this exercise** and could not be removed:
   `artefact` and `run_event` are append-only and the trigger refuses a delete,
   which is the guarantee working.
+
+## The screenshots
+
+Every run was screenshotted, and those pictures are no longer here. There were
+2,405 of them and they came to 320MB, which made cloning this repository cost
+five times what installing it does — and the point of a test record is the
+finding, not the pixels it was found in. What is written in these files is the
+evidence meant to last: the prompt, what was expected, what happened, and for
+each defect its cause and the commit that fixed it.
+
+They are recoverable. They were tracked up to `319fee0`, so any of them can be
+read back out of git history:
+
+    git show 319fee0^:docs/testing/results/run-01/TC-01-01-form.png > /tmp/x.png
+
+A future run will write into `docs/testing/results/run-NN/` as before. That
+path is now ignored, so the pictures stay local to whoever ran it.
+

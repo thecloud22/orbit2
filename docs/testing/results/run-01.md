@@ -35,7 +35,8 @@ neither` — and turn 13 named a conclusion regardless.
 **Status: FAIL.** Not a refusal — a draft that would publish and report
 "Pipeline loaded" for a run that never signed in. See `defects.md` Defect 1.
 
-Screenshots: `run-01/TC-01-01-form.png`, `-02-after.png`, `-03-draft.png`.
+Screenshots: `run-01/TC-01-01-form.png`, `-02-after.png`, `-03-draft.png` — no
+longer in the repository, see the note in `README.md`.
 
 ---
 
