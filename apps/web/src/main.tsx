@@ -24,7 +24,7 @@ function App() {
       {route.at === 'agent' && <Agent id={route.id} go={go} />}
       {route.at === 'bringIn' && <BringIn go={go} />}
       {route.at === 'runs' && <Runs go={go} />}
-      {route.at === 'run' && <RunPage reference={route.reference} />}
+      {route.at === 'run' && <RunPage reference={route.reference} go={go} />}
       {route.at === 'start' && <StartRun version={route.version} go={go} />}
       {route.at === 'admin' && <AdminScreen />}
       {route.at === 'audit' && <AuditScreen />}

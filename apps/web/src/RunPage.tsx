@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { isRetryable, type ArtefactView, type ErrorKind, type RunEventView, type RunView, type StepAttemptView } from '@orbit/contract';
 import { Dot, EmptyState, OutcomePair, Row, Verbatim, type Emptiness } from './ui.tsx';
+import { useLinkProps, type Route } from './router.ts';
 
 type Loaded = { kind: 'loaded'; data: RunView } | { kind: 'empty'; of: Emptiness };
 
@@ -142,7 +143,7 @@ function Controls({ run, again }: { run: RunView['run']; again: () => void }) {
   );
 }
 
-export function RunPage({ reference }: { reference: string }) {
+export function RunPage({ reference, go }: { reference: string; go: (to: Route) => void }) {
   const [state, setState] = useState<Loaded>({ kind: 'empty', of: { kind: 'notLoadedYet' } });
   const [refresh, setRefresh] = useState(0);
   useEffect(() => { setState({ kind: 'empty', of: { kind: 'notLoadedYet' } }); }, [reference]);
@@ -168,6 +169,11 @@ export function RunPage({ reference }: { reference: string }) {
     <div>
 
       <main style={{ maxWidth: 1280, margin: '0 auto', padding: '26px 36px 60px' }}>
+        <a {...useLinkProps({ at: 'runs' }, go)}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+            color: 'var(--ink-2)', textDecoration: 'none' }}>
+          <span aria-hidden="true">&larr;</span> Back to runs
+        </a>
         {state.kind === 'empty' ? (
           <div style={{ border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel)', marginTop: 24 }}>
             <EmptyState of={state.of} />
@@ -240,7 +246,19 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
         </div>
       </section>
 
-      <div style={{ display: 'flex', gap: 30, paddingTop: 20 }}>
+      <div style={{ paddingTop: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 11 }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>What it saw at this step</h2>
+          {attempts[selected] && (
+            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+              step {attempts[selected]!.step_position}, {attempts[selected]!.step_kind}, attempt {attempts[selected]!.attempt}
+            </span>
+          )}
+        </div>
+        <EvidencePanel artefacts={stepArtefacts.filter((a) => a.attempt_id === attempts[selected]?.id)} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 30, paddingTop: 26, marginTop: 26, borderTop: '1px solid var(--rule)' }}>
         <div style={{ width: 486, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 11 }}>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>What it did, in order</h2>
@@ -283,8 +301,7 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
         <div style={{ flexGrow: 1, borderLeft: '1px solid var(--rule)', paddingLeft: 30, minWidth: 0 }}>
           <StepDetail attempt={attempts[selected]}
             step={attempts[selected] ? stepAt(attempts[selected]!.step_position) : undefined}
-            events={events.filter((e) => e.attempt_id === attempts[selected]?.id)}
-            artefacts={stepArtefacts.filter((a) => a.attempt_id === attempts[selected]?.id)} />
+            events={events.filter((e) => e.attempt_id === attempts[selected]?.id)} />
           {withheld.map((a) => (
             <div key={a.id} style={{ marginTop: 18, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)',
               borderRadius: 5, padding: '13px 15px' }}>
@@ -309,11 +326,10 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
   );
 }
 
-function StepDetail({ attempt, step, events, artefacts }: {
+function StepDetail({ attempt, step, events }: {
   attempt: StepAttemptView | undefined;
   step: { kind: string; summary: string } | undefined;
   events: RunEventView[];
-  artefacts: ArtefactView[];
 }) {
   if (!attempt) return null;
   const branch = events.find((e) => e.kind === 'branch.evaluated')?.detail;
@@ -349,15 +365,31 @@ function StepDetail({ attempt, step, events, artefacts }: {
           </div>
         )}
       </div>
-      {artefacts.length > 0 && (
-        <div style={{ paddingTop: 18 }}>
-          <h3 style={{ margin: '0 0 11px', fontSize: 14, fontWeight: 700 }}>What it saw at this step</h3>
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-            {artefacts.map((a) => <Evidence key={a.id} artefact={a} />)}
-          </div>
-        </div>
-      )}
     </>
+  );
+}
+
+/**
+ * "What it saw" for the selected attempt, at a size where the resolved
+ * element is actually legible — not a decorative box on a thumbnail.
+ *
+ * A step that names no element on the page (`branch`, `check`, `end`) keeps
+ * no screenshot at all, which is a fact about the step, not a load failure —
+ * so it gets its own quiet note rather than an empty grid (product rule 11).
+ */
+function EvidencePanel({ artefacts }: { artefacts: ArtefactView[] }) {
+  if (artefacts.length === 0) {
+    return (
+      <div style={{ border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel)',
+        padding: '46px 20px', textAlign: 'center', color: 'var(--ink-2)', fontSize: 13.5 }}>
+        This step kept no screenshot. It has nothing on the page to resolve to.
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+      {artefacts.map((a) => <Evidence key={a.id} artefact={a} big />)}
+    </div>
   );
 }
 
@@ -381,7 +413,7 @@ function ran(startedAt: string | null, endedAt: string | null): string {
  * rather than shown (§12). A withheld artefact renders as withheld with its
  * reason — never as a broken image — because it is a record, not an absence.
  */
-function Evidence({ artefact }: { artefact: ArtefactView }) {
+function Evidence({ artefact, big }: { artefact: ArtefactView; big?: boolean }) {
   /**
    * Why it could not be shown, taken from the server rather than guessed.
    *
@@ -405,24 +437,26 @@ function Evidence({ artefact }: { artefact: ArtefactView }) {
       setFailed('This could not be loaded. That is this screen failing to reach the store, not a finding about the evidence.');
     }
   };
+  const width = big ? 620 : 232;
+  const cropHeight = big ? undefined : 150;
   if (artefact.withheld) {
     return (
-      <div style={{ width: 232, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)',
-        borderRadius: 5, padding: '12px 14px' }}>
-        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--attention-ink)', marginBottom: 5 }}>Withheld</div>
-        <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.45 }}>{artefact.withheld_why}</div>
+      <div style={{ width, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)',
+        borderRadius: 5, padding: big ? '16px 18px' : '12px 14px' }}>
+        <div style={{ fontSize: big ? 14 : 12.5, fontWeight: 700, color: 'var(--attention-ink)', marginBottom: 5 }}>Withheld</div>
+        <div style={{ fontSize: big ? 13 : 12, color: 'var(--ink-2)', lineHeight: 1.45 }}>{artefact.withheld_why}</div>
       </div>
     );
   }
   const short = (artefact.digest ?? '').replace('sha256:', '').slice(0, 10);
   return (
-    <figure style={{ margin: 0, width: 232, border: '1px solid var(--rule)', borderRadius: 5,
+    <figure style={{ margin: 0, width, border: '1px solid var(--rule)', borderRadius: big ? 6 : 5,
       background: 'var(--panel)', overflow: 'hidden' }}>
       <button type="button" onClick={() => artefact.shows && setOpen(true)}
         style={{ display: 'block', lineHeight: 0, width: '100%', padding: 0, border: 0,
           background: 'transparent', cursor: artefact.shows ? 'zoom-in' : 'default' }}>
         {failed ? (
-          <div style={{ height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          <div style={{ height: cropHeight ?? 320, display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: 'var(--failed-wash)', color: 'var(--failed-ink)', fontSize: 12, padding: 14,
             textAlign: 'center', lineHeight: 1.45 }}>
             {failed}
@@ -432,21 +466,24 @@ function Evidence({ artefact }: { artefact: ArtefactView }) {
             <img src={`/api/artefacts/${artefact.id}`} alt="The screen at this step"
               onError={() => void askWhy()}
               onLoad={(e) => setShot({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-              style={{ width: '100%', height: 150, objectFit: 'cover', objectPosition: 'top',
-                background: 'var(--panel-2)', display: 'block' }} />
+              style={cropHeight
+                ? { width: '100%', height: cropHeight, objectFit: 'cover', objectPosition: 'top',
+                    background: 'var(--panel-2)', display: 'block' }
+                : { width: '100%', height: 'auto', background: 'var(--panel-2)', display: 'block' }} />
             {/* Where the step's element actually was, drawn from the box
-                measured against these pixels. The tile crops, so a box below
-                the fold is not drawn rather than drawn in the wrong place —
-                the full picture opens in a new tab. */}
+                measured against these pixels. The small tile crops, so a box
+                below the fold there is not drawn rather than drawn in the
+                wrong place; the big tile shows the whole picture uncropped,
+                so the box is always visible on it. */}
             {artefact.shows && shot && (() => {
-              const scale = 232 / shot.w;
+              const scale = width / shot.w;
               const top = artefact.shows.at.y * scale;
-              if (top > 150) return null;
+              if (cropHeight && top > cropHeight) return null;
               return (
                 <span style={{ position: 'absolute', pointerEvents: 'none',
                   left: artefact.shows.at.x * scale, top,
                   width: artefact.shows.at.width * scale,
-                  height: Math.min(artefact.shows.at.height * scale, 150 - top),
+                  height: cropHeight ? Math.min(artefact.shows.at.height * scale, cropHeight - top) : artefact.shows.at.height * scale,
                   border: '2px solid var(--primary)', borderRadius: 2,
                   boxShadow: '0 0 0 1px rgba(255,255,255,0.9)' }} />
               );
@@ -457,12 +494,13 @@ function Evidence({ artefact }: { artefact: ArtefactView }) {
       {open && artefact.shows && (
         <Enlarged artefact={artefact} onClose={() => setOpen(false)} />
       )}
-      <figcaption style={{ padding: '9px 11px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+      <figcaption style={{ padding: big ? '13px 16px' : '9px 11px', display: 'flex', flexDirection: 'column',
+        gap: big ? 4 : 3, borderTop: big ? '1px solid var(--rule)' : undefined }}>
+        <span style={{ fontSize: big ? 15 : 12.5, fontWeight: 700 }}>
           {artefact.shows ? `Found “${artefact.shows.label}”` : 'Screenshot'}
         </span>
         {artefact.shows && (
-          <span style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>
+          <span style={{ fontSize: big ? 12.5 : 11.5, color: 'var(--ink-2)' }}>
             boxed where the step resolved it, by {artefact.shows.by}
           </span>
         )}
