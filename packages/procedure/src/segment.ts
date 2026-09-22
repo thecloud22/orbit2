@@ -160,10 +160,16 @@ function blocks(all: Line[]): Block[] {
       found.push({ ...span, kind: 'heading' });
       return;
     }
+    // Text taken out of a PDF has no blank lines between paragraphs, so a
+    // heading arrives straight after the sentence before it. A heading-like
+    // line counts as one when what came before it had finished.
+    const previous = all[index - 1]?.content ?? '';
+    const afterAFinishedLine = /[.?!:]["')\]’”»]*$/.test(previous);
     if (ITEM.test(text)) {
       close();
       open = { ...span, kind: 'item' };
-    } else if (!open && isHeading(text, all[index + 1]?.content ?? '')) {
+    } else if ((!open || afterAFinishedLine) && isHeading(text, all[index + 1]?.content ?? '')) {
+      close();
       found.push({ ...span, kind: 'heading' });
       return;
     } else if (open) {

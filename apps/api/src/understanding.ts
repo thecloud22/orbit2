@@ -15,13 +15,39 @@
 import { object, sentenceLabel, sentenceNumber, z, type SentenceLabel } from '@orbit/contract';
 import type { ClientBase, PoolClient } from 'pg';
 import { askedFor, type Queued } from './authoring.ts';
+import { readPdf } from '@orbit/procedure';
 import { insertPart, PART_LIMIT, readCoverage } from './procedure.ts';
 import { pool } from './db.ts';
 
-/** The same request as a walk, with room for a long procedure. */
+/** A PDF as it travels in a request. 20 MB of file, base64-encoded. */
+const PDF_LIMIT = Math.ceil((20 * 1024 * 1024 * 4) / 3);
+const pdfBase64 = z.string().max(PDF_LIMIT, 'A PDF can be at most 20 MB.').regex(/^[A-Za-z0-9+/=\s]+$/, 'That is not a file.');
+
+/**
+ * Where the text came from: pasted, or read from a PDF. Read here rather than
+ * by the screen, so the words that are split and numbered are the ones Orbit
+ * read, and the screen is never the thing that decided what the document said.
+ */
+async function textOf(asked: { procedure?: string | undefined; pdf?: string | undefined }):
+  Promise<{ ok: true; source: 'pasted' | 'pdf'; body: string; pages?: Array<{ page: number; start: number; end: number }> }
+    | { ok: false; because: string }> {
+  if (asked.pdf) {
+    const read = await readPdf(new Uint8Array(Buffer.from(asked.pdf, 'base64')));
+    if (!read.ok) return read;
+    if (read.text.length > PART_LIMIT) {
+      return { ok: false, because: `This PDF has more text than one part can hold (${PART_LIMIT.toLocaleString('en-US')} characters). Split it, and add the rest as the next part.` };
+    }
+    return { ok: true, source: 'pdf', body: read.text, pages: read.pages };
+  }
+  return { ok: true, source: 'pasted', body: asked.procedure ?? '' };
+}
+
+/** The same request as a walk, with room for a long procedure, or a PDF in its place. */
 export const understandingAskedFor = askedFor.extend({
   procedure: z.string().min(20, 'Say a little more — this is the whole description Orbit works from.')
-    .max(PART_LIMIT, `A procedure pasted in one go can be at most ${PART_LIMIT.toLocaleString('en-US')} characters.`),
+    .max(PART_LIMIT, `A procedure pasted in one go can be at most ${PART_LIMIT.toLocaleString('en-US')} characters.`)
+    .optional(),
+  pdf: pdfBase64.optional(),
   /** The author says this is not all of it, and will add the rest as parts (§13). */
   moreToCome: z.boolean().default(false),
 });
@@ -32,7 +58,13 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
     return { ok: false, because: asked.error.issues
       .map((i) => i.message || `${i.path.join('.')} is not right`).join(' ') };
   }
-  const { name, procedure, applicationId, startPath, inputs, moreToCome } = asked.data;
+  const { name, applicationId, startPath, inputs, moreToCome } = asked.data;
+  if (Boolean(asked.data.procedure) === Boolean(asked.data.pdf)) {
+    return { ok: false, because: 'Paste the procedure or upload it as a PDF — one of the two.' };
+  }
+  const read = await textOf(asked.data);
+  if (!read.ok) return read;
+  const procedure = read.body;
 
   const { rows: [app] } = await db.query<{ name: string; retired_at: string | null }>(
     `SELECT name, retired_at FROM application WHERE id = $1`, [applicationId]);
@@ -53,7 +85,7 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
       `INSERT INTO understanding (workflow_id, application_id, start_path, inputs, more_to_come)
        VALUES ($1, $2, $3, $4, $5)`,
       [workflowId, applicationId, startPath, JSON.stringify(inputs), moreToCome]);
-    const part = await insertPart(db, workflowId, { source: 'pasted', body: procedure });
+    const part = await insertPart(db, workflowId, { source: read.source, body: procedure }, read.pages);
     if (!part.ok) {
       await db.query('ROLLBACK');
       return { ok: false, because: part.because };
@@ -71,13 +103,13 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
 }
 
 export type SentenceView = {
-  number: string; part: string; n: number; text: string; kind: string; unterminated: boolean;
+  number: string; part: string; n: number; text: string; kind: string; unterminated: boolean; page: number | null;
   label: SentenceLabel | null; reason: string | null; basis: string | null; givenBy: string | null;
 };
 
 async function sentencesWithLabels(db: ClientBase, workflowId: string): Promise<SentenceView[]> {
   const { rows } = await db.query<SentenceView>(
-    `SELECT p.key || '.' || s.n AS number, p.key AS part, s.n, s.text, s.kind, s.unterminated,
+    `SELECT p.key || '.' || s.n AS number, p.key AS part, s.n, s.text, s.kind, s.unterminated, s.page,
             l.label, l.reason, l.basis, l.given_by AS "givenBy"
        FROM procedure_sentence s
        JOIN procedure_part p ON p.id = s.part_id
@@ -246,7 +278,8 @@ export async function confirmUnderstanding(db: PoolClient, workflowId: string): 
 }
 
 export const nextPartAskedFor = object({
-  body: z.string().max(PART_LIMIT, `A part can be at most ${PART_LIMIT.toLocaleString('en-US')} characters.`),
+  body: z.string().max(PART_LIMIT, `A part can be at most ${PART_LIMIT.toLocaleString('en-US')} characters.`).optional(),
+  pdf: pdfBase64.optional(),
   /** Whether still more is to come after this one. */
   moreToCome: z.boolean().default(false),
 });
@@ -261,6 +294,11 @@ export const nextPartAskedFor = object({
 export async function addNextPart(db: PoolClient, workflowId: string, body: unknown): Promise<Queued> {
   const asked = nextPartAskedFor.safeParse(body);
   if (!asked.success) return { ok: false, because: asked.error.issues.map((i) => i.message).join(' ') };
+  if (Boolean(asked.data.body?.trim()) === Boolean(asked.data.pdf)) {
+    return { ok: false, because: 'Paste the next part or upload it as a PDF — one of the two.' };
+  }
+  const read = await textOf({ procedure: asked.data.body, pdf: asked.data.pdf });
+  if (!read.ok) return read;
 
   await db.query('BEGIN');
   try {
@@ -275,7 +313,7 @@ export async function addNextPart(db: PoolClient, workflowId: string, body: unkn
     if (u.status === 'queued' || u.status === 'sorting') {
       return refuse('Orbit is still sorting the last part. Add the next one when it has finished.');
     }
-    const part = await insertPart(db, workflowId, { source: 'pasted', body: asked.data.body });
+    const part = await insertPart(db, workflowId, { source: read.source, body: read.body }, read.pages);
     if (!part.ok) return refuse(part.because);
     await db.query(
       `UPDATE understanding SET status = 'queued', refused = NULL, sorted_at = NULL, lease_expires_at = NULL,

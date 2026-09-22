@@ -10,7 +10,7 @@ import {
   checkLabelling, coverage, nextPartKey, numberOf, object, partSource, z,
   type Coverage, type LabellingChecked, type SentenceLabel,
 } from '@orbit/contract';
-import { segment } from '@orbit/procedure';
+import { pageAt, segment } from '@orbit/procedure';
 import type { ClientBase } from 'pg';
 
 /** A long procedure arrives whole as a PDF; this bounds one part, not a document. */
@@ -39,8 +39,14 @@ export async function addPart(db: ClientBase, workflowId: string, asked: unknown
   }
 }
 
-/** The same, inside a transaction the caller holds. */
-export async function insertPart(db: ClientBase, workflowId: string, asked: unknown): Promise<PartAdded> {
+/**
+ * The same, inside a transaction the caller holds. `pages` is where each page
+ * of a PDF sits in the body, so every sentence can say which page it is on.
+ */
+export async function insertPart(
+  db: ClientBase, workflowId: string, asked: unknown,
+  pages?: ReadonlyArray<{ page: number; start: number; end: number }>,
+): Promise<PartAdded> {
   const parsed = partAskedFor.safeParse(asked);
   if (!parsed.success) return { ok: false, because: parsed.error.issues.map((i) => i.message).join(' ') };
   const { source, body } = parsed.data;
@@ -62,10 +68,11 @@ export async function insertPart(db: ClientBase, workflowId: string, asked: unkn
     `INSERT INTO procedure_part (workflow_id, key, source, body) VALUES ($1, $2, $3, $4) RETURNING id`,
     [workflowId, key, source, body]);
   await db.query(
-    `INSERT INTO procedure_sentence (part_id, n, text, kind, start_at, end_at, unterminated)
-     SELECT $1, * FROM unnest($2::int[], $3::text[], $4::text[], $5::int[], $6::int[], $7::boolean[])`,
+    `INSERT INTO procedure_sentence (part_id, n, text, kind, start_at, end_at, unterminated, page)
+     SELECT $1, * FROM unnest($2::int[], $3::text[], $4::text[], $5::int[], $6::int[], $7::boolean[], $8::int[])`,
     [part!.id, sentences.map((s) => s.n), sentences.map((s) => s.text), sentences.map((s) => s.kind),
-     sentences.map((s) => s.start), sentences.map((s) => s.end), sentences.map((s) => s.unterminated)]);
+     sentences.map((s) => s.start), sentences.map((s) => s.end), sentences.map((s) => s.unterminated),
+     sentences.map((s) => (pages ? pageAt(pages, s.start) : null))]);
   await db.query(
     `INSERT INTO audit_entry (act, object_kind, object_id, changed)
      VALUES ('procedure part added', 'workflow', $1, $2)`,

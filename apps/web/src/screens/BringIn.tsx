@@ -58,6 +58,7 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const [inputs, setInputs] = useState<Array<{ name: string; value: string }>>([{ name: '', value: '' }]);
   const [refused, setRefused] = useState<string | null>(null);
   const [moreToCome, setMoreToCome] = useState(false);
+  const [pdf, setPdf] = useState<{ name: string; bytes: number; base64: string } | null>(null);
 
   /**
    * Only what can actually be chosen.
@@ -72,7 +73,7 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const inService = apps.state === 'loaded'
     ? apps.value.applications.filter((a) => !a.retired_at) : [];
 
-  const ready = Boolean(name.trim()) && procedure.trim().length >= 20 && Boolean(chosen);
+  const ready = Boolean(name.trim()) && (Boolean(pdf) || procedure.trim().length >= 20) && Boolean(chosen);
   const application = apps.state === 'loaded'
     ? apps.value.applications.find((a) => a.id === chosen) : undefined;
 
@@ -83,7 +84,8 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   async function ask() {
     setRefused(null);
     const result = await send<{ id: string }>('/api/understanding', {
-      name, procedure, applicationId: chosen, startPath, moreToCome,
+      name, applicationId: chosen, startPath, moreToCome,
+      ...(pdf ? { pdf: pdf.base64 } : { procedure }),
       inputs: Object.fromEntries(inputs.filter((i) => i.name.trim()).map((i) => [i.name.trim(), i.value])),
     });
     if (result.ok) go({ at: 'understanding', id: result.value.id });
@@ -178,12 +180,15 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
               <input style={{ ...field, maxWidth: 420 }} value={name} aria-label="Name for this agent"
                 placeholder="Underwriting decision" onChange={(e) => setName(e.target.value)} />
             </div>
-            <textarea value={procedure} onChange={(e) => setProcedure(e.target.value)} rows={6}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10 }}>
+              <PdfPicker chosen={pdf} onChosen={setPdf} />
+            </div>
+            {!pdf && <textarea value={procedure} onChange={(e) => setProcedure(e.target.value)} rows={6}
               aria-label="The procedure"
               placeholder="Describe it the way you would to somebody starting Monday."
               style={{ width: '100%', font: 'inherit', fontSize: 14.5, lineHeight: 1.75, color: 'var(--ink)',
                 background: 'var(--panel)', border: '1px solid var(--rule-2)', borderRadius: 5,
-                padding: '16px 18px', boxSizing: 'border-box', resize: 'vertical' }} />
+                padding: '16px 18px', boxSizing: 'border-box', resize: 'vertical' }} />}
             <p style={{ fontSize: 12.5, color: 'var(--ink-2)', margin: '9px 0 0', maxWidth: 700, lineHeight: 1.55 }}>
               Kept exactly as you write it. Every question Orbit raises is a question about these words,
               so a procedure tidied on the way in would make them harder to answer.
@@ -558,3 +563,47 @@ const Pick = ({ chosen, onPick, title, body }: {
     <div style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.55 }}>{body}</div>
   </button>
 );
+
+/**
+ * A PDF instead of pasted text. Read by Orbit, not by this screen: the file
+ * is sent as it is, and the words that get numbered are the ones the server
+ * read out of it, so the screen never decides what the document said.
+ */
+export function PdfPicker({ chosen, onChosen }: {
+  chosen: { name: string; bytes: number } | null;
+  onChosen: (pdf: { name: string; bytes: number; base64: string } | null) => void;
+}) {
+  const [why, setWhy] = useState<string | null>(null);
+  if (chosen) {
+    return (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 13.5 }}>
+        <span>Using <strong>{chosen.name}</strong> <span style={{ color: 'var(--ink-2)' }}>({Math.round(chosen.bytes / 1024)} KB)</span></span>
+        <button type="button" onClick={() => onChosen(null)} style={{ font: 'inherit', fontSize: 12.5,
+          color: 'var(--ink-2)', background: 'transparent', border: 0, cursor: 'pointer', textDecoration: 'underline' }}>
+          Paste it instead</button>
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 13 }}>
+      <label style={{ fontSize: 13, fontWeight: 600, cursor: 'pointer', border: '1px solid var(--rule-2)',
+        borderRadius: 3, padding: '7px 12px', background: 'var(--panel)' }}>
+        Upload a PDF instead
+        <input type="file" accept="application/pdf,.pdf" style={{ display: 'none' }}
+          onChange={async (e) => {
+            setWhy(null);
+            const file = e.target.files?.[0];
+            if (!file) return;
+            if (file.size > 20 * 1024 * 1024) { setWhy('A PDF can be at most 20 MB.'); return; }
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            let binary = '';
+            for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+            onChosen({ name: file.name, bytes: file.size, base64: btoa(binary) });
+          }} />
+      </label>
+      <span style={{ color: 'var(--ink-2)' }}>
+        {why ?? 'Its text is read as written. A scanned PDF has none, and is refused.'}
+      </span>
+    </span>
+  );
+}

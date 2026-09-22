@@ -10,6 +10,7 @@ import { after, before, beforeEach, describe, test } from 'node:test';
 import { Client } from 'pg';
 import { migrate } from './migrate.ts';
 import { recordLabelling } from './procedure.ts';
+import { aPdf } from '../../../packages/procedure/src/pdf-fixture.ts';
 import { addNextPart, bringInToUnderstand, confirmUnderstanding, forTheWalk, relabel, setMoreToCome, understandingOf } from './understanding.ts';
 
 const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.env['USER']}@localhost/orbit2_test`;
@@ -157,7 +158,7 @@ describe('confirming the sort', () => {
 
 test('the walk is given task and rule sentences only', () => {
   const s = (number: string, label: string | null, text: string) =>
-    ({ number, part: '1', n: 1, text, kind: 'prose', label, reason: null, basis: null, givenBy: null }) as never;
+    ({ number, part: '1', n: 1, text, kind: 'prose', unterminated: false, page: null, label, reason: null, basis: null, givenBy: null }) as never;
   assert.equal(forTheWalk([s('1.1', 'background', 'Intro.'), s('1.2', 'task', 'Log in.'),
     s('1.3', 'forAPerson', 'Call them.'), s('1.4', 'rule', 'If none, say so.'), s('1.5', 'wontDo', 'Never delete.')]),
   'Log in.\nIf none, say so.');
@@ -209,5 +210,50 @@ describe('a procedure brought in parts', () => {
     assert.deepEqual(await setMoreToCome(db, id, { moreToCome: false }), { ok: true });
     assert.equal((await confirmUnderstanding(db as never, id)).ok, true);
     assert.equal((await addNextPart(db as never, id, { body: 'Another part.' })).ok, false, 'not after it was drafted from');
+  });
+});
+
+describe('a procedure brought in as a PDF', () => {
+  const pdf = (pages: Array<string[] | null>) => Buffer.from(aPdf(pages)).toString('base64');
+
+  test('is read in code, and every sentence says its page', async () => {
+    const result = await bringInToUnderstand(db as never, {
+      name: 'From a PDF', applicationId, startPath: '/', inputs: {},
+      pdf: pdf([['Claims Status Enquiry', '1. Log into Claims Central.'], ['2. Search for the claim.']]) });
+    assert.ok(result.ok, result.ok ? '' : result.because);
+    const u = await understandingOf(db, result.id);
+    assert.equal(u!.parts[0]!.source, 'pdf');
+    assert.deepEqual(u!.sentences.map((s) => [s.text, s.page]), [
+      ['Claims Status Enquiry', 1], ['1. Log into Claims Central.', 1], ['2. Search for the claim.', 2]]);
+  });
+
+  test('a scan is refused before anything is made', async () => {
+    const before_ = await db.query(`SELECT count(*)::int AS n FROM workflow`);
+    const result = await bringInToUnderstand(db as never, {
+      name: 'A scan', applicationId, startPath: '/', inputs: {}, pdf: pdf([null]) });
+    assert.match(result.ok ? '' : result.because, /no text in it/);
+    const after_ = await db.query(`SELECT count(*)::int AS n FROM workflow`);
+    assert.equal(after_.rows[0].n, before_.rows[0].n);
+  });
+
+  test('pasting and uploading at once is refused', async () => {
+    const result = await bringInToUnderstand(db as never, {
+      name: 'Both', procedure: PROCEDURE, applicationId, startPath: '/', inputs: {}, pdf: pdf([['Log in.']]) });
+    assert.match(result.ok ? '' : result.because, /one of the two/);
+  });
+
+  test('the next part can be a PDF', async () => {
+    const first = await bringInToUnderstand(db as never, {
+      name: 'Then a PDF', procedure: 'Log into Claims Central. Search for the claim.', applicationId,
+      startPath: '/', inputs: {}, moreToCome: true });
+    assert.ok(first.ok);
+    await recordLabelling(db, first.id, '1', [
+      { sentence: '1.1', label: 'task', reason: 't', basis: 'stated' },
+      { sentence: '1.2', label: 'task', reason: 't', basis: 'stated' }], 'model');
+    await db.query(`UPDATE understanding SET status = 'sorted' WHERE workflow_id = $1`, [first.id]);
+    assert.ok((await addNextPart(db as never, first.id, { pdf: pdf([['3. Record the status.']]) })).ok);
+    const u = await understandingOf(db, first.id);
+    assert.deepEqual(u!.sentences.at(-1), { ...u!.sentences.at(-1)!, number: '2.1', page: 1 });
+    assert.equal(u!.parts[1]!.source, 'pdf');
   });
 });

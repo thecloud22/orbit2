@@ -172,6 +172,15 @@ describe('the shape of a real SOP', () => {
     assert.equal(segment('Steps\n- Call the requester').at(-1)!.unterminated, false);
   });
 
+  test('a heading straight after a finished sentence, as text from a PDF arrives', () => {
+    const pdfText = 'It covers motor and home claims.\nBefore you start\nYou will need the claim number.\nProcedure\n1. Log in.';
+    const found = segment(pdfText);
+    assert.deepEqual(found.map((s) => [s.kind, s.text]), [
+      ['prose', 'It covers motor and home claims.'], ['heading', 'Before you start'],
+      ['prose', 'You will need the claim number.'], ['heading', 'Procedure'], ['item', '1. Log in.'],
+    ]);
+  });
+
   test('a part that ends properly, or on a step, is not unterminated', () => {
     assert.equal(segment('Log in. Search.').at(-1)!.unterminated, false);
     assert.equal(segment('Steps\n- Call the requester').at(-1)!.unterminated, false);

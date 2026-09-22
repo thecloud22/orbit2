@@ -3,7 +3,7 @@ import { Action, Page, Refusal, Section } from '../Page.tsx';
 import { send } from '../fetching.ts';
 import { EmptyState, type Emptiness } from '../ui.tsx';
 import type { Route } from '../router.ts';
-import { Working } from './BringIn.tsx';
+import { PdfPicker, Working } from './BringIn.tsx';
 
 /**
  * What Orbit understood, before anything is drafted (Orbit 2.1).
@@ -30,7 +30,7 @@ interface Understanding {
   name: string;
   application: string;
   sentences: Array<{
-    number: string; part: string; text: string; kind: string; unterminated: boolean;
+    number: string; part: string; text: string; kind: string; unterminated: boolean; page: number | null;
     label: Label | null; reason: string | null; basis: string | null; givenBy: string | null;
   }>;
   coverage: { total: number; placed: number; unplaced: string[]; byLabel: Record<Label, number> };
@@ -55,6 +55,7 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
   const [walking, setWalking] = useState<string | null>(null);
   const [nextPart, setNextPart] = useState('');
   const [stillMore, setStillMore] = useState(false);
+  const [nextPdf, setNextPdf] = useState<{ name: string; bytes: number; base64: string } | null>(null);
 
   const status = state.ok ? state.value.status : null;
   useEffect(() => {
@@ -101,9 +102,10 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
 
   const addPart = async () => {
     setBusy(true); setRefused(null);
-    const result = await send(`/api/workflows/${id}/parts`, { body: nextPart, moreToCome: stillMore });
+    const result = await send(`/api/workflows/${id}/parts`,
+      { ...(nextPdf ? { pdf: nextPdf.base64 } : { body: nextPart }), moreToCome: stillMore });
     setBusy(false);
-    if (result.ok) { setNextPart(''); setStillMore(false); setRefresh((n) => n + 1); }
+    if (result.ok) { setNextPart(''); setNextPdf(null); setStillMore(false); setRefresh((n) => n + 1); }
     else setRefused(result.why);
   };
   const saidMore = async (more: boolean) => {
@@ -184,7 +186,9 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start',
               borderBottom: '1px solid var(--rule)', padding: '12px 0' }}>
               <span style={{ width: 46, flexShrink: 0, fontFamily: 'var(--mono)', fontSize: 12,
-                color: 'var(--ink-2)', paddingTop: 2 }}>{s.number}</span>
+                color: 'var(--ink-2)', paddingTop: 2 }}>{s.number}
+                {s.page !== null && <span style={{ display: 'block', fontSize: 11, marginTop: 3 }}>p. {s.page}</span>}
+              </span>
               <span style={{ flexGrow: 1, minWidth: 0, fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap',
                 fontWeight: s.kind === 'heading' ? 700 : 400,
                 color: s.label === 'background' || s.label === 'wontDo' ? 'var(--ink-2)' : 'var(--ink)' }}>
@@ -236,16 +240,17 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
             display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 900 }}>
             <label htmlFor="next-part" style={{ fontSize: 13.5, fontWeight: 600 }}>
               Add the next part</label>
-            <textarea id="next-part" rows={5} value={nextPart} onChange={(e) => setNextPart(e.target.value)}
+            <PdfPicker chosen={nextPdf} onChosen={setNextPdf} />
+            {!nextPdf && <textarea id="next-part" rows={5} value={nextPart} onChange={(e) => setNextPart(e.target.value)}
               placeholder="Paste the next page or two, exactly as written"
               style={{ width: '100%', font: 'inherit', fontSize: 14, lineHeight: 1.7, padding: '12px 14px',
-                border: '1px solid var(--rule-2)', borderRadius: 4, background: 'var(--panel)', resize: 'vertical' }} />
+                border: '1px solid var(--rule-2)', borderRadius: 4, background: 'var(--panel)', resize: 'vertical' }} />}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
               <input type="checkbox" checked={stillMore} onChange={(e) => setStillMore(e.target.checked)} />
               There is still more after this part
             </label>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <Action disabled={busy || !sorted || !nextPart.trim()}
+              <Action disabled={busy || !sorted || (!nextPart.trim() && !nextPdf)}
                 why={!sorted ? 'Orbit is still sorting the last part' : 'Paste the next part first'}
                 onClick={() => void addPart()}>Sort this part</Action>
               <span style={{ flexGrow: 1 }} />

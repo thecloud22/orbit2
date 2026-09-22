@@ -5,13 +5,19 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/*.test.ts"
   },
   "dependencies": {
-    "@orbit/contract": "file:../contract"
+    "@orbit/contract": "file:../contract",
+    "pdfjs-dist": "^6.3.289"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
