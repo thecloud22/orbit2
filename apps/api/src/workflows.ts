@@ -19,7 +19,8 @@ export async function readWorkflow(id: string) {
 
   const { rows: stepRows } = await pool.query<{
     id: string; position: number; kind: string; declares: Record<string, unknown>; complete: boolean;
-  }>(`SELECT id, position, kind, declares, complete FROM workflow_step
+    from_sentence: string | null;
+  }>(`SELECT id, position, kind, declares, complete, from_sentence FROM workflow_step
       WHERE workflow_id = $1 ORDER BY position`, [id]);
 
   // What each step does not say yet, decided by the schema rather than by the

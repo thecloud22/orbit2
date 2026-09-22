@@ -189,6 +189,7 @@ test('a version drafted from a sort carries the sort, and its digest covers it',
       { number: '1.2', text: 'Phone them.', label: 'forAPerson', givenBy: 'author' },
     ],
     coverage: { total: 2, byLabel: { task: 1, forAPerson: 1 } },
+    steps: {},
     chat: [],
   });
 });

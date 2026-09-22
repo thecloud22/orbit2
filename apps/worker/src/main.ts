@@ -158,7 +158,17 @@ async function authorOne(sessionId: string) {
     // way round.
     let appending: Promise<unknown> = Promise.resolve();
 
+    // A walk after a sort is shown the sentences it was confirmed with,
+    // numbered, so each step it drafts can say which one it carries out.
+    const { rows: sentences } = s.into_workflow_id ? await db.query<{ number: string; text: string }>(
+      `SELECT p.key || '.' || x.n AS number, x.text
+         FROM procedure_sentence x JOIN procedure_part p ON p.id = x.part_id
+         JOIN LATERAL (SELECT label FROM sentence_label WHERE sentence_id = x.id ORDER BY seq DESC LIMIT 1) l ON true
+        WHERE p.workflow_id = $1 AND l.label IN ('task', 'rule')
+        ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
+
     const result = await authorAndStore(db, {
+      ...(sentences.length ? { sentences } : {}),
       name: s.name,
       procedure: s.procedure,
       applicationId: s.application_id,
@@ -298,6 +308,7 @@ async function recordOne(sessionId: string) {
     await appending;
 
     const result = await storeDraft(db, { name: s.name, procedure: null }, {
+      provenance: {},
       steps: recording.steps,
       questions: recording.questions,
       turns: [],          // nothing was asked of a model: the person showed it

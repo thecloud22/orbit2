@@ -163,6 +163,12 @@ const proposal = z.object({
     than: z.string(),
   })).nullable(),
   why: z.string(),
+  /**
+   * Which confirmed sentence this step carries out (Orbit 2.1), from an enum
+   * of the draft's own numbers. Null when the walk was not given numbered
+   * sentences, or the step carries out none — signing in, often.
+   */
+  sentence: z.string().nullable(),
 });
 type Proposal = z.infer<typeof proposal>;
 
@@ -234,9 +240,10 @@ const CONCLUDE = [
   'A second conclusion is not a failure. "There is no such file" is a correct result.',
 ].join('\n');
 
-const shape = {
+const shapeWith = (numbers: readonly string[]) => ({
   type: 'object',
   properties: {
+    sentence: numbers.length ? { type: ['string', 'null'], enum: [...numbers, null] } : { type: 'null' },
     act: { type: 'string', enum: ['enter', 'activate', 'read', 'done'] },
     element: { type: ['string', 'null'] },
     value: { type: ['string', 'null'] },
@@ -257,9 +264,9 @@ const shape = {
     },
     why: { type: 'string' },
   },
-  required: ['act', 'element', 'value', 'optional', 'changesARecord', 'onlyIf', 'why'],
+  required: ['act', 'element', 'value', 'optional', 'changesARecord', 'onlyIf', 'why', 'sentence'],
   additionalProperties: false,
-};
+});
 
 export interface Turn {
   turn: number;
@@ -296,6 +303,8 @@ export interface AuthoredDraft {
   /** Derived from the steps rather than proposed: an input is a value an
    *  `enter` step takes from outside, and nothing else can be one. */
   declaredInputs: Array<{ name: string; label: string; type: 'text'; required: true }>;
+  /** Which confirmed sentence each step carries out, by step id (Orbit 2.1). */
+  provenance: Record<string, string>;
 }
 
 const INSTRUCTION = [
@@ -355,11 +364,25 @@ export async function authorFromProcedure(opts: {
    *  rather than a blank page and a finished draft. */
   onTurn?: (turn: Turn) => void;
   maxTurns?: number;
+  /** The confirmed sentences the procedure was built from (Orbit 2.1). When
+   *  given, the procedure is shown numbered and each step says which one it
+   *  carries out. */
+  sentences?: ReadonlyArray<{ number: string; text: string }>;
 }): Promise<AuthoredDraft> {
   const { procedure, origin, startPath, inputs, model } = opts;
   // A ceiling, for the same reason `for each` has one: without it nobody can
   // say what an authoring session could have cost.
   const maxTurns = opts.maxTurns ?? 12;
+
+  const numbers = (opts.sentences ?? []).map((x) => x.number);
+  const provenance: Record<string, string> = {};
+  // Numbered when there are numbers to give; the plain text otherwise, as 2.0
+  // walks have always been shown.
+  const shownProcedure = opts.sentences?.length
+    ? [...opts.sentences.map((x) => `${x.number} ${x.text.replace(/\s+/g, ' ')}`), '',
+       'Each line above starts with its number. Set sentence to the number of the line the next step carries out,',
+       'or null if it carries out none of them.'].join('\n')
+    : procedure;
 
   const browser = await chromium.launch();
   const page: Page = await browser.newPage();
@@ -435,7 +458,7 @@ export async function authorFromProcedure(opts: {
         {
           purpose: 'propose the next step',
           instruction: INSTRUCTION,
-          shown: [`PROCEDURE:\n${procedure}`, '',
+          shown: [`PROCEDURE:\n${shownProcedure}`, '',
                   `DECLARED INPUTS: ${Object.keys(inputs).join(', ') || 'none'}`,
                   // The registry's answer to "who is this agent". Withholding
                   // it meant a procedure that says "sign in with any user ID"
@@ -449,7 +472,7 @@ export async function authorFromProcedure(opts: {
                   `SIGNS IN AS: ${opts.signsInAs || 'nothing registered — do not invent an account'}`,
                   '', `PAGE (${page.url()}):`, asText(seen), '', asking].join('\n'),
         },
-        proposal, shape,
+        proposal, shapeWith(numbers),
       );
 
       // Every verdict passes through here, so the correction fed to the next
@@ -630,6 +653,7 @@ export async function authorFromProcedure(opts: {
       }
 
       steps.push(made);
+      if (p.sentence && numbers.includes(p.sentence)) provenance[made.id] = p.sentence;
       if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)! })));
       noteTurn(record('kept', conditions.length > 0
         ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
@@ -857,7 +881,7 @@ export async function authorFromProcedure(opts: {
     steps.flatMap((s) => (s.kind === 'enter' && s.value.from === 'input' ? [s.value.value] : [])),
   )].map((name) => ({ name, label: name, type: 'text' as const, required: true as const }));
 
-  return { steps, turns, questions, declaredInputs };
+  return { steps, turns, questions, declaredInputs, provenance };
 }
 
 /**

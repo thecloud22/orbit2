@@ -51,6 +51,8 @@ export async function authorAndStore(db: PoolClient, opts: {
   /** Draft into this workflow rather than making one: it was made when the
    *  procedure was brought in to be understood (Orbit 2.1). */
   into?: string;
+  /** The confirmed sentences, numbered, for a walk after a sort. */
+  sentences?: ReadonlyArray<{ number: string; text: string }>;
   model: ModelProvider;
   /** Each turn as it lands, for whoever is watching the screen. */
   onTurn?: (turn: Turn) => void;
@@ -177,9 +179,9 @@ export async function storeDraft(
     for (const [i, step] of draft.steps.entries()) {
       const { id, kind, ...declares } = step;
       await db.query(
-        `INSERT INTO workflow_step (id, workflow_id, position, kind, declares, complete)
-         VALUES ($1, $2, $3, $4, $5, true)`,
-        [id, workflowId, i + 1, kind, JSON.stringify(declares)]);
+        `INSERT INTO workflow_step (id, workflow_id, position, kind, declares, complete, from_sentence)
+         VALUES ($1, $2, $3, $4, $5, true, $6)`,
+        [id, workflowId, i + 1, kind, JSON.stringify(declares), draft.provenance?.[id] ?? null]);
     }
     for (const [i, step] of draft.steps.entries()) {
       const next = draft.steps[i + 1];

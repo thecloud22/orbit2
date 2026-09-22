@@ -176,5 +176,10 @@ async function sortOf(db: PoolClient, workflowId: string) {
   // with nothing of what it said.
   const { rows: chat } = await db.query<{ saidBy: string; text: string | null; state: string }>(
     `SELECT said_by AS "saidBy", text, state FROM chat_message WHERE workflow_id = $1 ORDER BY seq`, [workflowId]);
-  return { sentences, coverage: { total: sentences.length, byLabel }, chat };
+  // Which sentence each step carries out, by step id: the sentence that
+  // became the step, inside what was approved (plan §4).
+  const { rows: carried } = await db.query<{ id: string; from_sentence: string }>(
+    `SELECT id, from_sentence FROM workflow_step WHERE workflow_id = $1 AND from_sentence IS NOT NULL`, [workflowId]);
+  const steps = Object.fromEntries(carried.map((c) => [c.id, c.from_sentence]));
+  return { sentences, coverage: { total: sentences.length, byLabel }, steps, chat };
 }

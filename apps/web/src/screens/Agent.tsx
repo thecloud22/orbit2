@@ -17,7 +17,9 @@ interface Draft {
                  complete: boolean;
                  /** What the step does not say yet, decided by the schema
                   *  rather than by the `complete` column somebody set. */
-                 missing: string[] }>;
+                 missing: string[];
+                 /** The confirmed sentence this step carries out (2.1). */
+                 from_sentence?: string | null }>;
   notes: Array<{ id: string; kind: string; body: string; answer: string | null; resolved_at: string | null }>;
   versions: Array<{ id: string; version: number; digest: string; published_at: string;
     /** What the version was drafted from, when it came through a sort (2.1). */
@@ -543,6 +545,10 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
                 </span>
               )}
               <span style={{ flexGrow: 1, fontSize: 13.5 }}>{summary(s.declares)}</span>
+              {s.from_sentence && (
+                <span title="The sentence of the procedure this step carries out"
+                  style={{ fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}>from {s.from_sentence}</span>
+              )}
               {strategy(s.declares) && <span style={{ fontSize: 11.5, color: 'var(--ink-2)',
                 fontFamily: 'var(--mono)' }}>by {strategy(s.declares)}</span>}
               {!s.complete && <Chip state="attention">not finished</Chip>}

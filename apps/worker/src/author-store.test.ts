@@ -165,3 +165,14 @@ test('a walk after a sort drafts into the draft that already exists', async () =
   assert.equal(after_!.steps, 1);
   assert.deepEqual(after_!.turns, [1, 2], 'the walk is numbered after the sort');
 });
+
+test('each step keeps the sentence it carries out', async () => {
+  const { rows: [w] } = await db.query<{ id: string }>(`INSERT INTO workflow (name) VALUES ('Provenance') RETURNING id`);
+  const status = aStep('the status');
+  const { opts, draft } = interpretation({ steps: [status], provenance: { [status.id]: '1.8' } });
+  const result = await storeDraft(db as never, { ...opts, into: w!.id }, draft);
+  assert.equal(result.stored, true);
+  const { rows } = await db.query<{ from_sentence: string | null }>(
+    `SELECT from_sentence FROM workflow_step WHERE workflow_id = $1`, [w!.id]);
+  assert.deepEqual(rows, [{ from_sentence: '1.8' }]);
+});
