@@ -167,8 +167,17 @@ async function authorOne(sessionId: string) {
         WHERE p.workflow_id = $1 AND (l.label IN ('task', 'rule') OR l.waits)
         ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
 
+    // Which task finds a record the rules say may not exist.
+    const { rows: [tables] } = s.into_workflow_id ? await db.query<{ tables: Array<{
+      columns: Array<{ name: string; readBy: string | null }>; rows: Array<{ when: Array<{ column: string; is: string }> }> }> | null }>(
+      `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [s.into_workflow_id]) : { rows: [] };
+    const mayBeAbsentAfter = [...new Set((tables?.tables ?? []).flatMap((t) => t.rows.flatMap((r) => r.when
+      .filter((w) => w.is === 'isAbsent')
+      .flatMap((w) => t.columns.find((c) => c.name === w.column)?.readBy ?? []))))];
+
     const result = await authorAndStore(db, {
       ...(sentences.length ? { sentences } : {}),
+      ...(mayBeAbsentAfter.length ? { mayBeAbsentAfter } : {}),
       name: s.name,
       procedure: s.procedure,
       applicationId: s.application_id,

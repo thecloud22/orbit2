@@ -372,6 +372,10 @@ export async function authorFromProcedure(opts: {
    *  given, the procedure is shown numbered and each step says which one it
    *  carries out. */
   sentences?: ReadonlyArray<{ number: string; text: string; waits?: boolean }>;
+  /** Task sentences after which, the confirmed rule tables say, the record
+   *  may not be there ("if there is no such file, say so"). The first value
+   *  read after each is taken as possibly absent (Orbit 2.1). */
+  mayBeAbsentAfter?: readonly string[];
 }): Promise<AuthoredDraft> {
   const { procedure, origin, startPath, inputs, model } = opts;
   // A ceiling, for the same reason `for each` has one: without it nobody can
@@ -430,7 +434,13 @@ export async function authorFromProcedure(opts: {
       // Only an act that is *supposed* to move the page counts towards being
       // stuck. Typing into a field changes nothing visible, and holding that
       // against the session would end it halfway through a form.
-      const fingerprint = `${page.url()}|${seen.map((s) => s.name).join('|')}`;
+      // What the page visibly says, not only what its controls are called. An
+      // act that changes the page without renaming anything — attaching a
+      // condition adds a line to a panel — was counted as a page that had not
+      // changed, and two in a row ended the walk as "stuck" before the file
+      // was ever approved.
+      const visible = String(await page.evaluate('document.body ? document.body.innerText : ""').catch(() => ''));
+      const fingerprint = `${page.url()}|${seen.map((s) => s.name).join('|')}|${visible}`;
       if (lastActMoved) {
         unchanged = fingerprint === lastFingerprint ? unchanged + 1 : 0;
       }
@@ -748,6 +758,24 @@ export async function authorFromProcedure(opts: {
   // asks what it is called, rather than inventing a name for a business
   // conclusion — which is exactly the kind of plausible interpretation the
   // product refuses to publish.
+  // What the confirmed rules say may be missing, applied here rather than
+  // left to the model. A walk shows the model a record that is there — the
+  // example — and it judges every value on it present; gpt-6-luna did so even
+  // for "if there is no such file, say so", and the procedure lost the ending
+  // it states. The rule table already says which task finds the record that
+  // may not exist, so the first value read after that task is the one whose
+  // absence means it did not.
+  for (const after of opts.mayBeAbsentAfter ?? []) {
+    const from = steps.map((x) => provenance[x.id] === after).lastIndexOf(true);
+    const read = from >= 0 ? steps.slice(from + 1).find((x) => x.kind === 'read') : undefined;
+    if (read && read.kind === 'read' && read.produces.required) {
+      read.produces = { ...read.produces, required: false };
+      questions.push(asAssumption(
+        `"${read.produces.label}" may not be there: the procedure says what to do when the record ${after} finds does not exist.`,
+        `Taken from the rules as confirmed: ${read.produces.label} missing means the record was not found.`));
+    }
+  }
+
   if (!steps.some((s) => s.kind === 'end')) {
     const produced = steps.flatMap((s) => (s.kind === 'read' ? [s.produces] : []));
     const published = produced.map((v) => v.name);
@@ -816,7 +844,62 @@ export async function authorFromProcedure(opts: {
       : absent && absent === found ? 'it gave both conclusions the same name, which names neither'
       : null;
 
-    if (allConditions.length > 0) {
+    // Two shapes of condition, told apart by what comes after the guarded
+    // steps. "Approve only if the score is over 700" guards the last thing
+    // the procedure does: failing it is a different way to finish, so it
+    // leaves for its own ending (below). "If the loan-to-value is over 80%,
+    // attach PMI … then approve the file" guards one step in the middle of
+    // work that goes on either way: failing it skips that step and nothing
+    // else. Treating the second like the first sent every file under 80% to
+    // the "other" ending — on scenario 1, "No such loan file" for a file that
+    // was there — without approving anything.
+    const lastGuarded = steps.map((x) => guards.has(x.id)).lastIndexOf(true);
+    const perStep = allConditions.length > 0 && steps.slice(lastGuarded + 1).some((x) => !guards.has(x.id));
+    if (perStep) {
+      const conditionsOf = (x: Step) => (guards.get(x.id) ?? []).filter((c) => comparisonFor(c, c.of) !== null);
+      const keyOf = (x: Step) => conditionsOf(x).map((c) => `${c.value}|${c.is}|${c.than}`).join('&');
+      for (const c of allConditions) {
+        if (comparisonFor(c, c.of) !== null) continue;
+        questions.push(asQuestion(
+          `The procedure conditions a step on ${c.of.label} ${readable(c.is)} "${c.than}", and ${c.of.label} is`
+          + ` recorded as ${c.of.type}. Orbit could not make that a comparison it can carry out, so that step`
+          + ' is not conditioned below. Say it another way, or say what should be compared.'));
+      }
+      // Consecutive steps under the same conditions are skipped together.
+      const blocks: Array<{ steps: Step[]; key: string }> = [];
+      for (const x of steps) {
+        const key = keyOf(x);
+        const last = blocks.at(-1);
+        if (last && key && last.key === key) last.steps.push(x);
+        else blocks.push({ steps: [x], key });
+      }
+      const branchIds = blocks.map((b) => (b.key ? conditionsOf(b.steps[0]!).map(() => crypto.randomUUID()) : []));
+      const entryOf = (i: number) => branchIds[i]?.[0] ?? blocks[i]?.steps[0]?.id;
+      const rebuilt: Step[] = [];
+      let guardedSteps = 0;
+      blocks.forEach((block, i) => {
+        const cs = block.key ? conditionsOf(block.steps[0]!) : [];
+        const after = entryOf(i + 1);
+        cs.forEach((c, j) => rebuilt.push({
+          id: branchIds[i]![j]!, kind: 'branch',
+          summary: `Is ${c.of.label} ${readable(c.is)} ${c.than}?`,
+          when: comparisonFor(c, c.of)!,
+          ifTrue: j + 1 < cs.length ? branchIds[i]![j + 1]! : block.steps[0]!.id,
+          // Nothing comes after the block only if it is the last, and a block
+          // with work after it is what makes these per-step at all.
+          ifFalse: after!,
+        }));
+        if (cs.length) guardedSteps += block.steps.length;
+        rebuilt.push(...block.steps);
+      });
+      steps.length = 0;
+      steps.push(...rebuilt);
+      questions.push(asAssumption(
+        `${guardedSteps} step${guardedSteps === 1 ? ' is' : 's are'} done only when ${guardedSteps === 1 ? 'its condition holds' : 'their conditions hold'}; when one does not, that step is skipped and the rest carries on.`,
+        'Taken as correct: the procedure goes on either way, so a condition that does not hold skips its step and nothing more.'));
+    }
+
+    if (allConditions.length > 0 && !perStep) {
       // The procedure conditions an act, so the workflow has two ways to
       // finish: the conditions held, or one of them did not. Orbit puts a
       // branch in front of the guarded steps for each condition; the model
@@ -915,15 +998,23 @@ export async function authorFromProcedure(opts: {
         summary: said.whenFound.label, outcome: found, publishes: published };
       const absentEnd: Step = { id: crypto.randomUUID(), kind: 'end',
         summary: said.whenAbsent.label, outcome: absent,
-        // Nothing is published on this path: the value it is defined by is the
-        // one that was not there.
-        publishes: published.filter((v) => v !== separator.name) };
+        // Only what was read before the value that was not there: the rest was
+        // never reached on this path, and publication refuses an ending that
+        // claims a value its path never produced.
+        publishes: steps.slice(0, steps.findIndex((x) => x.kind === 'read' && x.produces.name === separator.name))
+          .flatMap((x) => (x.kind === 'read' ? [x.produces.name] : [])) };
+      // Straight after the read that may find nothing, so a record that is not
+      // there ends here — before any later step acts on, or compares, a value
+      // that never arrived. At the end, as it was, a missing file reached the
+      // conditions first and halted on a comparison it could not make.
+      const at = steps.findIndex((x) => x.kind === 'read' && x.produces.name === separator.name);
+      const rest = steps.splice(at + 1);
       steps.push({
         id: crypto.randomUUID(), kind: 'branch',
         summary: `Did ${separator.label} turn out to be there?`,
         when: { of: 'absence', operator: 'isNotAbsent', left: { from: 'step', value: separator.name } },
-        ifTrue: foundEnd.id, ifFalse: absentEnd.id,
-      }, foundEnd, absentEnd);
+        ifTrue: rest[0]?.id ?? foundEnd.id, ifFalse: absentEnd.id,
+      }, ...rest, foundEnd, absentEnd);
       noteTurn(record('kept', `two conclusions, separated by whether ${separator.name} was there: ${found} / ${absent}`));
     }
   }
