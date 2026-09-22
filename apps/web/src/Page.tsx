@@ -20,7 +20,8 @@ export function Page({ kicker, title, aside, actions, children }: {
           </h1>
         </div>
         {aside}
-        {actions && <div style={{ display: 'flex', gap: 9, paddingBottom: 3 }}>{actions}</div>}
+        {/* Never squeezed: a long title or aside wrapped the button text onto two lines. */}
+        {actions && <div style={{ display: 'flex', gap: 9, paddingBottom: 3, flexShrink: 0, whiteSpace: 'nowrap' }}>{actions}</div>}
       </header>
       <div style={{ height: 2, background: 'var(--ink)' }} />
       {children}

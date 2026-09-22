@@ -104,7 +104,7 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
   };
 
   return (
-    <Page kicker="Before anything is drafted" title={u.name}
+    <Page kicker={confirmed ? 'What Orbit understood' : 'Before anything is drafted'} title={u.name}
       aside={<p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: 'var(--ink-2)', maxWidth: 520 }}>
         {u.status === 'queued' ? 'Waiting for a worker to pick this up.'
           : u.status === 'sorting' ? 'Orbit is reading every sentence and saying what it will do with it.'
@@ -184,14 +184,14 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
         </div>
       </Section>
 
-      <Section title="What happens when you confirm">
+      {!confirmed && <Section title="What happens when you confirm">
         <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.65, color: 'var(--ink-2)', maxWidth: 760 }}>
           Orbit works through the sentences marked <strong>Orbit does this</strong> and <strong>A rule</strong> against {u.application},
           in this order and in these words, and drafts the steps. Sentences for a person, and what the procedure
           says not to do, are written onto the draft as decided, so it says what it leaves out.
           Background is kept here and goes nowhere else.
         </p>
-      </Section>
+      </Section>}
     </Page>
   );
 }
