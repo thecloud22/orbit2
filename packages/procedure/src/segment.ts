@@ -102,8 +102,21 @@ export function segment(source: string): Segmented[] {
   return out.map((s, i) => ({
     ...s,
     n: i + 1,
-    unterminated: i === out.length - 1 && (s.kind === 'prose' || s.kind === 'leadIn') && !TERMINATED.test(s.text),
+    unterminated: i === out.length - 1 && cutShort(s),
   }));
+}
+
+/**
+ * Whether the last sentence stops before it ends. Running text with no full
+ * stop does. A step or bullet usually has none, so one counts only when it
+ * stops on a word nothing ends on — "…and open the" is a page break, "Call the
+ * requester" is a step.
+ */
+function cutShort(s: Segmented): boolean {
+  if (s.kind === 'heading' || TERMINATED.test(s.text)) return false;
+  if (s.kind === 'prose' || s.kind === 'leadIn') return true;
+  const last = s.text.split(/\s+/).at(-1)!.toLowerCase().replace(/[^a-z]/g, '');
+  return CONNECTORS.has(last);
 }
 
 function unit(source: string, start: number, end: number, kind: SentenceKind): Segmented {

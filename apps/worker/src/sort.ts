@@ -108,7 +108,14 @@ const KIND: Record<string, string> = { prose: 'text', heading: 'heading', item: 
 
 export async function sortSentences(
   sentences: readonly Sentence[], model: ModelProvider, firstTurn = 1,
+  /** The end of what is already sorted, when a later part is being sorted (§13):
+   *  shown for context, with its labels, and not answered about. */
+  before: ReadonlyArray<Sentence & { label: string }> = [],
 ): Promise<Sorted> {
+  const context = before.length
+    ? ['ALREADY SORTED, for context only — do not answer about these:',
+       ...before.map((s) => `${s.number} (${s.label}) ${s.text.replace(/\s+/g, ' ')}`), '']
+    : [];
   const turns: SortTurn[] = [];
   const labels: LabelEntry[] = [];
 
@@ -124,7 +131,7 @@ export async function sortSentences(
       const asking = `Label sentences ${range}${attempt > 1 ? ', again' : ''}.`;
       const answered = await model.propose(
         { purpose: 'sort the procedure\'s sentences', instruction: SORT,
-          shown: [`SENTENCES (${range}):`, ...listed, '', correction, asking].filter(Boolean).join('\n') },
+          shown: [...context, `SENTENCES (${range}):`, ...listed, '', correction, asking].filter(Boolean).join('\n') },
         answer, shapeFor(numbers));
 
       const record = (verdict: SortTurn['verdict'], why: string) => turns.push(turnOf(

@@ -22,7 +22,17 @@ export async function sortAndStore(db: PoolClient, workflowId: string, model: Mo
 
   const { rows: [last] } = await db.query<{ turn: number }>(
     `SELECT coalesce(max(turn), 0)::int AS turn FROM model_call WHERE workflow_id = $1`, [workflowId]);
-  const result = await sortSentences(sentences, model, last!.turn + 1);
+  // A later part is sorted with the end of what came before it in view: its
+  // first sentence may carry on from the last one of the previous part.
+  const { rows: before } = await db.query<{ number: string; text: string; kind: string; label: string }>(
+    `SELECT * FROM (
+       SELECT p.key || '.' || s.n AS number, s.text, s.kind, l.label, p.added_at, p.key, s.n
+         FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
+         JOIN LATERAL (SELECT label FROM sentence_label WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
+        WHERE p.workflow_id = $1
+        ORDER BY p.added_at DESC, p.key DESC, s.n DESC LIMIT 6) t
+      ORDER BY added_at, key, n`, [workflowId]);
+  const result = await sortSentences(sentences, model, last!.turn + 1, before);
 
   await db.query('BEGIN');
   try {

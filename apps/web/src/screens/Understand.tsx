@@ -25,10 +25,12 @@ interface Understanding {
   confirmed_at: string | null;
   session_id: string | null;
   walk: string | null;
+  more_to_come: boolean;
+  parts: Array<{ key: string; source: string; added_at: string; sentences: number }>;
   name: string;
   application: string;
   sentences: Array<{
-    number: string; part: string; text: string; kind: string;
+    number: string; part: string; text: string; kind: string; unterminated: boolean;
     label: Label | null; reason: string | null; basis: string | null; givenBy: string | null;
   }>;
   coverage: { total: number; placed: number; unplaced: string[]; byLabel: Record<Label, number> };
@@ -51,6 +53,8 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [walking, setWalking] = useState<string | null>(null);
+  const [nextPart, setNextPart] = useState('');
+  const [stillMore, setStillMore] = useState(false);
 
   const status = state.ok ? state.value.status : null;
   useEffect(() => {
@@ -95,6 +99,21 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
     setRefresh((n) => n + 1);
   };
 
+  const addPart = async () => {
+    setBusy(true); setRefused(null);
+    const result = await send(`/api/workflows/${id}/parts`, { body: nextPart, moreToCome: stillMore });
+    setBusy(false);
+    if (result.ok) { setNextPart(''); setStillMore(false); setRefresh((n) => n + 1); }
+    else setRefused(result.why);
+  };
+  const saidMore = async (more: boolean) => {
+    setBusy(true); setRefused(null);
+    const result = await send(`/api/workflows/${id}/more-to-come`, { moreToCome: more });
+    setBusy(false);
+    if (!result.ok) setRefused(result.why);
+    setRefresh((n) => n + 1);
+  };
+
   const confirm = async () => {
     setBusy(true); setRefused(null);
     const result = await send<{ id: string }>(`/api/workflows/${id}/understood`, {});
@@ -114,8 +133,9 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
       </p>}
       actions={confirmed
         ? <Action kind="ghost" onClick={() => go({ at: 'agent', id })}>Open the draft</Action>
-        : <Action disabled={!sorted || !complete || forOrbit === 0 || busy}
+        : <Action disabled={!sorted || !complete || forOrbit === 0 || u.more_to_come || busy}
             why={!sorted ? 'Orbit is still sorting'
+              : u.more_to_come ? 'You said more is to come: add it, or say that is all'
               : !complete ? `${u.coverage.total - u.coverage.placed} sentences have no label yet`
               : forOrbit === 0 ? 'Nothing is marked for Orbit to do'
               : 'Working'}
@@ -149,8 +169,19 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
           </div>
         )}
         <div style={{ borderTop: '1px solid var(--ink)' }}>
-          {u.sentences.map((s) => (
-            <div key={s.number} style={{ display: 'flex', gap: 16, alignItems: 'flex-start',
+          {u.sentences.map((s, i) => (
+            <div key={s.number}>
+            {/* A heading for each part, once there is more than one. */}
+            {u.parts.length > 1 && (i === 0 || u.sentences[i - 1]!.part !== s.part) && (
+              <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', padding: '16px 0 8px',
+                borderBottom: '1px solid var(--rule)' }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700 }}>Part {s.part}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+                  {partNote(u.parts.find((p) => p.key === s.part))}
+                </span>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start',
               borderBottom: '1px solid var(--rule)', padding: '12px 0' }}>
               <span style={{ width: 46, flexShrink: 0, fontFamily: 'var(--mono)', fontSize: 12,
                 color: 'var(--ink-2)', paddingTop: 2 }}>{s.number}</span>
@@ -158,6 +189,18 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
                 fontWeight: s.kind === 'heading' ? 700 : 400,
                 color: s.label === 'background' || s.label === 'wontDo' ? 'var(--ink-2)' : 'var(--ink)' }}>
                 {s.text}
+                {/* Parts are kept exactly as pasted, so a sentence cut at a
+                    page break is shown as a pair, never joined. */}
+                {s.unterminated && (
+                  <span style={{ display: 'block', fontSize: 12.5, color: 'var(--attention-ink)', marginTop: 4 }}>
+                    Stops mid-sentence. The next part may carry on from here.
+                  </span>
+                )}
+                {i > 0 && u.sentences[i - 1]!.unterminated && u.sentences[i - 1]!.part !== s.part && (
+                  <span style={{ display: 'block', fontSize: 12.5, color: 'var(--attention-ink)', marginTop: 4 }}>
+                    May carry on from {u.sentences[i - 1]!.number}.
+                  </span>
+                )}
               </span>
               <span style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {s.label === null ? (
@@ -180,9 +223,45 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
                 )}
               </span>
             </div>
+            </div>
           ))}
         </div>
       </Section>
+
+      {/* The open end (§13): the author said this is not all of it. Orbit waits
+          for the rest rather than take a page break for the end. */}
+      {!confirmed && (u.more_to_come ? (
+        <Section title="More to come" note="nothing can be confirmed until the procedure is all here">
+          <div style={{ border: '2px dashed var(--rule-2)', borderRadius: 6, padding: '16px 18px',
+            display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 900 }}>
+            <label htmlFor="next-part" style={{ fontSize: 13.5, fontWeight: 600 }}>
+              Add the next part</label>
+            <textarea id="next-part" rows={5} value={nextPart} onChange={(e) => setNextPart(e.target.value)}
+              placeholder="Paste the next page or two, exactly as written"
+              style={{ width: '100%', font: 'inherit', fontSize: 14, lineHeight: 1.7, padding: '12px 14px',
+                border: '1px solid var(--rule-2)', borderRadius: 4, background: 'var(--panel)', resize: 'vertical' }} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+              <input type="checkbox" checked={stillMore} onChange={(e) => setStillMore(e.target.checked)} />
+              There is still more after this part
+            </label>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <Action disabled={busy || !sorted || !nextPart.trim()}
+                why={!sorted ? 'Orbit is still sorting the last part' : 'Paste the next part first'}
+                onClick={() => void addPart()}>Sort this part</Action>
+              <span style={{ flexGrow: 1 }} />
+              <Action kind="ghost" disabled={busy} onClick={() => void saidMore(false)}>That's all of it</Action>
+            </div>
+          </div>
+        </Section>
+      ) : sorted && (
+        <div style={{ paddingTop: 14 }}>
+          <button type="button" onClick={() => void saidMore(true)} disabled={busy}
+            style={{ font: 'inherit', fontSize: 13, color: 'var(--ink-2)', background: 'transparent', border: 0,
+              padding: 0, cursor: 'pointer', textDecoration: 'underline' }}>
+            There is more of this procedure to add
+          </button>
+        </div>
+      ))}
 
       {!confirmed && <Section title="What happens when you confirm">
         <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.65, color: 'var(--ink-2)', maxWidth: 760 }}>
@@ -224,4 +303,10 @@ function Coverage({ coverage }: { coverage: Understanding['coverage'] }) {
       </div>
     </div>
   );
+}
+
+function partNote(part: { source: string; added_at: string; sentences: number } | undefined): string {
+  if (!part) return '';
+  const from = part.source === 'author' ? 'written by you' : part.source === 'pdf' ? 'from a PDF' : 'pasted';
+  return `${from} · ${part.sentences} sentence${part.sentences === 1 ? '' : 's'} · ${new Date(part.added_at).toLocaleString()}`;
 }

@@ -167,6 +167,11 @@ describe('the shape of a real SOP', () => {
     assert.equal(found.filter((s) => s.unterminated).length, 1);
   });
 
+  test('a step cut at a page break is unterminated; a step without a full stop is not', () => {
+    assert.equal(segment('Steps\n2. Search the pipeline and open the').at(-1)!.unterminated, true);
+    assert.equal(segment('Steps\n- Call the requester').at(-1)!.unterminated, false);
+  });
+
   test('a part that ends properly, or on a step, is not unterminated', () => {
     assert.equal(segment('Log in. Search.').at(-1)!.unterminated, false);
     assert.equal(segment('Steps\n- Call the requester').at(-1)!.unterminated, false);

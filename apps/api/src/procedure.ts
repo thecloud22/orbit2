@@ -62,10 +62,10 @@ export async function insertPart(db: ClientBase, workflowId: string, asked: unkn
     `INSERT INTO procedure_part (workflow_id, key, source, body) VALUES ($1, $2, $3, $4) RETURNING id`,
     [workflowId, key, source, body]);
   await db.query(
-    `INSERT INTO procedure_sentence (part_id, n, text, kind, start_at, end_at)
-     SELECT $1, * FROM unnest($2::int[], $3::text[], $4::text[], $5::int[], $6::int[])`,
+    `INSERT INTO procedure_sentence (part_id, n, text, kind, start_at, end_at, unterminated)
+     SELECT $1, * FROM unnest($2::int[], $3::text[], $4::text[], $5::int[], $6::int[], $7::boolean[])`,
     [part!.id, sentences.map((s) => s.n), sentences.map((s) => s.text), sentences.map((s) => s.kind),
-     sentences.map((s) => s.start), sentences.map((s) => s.end)]);
+     sentences.map((s) => s.start), sentences.map((s) => s.end), sentences.map((s) => s.unterminated)]);
   await db.query(
     `INSERT INTO audit_entry (act, object_kind, object_id, changed)
      VALUES ('procedure part added', 'workflow', $1, $2)`,

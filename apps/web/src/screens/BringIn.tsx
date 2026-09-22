@@ -57,6 +57,7 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const [startPath, setStartPath] = useState('/');
   const [inputs, setInputs] = useState<Array<{ name: string; value: string }>>([{ name: '', value: '' }]);
   const [refused, setRefused] = useState<string | null>(null);
+  const [moreToCome, setMoreToCome] = useState(false);
 
   /**
    * Only what can actually be chosen.
@@ -82,7 +83,7 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   async function ask() {
     setRefused(null);
     const result = await send<{ id: string }>('/api/understanding', {
-      name, procedure, applicationId: chosen, startPath,
+      name, procedure, applicationId: chosen, startPath, moreToCome,
       inputs: Object.fromEntries(inputs.filter((i) => i.name.trim()).map((i) => [i.name.trim(), i.value])),
     });
     if (result.ok) go({ at: 'understanding', id: result.value.id });
@@ -187,6 +188,18 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
               Kept exactly as you write it. Every question Orbit raises is a question about these words,
               so a procedure tidied on the way in would make them harder to answer.
             </p>
+            {/* A long procedure comes in a page or two at a time. Asked here so
+                a page break is never taken for the end of the procedure. */}
+            <fieldset style={{ border: 0, margin: 0, padding: '14px 0 0', display: 'flex', alignItems: 'center', gap: 22 }}>
+              <legend style={{ float: 'left', padding: 0, marginRight: 22, fontSize: 13.5, fontWeight: 600 }}>
+                Is this the whole procedure?</legend>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13.5, minHeight: 44 }}>
+                <input type="radio" name="whole" checked={!moreToCome} onChange={() => setMoreToCome(false)} />
+                Yes, all of it</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13.5, minHeight: 44 }}>
+                <input type="radio" name="whole" checked={moreToCome} onChange={() => setMoreToCome(true)} />
+                More to come. I'll add the next part after this</label>
+            </fieldset>
           </Section>
 
           <Section title="An example to work through"

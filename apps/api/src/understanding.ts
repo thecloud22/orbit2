@@ -22,6 +22,8 @@ import { pool } from './db.ts';
 export const understandingAskedFor = askedFor.extend({
   procedure: z.string().min(20, 'Say a little more — this is the whole description Orbit works from.')
     .max(PART_LIMIT, `A procedure pasted in one go can be at most ${PART_LIMIT.toLocaleString('en-US')} characters.`),
+  /** The author says this is not all of it, and will add the rest as parts (§13). */
+  moreToCome: z.boolean().default(false),
 });
 
 export async function bringInToUnderstand(db: PoolClient, body: unknown): Promise<Queued> {
@@ -30,7 +32,7 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
     return { ok: false, because: asked.error.issues
       .map((i) => i.message || `${i.path.join('.')} is not right`).join(' ') };
   }
-  const { name, procedure, applicationId, startPath, inputs } = asked.data;
+  const { name, procedure, applicationId, startPath, inputs, moreToCome } = asked.data;
 
   const { rows: [app] } = await db.query<{ name: string; retired_at: string | null }>(
     `SELECT name, retired_at FROM application WHERE id = $1`, [applicationId]);
@@ -48,8 +50,9 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
       `INSERT INTO workflow (name, procedure) VALUES ($1, $2) RETURNING id`, [name, procedure]);
     const workflowId = workflow!.id;
     await db.query(
-      `INSERT INTO understanding (workflow_id, application_id, start_path, inputs) VALUES ($1, $2, $3, $4)`,
-      [workflowId, applicationId, startPath, JSON.stringify(inputs)]);
+      `INSERT INTO understanding (workflow_id, application_id, start_path, inputs, more_to_come)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [workflowId, applicationId, startPath, JSON.stringify(inputs), moreToCome]);
     const part = await insertPart(db, workflowId, { source: 'pasted', body: procedure });
     if (!part.ok) {
       await db.query('ROLLBACK');
@@ -68,13 +71,13 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
 }
 
 export type SentenceView = {
-  number: string; part: string; n: number; text: string; kind: string;
+  number: string; part: string; n: number; text: string; kind: string; unterminated: boolean;
   label: SentenceLabel | null; reason: string | null; basis: string | null; givenBy: string | null;
 };
 
 async function sentencesWithLabels(db: ClientBase, workflowId: string): Promise<SentenceView[]> {
   const { rows } = await db.query<SentenceView>(
-    `SELECT p.key || '.' || s.n AS number, p.key AS part, s.n, s.text, s.kind,
+    `SELECT p.key || '.' || s.n AS number, p.key AS part, s.n, s.text, s.kind, s.unterminated,
             l.label, l.reason, l.basis, l.given_by AS "givenBy"
        FROM procedure_sentence s
        JOIN procedure_part p ON p.id = s.part_id
@@ -96,9 +99,9 @@ export async function understandingOf(db: ClientBase, workflowId: string) {
   const { rows: [u] } = await db.query<{
     status: 'queued' | 'sorting' | 'sorted' | 'refused'; refused: { describe: string } | null;
     queued_at: string; sorted_at: string | null; confirmed_at: string | null; session_id: string | null;
-    name: string; application: string; walk: string | null;
+    name: string; application: string; walk: string | null; more_to_come: boolean;
   }>(
-    `SELECT u.status, u.refused, u.queued_at, u.sorted_at, u.confirmed_at, u.session_id,
+    `SELECT u.status, u.refused, u.queued_at, u.sorted_at, u.confirmed_at, u.session_id, u.more_to_come,
             w.name, a.name AS application, s.status AS walk
        FROM understanding u
        JOIN workflow w ON w.id = u.workflow_id
@@ -106,8 +109,13 @@ export async function understandingOf(db: ClientBase, workflowId: string) {
        LEFT JOIN authoring_session s ON s.id = u.session_id
       WHERE u.workflow_id = $1`, [workflowId]);
   if (!u) return null;
+  const { rows: parts } = await db.query<{ key: string; source: string; added_at: string; sentences: number }>(
+    `SELECT p.key, p.source, p.added_at, count(s.id)::int AS sentences
+       FROM procedure_part p LEFT JOIN procedure_sentence s ON s.part_id = p.id
+      WHERE p.workflow_id = $1 GROUP BY p.id ORDER BY p.added_at, p.key`, [workflowId]);
   return {
     ...u,
+    parts,
     sentences: await sentencesWithLabels(db, workflowId),
     coverage: await readCoverage(db, workflowId),
   };
@@ -174,8 +182,8 @@ export async function confirmUnderstanding(db: PoolClient, workflowId: string): 
   try {
     const { rows: [u] } = await db.query<{
       status: string; confirmed_at: string | null; application_id: string; start_path: string;
-      inputs: Record<string, string>; name: string;
-    }>(`SELECT u.status, u.confirmed_at, u.application_id, u.start_path, u.inputs, w.name
+      inputs: Record<string, string>; name: string; more_to_come: boolean;
+    }>(`SELECT u.status, u.confirmed_at, u.application_id, u.start_path, u.inputs, u.more_to_come, w.name
           FROM understanding u JOIN workflow w ON w.id = u.workflow_id
          WHERE u.workflow_id = $1 FOR UPDATE OF u`, [workflowId]);
     const refuse = async (because: string): Promise<Queued> => {
@@ -185,6 +193,10 @@ export async function confirmUnderstanding(db: PoolClient, workflowId: string): 
     if (!u) return refuse('This draft was not brought in to be understood.');
     if (u.confirmed_at) return refuse('This has already been confirmed.');
     if (u.status !== 'sorted') return refuse('Orbit has not finished sorting this yet.');
+    if (u.more_to_come) {
+      return refuse('You said more of the procedure is to come. Add the next part, or say that is all of it. '
+        + 'Orbit works through the whole procedure once, so it waits for all of it.');
+    }
 
     const sentences = await sentencesWithLabels(db, workflowId);
     const unplaced = sentences.filter((s) => !s.label).map((s) => s.number);
@@ -231,4 +243,63 @@ export async function confirmUnderstanding(db: PoolClient, workflowId: string): 
     await db.query('ROLLBACK');
     throw error;
   }
+}
+
+export const nextPartAskedFor = object({
+  body: z.string().max(PART_LIMIT, `A part can be at most ${PART_LIMIT.toLocaleString('en-US')} characters.`),
+  /** Whether still more is to come after this one. */
+  moreToCome: z.boolean().default(false),
+});
+
+/**
+ * The next part of a procedure brought in a page or two at a time (§13).
+ *
+ * Its sentences are numbered in its own part, so nothing already sorted or
+ * relabelled is renumbered, and the worker sorts only what has no label yet.
+ * Refused once the sort has been confirmed: the walk ran over what was there.
+ */
+export async function addNextPart(db: PoolClient, workflowId: string, body: unknown): Promise<Queued> {
+  const asked = nextPartAskedFor.safeParse(body);
+  if (!asked.success) return { ok: false, because: asked.error.issues.map((i) => i.message).join(' ') };
+
+  await db.query('BEGIN');
+  try {
+    const refuse = async (because: string): Promise<Queued> => { await db.query('ROLLBACK'); return { ok: false, because }; };
+    const { rows: [u] } = await db.query<{ status: string; confirmed_at: string | null }>(
+      `SELECT status, confirmed_at FROM understanding WHERE workflow_id = $1 FOR UPDATE`, [workflowId]);
+    if (!u) return refuse('This draft was not brought in to be understood.');
+    if (u.confirmed_at) {
+      return refuse('The sort has been confirmed and drafted from, so a part added now would not be in the draft. '
+        + 'Bring the whole procedure in again.');
+    }
+    if (u.status === 'queued' || u.status === 'sorting') {
+      return refuse('Orbit is still sorting the last part. Add the next one when it has finished.');
+    }
+    const part = await insertPart(db, workflowId, { source: 'pasted', body: asked.data.body });
+    if (!part.ok) return refuse(part.because);
+    await db.query(
+      `UPDATE understanding SET status = 'queued', refused = NULL, sorted_at = NULL, lease_expires_at = NULL,
+              claimed_by = NULL, queued_at = now(), more_to_come = $2
+        WHERE workflow_id = $1`, [workflowId, asked.data.moreToCome]);
+    await db.query('COMMIT');
+    return { ok: true, id: workflowId };
+  } catch (error) {
+    await db.query('ROLLBACK');
+    throw error;
+  }
+}
+
+/** The author says whether more is to come. "That is all of it" closes the open end. */
+export async function setMoreToCome(db: ClientBase, workflowId: string, body: unknown): Promise<Done> {
+  const asked = object({ moreToCome: z.boolean() }).safeParse(body);
+  if (!asked.success) return { ok: false, because: 'Say whether more of the procedure is to come.' };
+  const { rows: [u] } = await db.query<{ confirmed_at: string | null }>(
+    `SELECT confirmed_at FROM understanding WHERE workflow_id = $1`, [workflowId]);
+  if (!u) return { ok: false, because: 'This draft was not brought in to be understood.' };
+  if (u.confirmed_at) return { ok: false, because: 'The sort has already been confirmed.' };
+  await db.query(`UPDATE understanding SET more_to_come = $2 WHERE workflow_id = $1`, [workflowId, asked.data.moreToCome]);
+  await db.query(
+    `INSERT INTO audit_entry (act, object_kind, object_id, changed) VALUES ($2, 'workflow', $1, '{}')`,
+    [workflowId, asked.data.moreToCome ? 'more of the procedure is to come' : 'that is all of the procedure']);
+  return { ok: true };
 }

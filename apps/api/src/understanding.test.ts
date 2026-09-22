@@ -10,7 +10,7 @@ import { after, before, beforeEach, describe, test } from 'node:test';
 import { Client } from 'pg';
 import { migrate } from './migrate.ts';
 import { recordLabelling } from './procedure.ts';
-import { bringInToUnderstand, confirmUnderstanding, forTheWalk, relabel, understandingOf } from './understanding.ts';
+import { addNextPart, bringInToUnderstand, confirmUnderstanding, forTheWalk, relabel, setMoreToCome, understandingOf } from './understanding.ts';
 
 const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.env['USER']}@localhost/orbit2_test`;
 let db: Client;
@@ -161,4 +161,53 @@ test('the walk is given task and rule sentences only', () => {
   assert.equal(forTheWalk([s('1.1', 'background', 'Intro.'), s('1.2', 'task', 'Log in.'),
     s('1.3', 'forAPerson', 'Call them.'), s('1.4', 'rule', 'If none, say so.'), s('1.5', 'wontDo', 'Never delete.')]),
   'Log in.\nIf none, say so.');
+});
+
+describe('a procedure brought in parts', () => {
+  const inParts = async () => {
+    const result = await bringInToUnderstand(db as never, {
+      name: 'In parts', procedure: 'Log into Claims Central. Search for the claim. If it was reopened within 30 days of',
+      applicationId, startPath: '/', inputs: {}, moreToCome: true });
+    assert.ok(result.ok);
+    return result.id;
+  };
+  const sortAll = async (id: string, part: string, n: number) => {
+    const answer = Array.from({ length: n }, (_, i) => ({ sentence: `${part}.${i + 1}`, label: 'task', reason: 't', basis: 'stated' }));
+    assert.equal((await recordLabelling(db, id, part, answer, 'model')).ok, true);
+    await db.query(`UPDATE understanding SET status = 'sorted', sorted_at = now() WHERE workflow_id = $1`, [id]);
+  };
+
+  test('says where a part stops mid-sentence, and confirming waits for the rest', async () => {
+    const id = await inParts();
+    const u = await understandingOf(db, id);
+    assert.equal(u!.more_to_come, true);
+    assert.deepEqual(u!.sentences.filter((s) => s.unterminated).map((s) => s.number), ['1.3']);
+    await sortAll(id, '1', 3);
+    const refused = await confirmUnderstanding(db as never, id);
+    assert.match(refused.ok ? '' : refused.because, /more of the procedure is to come/);
+  });
+
+  test('the next part is numbered 2, re-queued for sorting, and leaves part 1 as it was', async () => {
+    const id = await inParts();
+    assert.equal((await addNextPart(db as never, id, { body: 'the last payment. Pass it to the claims team.' })).ok, false,
+      'not while part 1 is still being sorted');
+    await sortAll(id, '1', 3);
+    const before_ = (await understandingOf(db, id))!.sentences;
+    assert.deepEqual(await addNextPart(db as never, id, { body: 'the last payment. Pass it to the claims team.' }),
+      { ok: true, id });
+    const u = (await understandingOf(db, id))!;
+    assert.equal(u.status, 'queued');
+    assert.equal(u.more_to_come, false, 'this part was the last');
+    assert.deepEqual(u.parts.map((p) => p.key), ['1', '2']);
+    assert.deepEqual(u.sentences.slice(0, 3), before_);
+    assert.deepEqual(u.sentences.slice(3).map((s) => [s.number, s.label]), [['2.1', null], ['2.2', null]]);
+  });
+
+  test('that is all of it, and then it can be confirmed', async () => {
+    const id = await inParts();
+    await sortAll(id, '1', 3);
+    assert.deepEqual(await setMoreToCome(db, id, { moreToCome: false }), { ok: true });
+    assert.equal((await confirmUnderstanding(db as never, id)).ok, true);
+    assert.equal((await addNextPart(db as never, id, { body: 'Another part.' })).ok, false, 'not after it was drafted from');
+  });
 });

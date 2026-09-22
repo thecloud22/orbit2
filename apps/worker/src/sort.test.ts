@@ -108,3 +108,12 @@ test('the answer can only name the numbers of its own batch', async () => {
   assert.equal(numbersIn(model.shapes[0]).length, BATCH);
   assert.deepEqual(numbersIn(model.shapes[1]), [`1.${BATCH + 1}`, `1.${BATCH + 2}`]);
 });
+
+test('a later part is sorted with the end of the earlier ones in view, and not asked about them', async () => {
+  const model = fake((a) => labelsFor(a));
+  const sorted = await sortSentences(sentences(2, '2'), model, 1,
+    [{ number: '1.9', text: 'If it was reopened within 30 days of', kind: 'prose', label: 'rule' }]);
+  assert.equal(sorted.ok, true);
+  assert.match(model.asked[0]!.shown, /^ALREADY SORTED, for context only — do not answer about these:\n1\.9 \(rule\) If it was reopened/);
+  assert.deepEqual(sorted.ok && sorted.labels.map((l) => l.sentence), ['2.1', '2.2']);
+});
