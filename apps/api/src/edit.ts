@@ -257,6 +257,9 @@ export async function discardDraft(db: PoolClient, workflowId: string):
 
     await db.query(`DELETE FROM workflow_step WHERE workflow_id = $1`, [workflowId]);
     await db.query(`DELETE FROM workflow_note WHERE workflow_id = $1`, [workflowId]);
+    // The procedure goes with its text below: its sentences and their labels
+    // are the same words, split.
+    await db.query(`DELETE FROM procedure_part WHERE workflow_id = $1`, [workflowId]);
     await db.query(
       `UPDATE workflow SET archived_at = now(), procedure = NULL, outcomes = '[]'::jsonb,
               declared_inputs = '[]'::jsonb, examples = '{}'::jsonb, confirmed_at = NULL, updated_at = now()
