@@ -198,7 +198,19 @@ export function checkRuleTables(
 }
 
 /** Columns no task reads: each one blocks confirmation until it is resolved. */
-export function unreadColumns(tables: readonly RuleTable[]): Array<{ table: number; question: string; label: string }> {
+export function unreadColumns(tables: readonly RuleTable[]):
+  Array<{ table: number; question: string; label: string; sentences: string[] }> {
   return tables.flatMap((t, i) => t.columns.filter((c) => c.readBy === null)
-    .map((c) => ({ table: i + 1, question: t.question, label: c.label })));
+    .map((c) => ({ table: i + 1, question: t.question, label: c.label, sentences: t.sentences })));
+}
+
+/**
+ * What to tell an author whose confirmation a column nobody reads is blocking:
+ * which sentences, and the ways out. A block that does not say how to lift it
+ * is a dead end, and the first person to meet this one was stuck on it.
+ */
+export function unreadAdvice(unread: ReturnType<typeof unreadColumns>): string {
+  const which = unread.map((c) => `"${c.label}" (${c.sentences.join(', ')})`).join(' and ');
+  return `No task reads ${which}. If a sentence only explains something or points elsewhere, mark it Background; `
+    + 'if a person checks it, mark it For a person; if Orbit should check it, add a sentence that reads it.';
 }

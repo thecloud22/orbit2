@@ -12,7 +12,7 @@
  * add, drop or reword one; the check that enforces that is in the contract,
  * and a sort that fails it is kept as a refusal, not as half an answer.
  */
-import { object, sentenceLabel, sentenceNumber, unreadColumns, z, type RuleTable, type SentenceLabel } from '@orbit/contract';
+import { object, sentenceLabel, sentenceNumber, unreadAdvice, unreadColumns, z, type RuleTable, type SentenceLabel } from '@orbit/contract';
 import type { ClientBase, PoolClient } from 'pg';
 import { askedFor, type Queued } from './authoring.ts';
 import { readPdf } from '@orbit/procedure';
@@ -262,8 +262,7 @@ export async function confirmUnderstanding(db: PoolClient, workflowId: string): 
       `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [workflowId]);
     const unread = unreadColumns(latest?.tables ?? []);
     if (unread.length) {
-      return refuse(unread.map((c) => `Table ${c.table} ("${c.question}") compares ${c.label}, which no task reads.`).join(' ')
-        + ' Add a sentence that reads it, or mark the rule for a person.');
+      return refuse(unreadAdvice(unread));
     }
     const procedure = forTheWalk(sentences);
     if (!procedure) {

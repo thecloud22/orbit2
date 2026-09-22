@@ -84,7 +84,7 @@ test('a table accounting for every rule sentence once is kept', () => {
   const checked = checkRuleTables(['1.3', '1.4'], ['1.1', '1.2'], [aTable()]);
   assert.equal(checked.ok, true);
   assert.deepEqual(unreadColumns(checked.ok ? checked.tables : []),
-    [{ table: 1, question: 'What do we tell the caller?', label: 'Outstanding' }]);
+    [{ table: 1, question: 'What do we tell the caller?', label: 'Outstanding', sentences: ['1.3', '1.4'] }]);
 });
 
 test('every problem with a set of tables is named', () => {

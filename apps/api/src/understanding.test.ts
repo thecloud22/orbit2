@@ -268,7 +268,7 @@ describe('the rules, as tables', () => {
       rows: [{ when: [{ column: 'claimAge', is: 'isMoreThan', value: '90' }], then: 'Team lead', sentence: '1.4' }],
       otherwise: null, sentences: ['1.4'] }])]);
     const result = await confirmUnderstanding(db as never, id);
-    assert.match(result.ok ? '' : result.because, /compares Claim age, which no task reads/);
+    assert.match(result.ok ? '' : result.because, /No task reads "Claim age" \(1\.4\)\. If a sentence only explains something/);
     const u = await understandingOf(db, id);
     assert.equal(u!.rules?.tables?.[0]?.question, 'What do we tell the caller?');
   });

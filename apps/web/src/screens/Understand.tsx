@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Action, Page, Refusal, Section } from '../Page.tsx';
 import { send } from '../fetching.ts';
 import { EmptyState, type Emptiness } from '../ui.tsx';
+import { unreadAdvice, unreadColumns, type RuleTable as Table_ } from '@orbit/contract';
 import type { Route } from '../router.ts';
 import { PdfPicker, Working } from './BringIn.tsx';
 
@@ -107,7 +108,7 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
   const confirmed = Boolean(u.confirmed_at);
   const complete = u.coverage.placed === u.coverage.total;
   const forOrbit = u.coverage.byLabel.task + u.coverage.byLabel.rule;
-  const unread = (u.rules?.tables ?? []).flatMap((t) => t.columns.filter((c) => !c.readBy).map((c) => c.label));
+  const unread = unreadColumns((u.rules?.tables ?? []) as Table_[]);
 
   const relabel = async (sentence: string, label: Label, waits?: boolean) => {
     setBusy(true); setRefused(null);
@@ -154,7 +155,7 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
         ? <Action kind="ghost" onClick={() => go({ at: 'agent', id })}>Open the draft</Action>
         : <Action disabled={!sorted || !complete || forOrbit === 0 || u.more_to_come || unread.length > 0 || busy}
             why={!sorted ? 'Orbit is still sorting'
-              : unread.length > 0 ? `No task reads ${unread.join(', ')}: add a sentence that does, or mark the rule for a person`
+              : unread.length > 0 ? unreadAdvice(unread)
               : u.more_to_come ? 'You said more is to come: add it, or say that is all'
               : !complete ? `${u.coverage.total - u.coverage.placed} sentences have no label yet`
               : forOrbit === 0 ? 'Nothing is marked for Orbit to do'
