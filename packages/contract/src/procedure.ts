@@ -121,3 +121,84 @@ export function coverage(
   }
   return { total: sentences.length, placed: sentences.length - unplaced.length, byLabel, unplaced };
 }
+
+/**
+ * A rule, as a table (2.1-d). A review surface: it says what the procedure's
+ * rule sentences decide, in a shape a person can check at a glance. Columns
+ * are values; each names the task sentence that reads it, or none — and a
+ * rule comparing something no task reads cannot be confirmed (criterion 5),
+ * because nothing would ever have the value to compare.
+ */
+export const RULE_COMPARISONS = [
+  'is', 'isNot', 'isMoreThan', 'isAtLeast', 'isLessThan', 'isAtMost', 'isBefore', 'isAfter', 'isAbsent', 'isPresent',
+] as const;
+export const ruleComparison = z.enum(RULE_COMPARISONS);
+
+export const ruleTable = object({
+  question: z.string().trim().min(1).max(200),
+  columns: z.array(object({
+    name: z.string().regex(/^[a-z][a-zA-Z0-9]*$/, 'a value is named in camelCase').max(64),
+    label: z.string().trim().min(1).max(120),
+    readBy: sentenceNumber.nullable(),
+  })).min(1).max(12),
+  rows: z.array(object({
+    when: z.array(object({ column: z.string(), is: ruleComparison, value: z.string().max(120).nullable() })).min(1).max(12),
+    then: z.string().trim().min(1).max(200),
+    sentence: sentenceNumber,
+  })).min(1).max(40),
+  otherwise: object({ then: z.string().trim().min(1).max(200), sentence: sentenceNumber.nullable() }).nullable(),
+  sentences: z.array(sentenceNumber).min(1),
+});
+export type RuleTable = z.infer<typeof ruleTable>;
+
+/**
+ * Keeps a set of tables only if it accounts for every rule sentence exactly
+ * once and refers to nothing it was not given. Every problem is named.
+ */
+export function checkRuleTables(
+  ruleSentences: readonly string[], taskSentences: readonly string[], answer: unknown,
+): { ok: true; tables: RuleTable[] } | { ok: false; problems: string[] } {
+  const parsed = z.array(ruleTable).safeParse(answer);
+  if (!parsed.success) {
+    return { ok: false, problems: parsed.error.issues.map((i) => `${i.path.join('.') || 'answer'}: ${i.message}`) };
+  }
+  const problems: string[] = [];
+  const rules = new Set(ruleSentences);
+  const tasks = new Set(taskSentences);
+  const seen = new Map<string, number>();
+  parsed.data.forEach((t, i) => {
+    const which = `table ${i + 1}`;
+    for (const n of t.sentences) {
+      if (!rules.has(n)) problems.push(`${which} cites ${n}, which is not a rule sentence`);
+      seen.set(n, (seen.get(n) ?? 0) + 1);
+    }
+    const columns = new Set(t.columns.map((c) => c.name));
+    if (columns.size !== t.columns.length) problems.push(`${which} names a column twice`);
+    for (const c of t.columns) {
+      if (c.readBy !== null && !tasks.has(c.readBy)) problems.push(`${which}: "${c.label}" is said to be read by ${c.readBy}, which is not a task`);
+    }
+    for (const [r, row] of t.rows.entries()) {
+      if (!t.sentences.includes(row.sentence)) problems.push(`${which} row ${r + 1} cites ${row.sentence}, which the table does not`);
+      for (const w of row.when) {
+        if (!columns.has(w.column)) problems.push(`${which} row ${r + 1} compares "${w.column}", which is not one of its columns`);
+        const needsValue = w.is !== 'isAbsent' && w.is !== 'isPresent';
+        if (needsValue && !w.value) problems.push(`${which} row ${r + 1} compares "${w.column}" with nothing`);
+      }
+    }
+    if (t.otherwise?.sentence && !t.sentences.includes(t.otherwise.sentence)) {
+      problems.push(`${which}'s otherwise cites ${t.otherwise.sentence}, which the table does not`);
+    }
+  });
+  for (const n of ruleSentences) {
+    const count = seen.get(n) ?? 0;
+    if (count === 0) problems.push(`rule sentence ${n} is in no table`);
+    if (count > 1) problems.push(`rule sentence ${n} is in ${count} tables`);
+  }
+  return problems.length ? { ok: false, problems } : { ok: true, tables: parsed.data };
+}
+
+/** Columns no task reads: each one blocks confirmation until it is resolved. */
+export function unreadColumns(tables: readonly RuleTable[]): Array<{ table: number; question: string; label: string }> {
+  return tables.flatMap((t, i) => t.columns.filter((c) => c.readBy === null)
+    .map((c) => ({ table: i + 1, question: t.question, label: c.label })));
+}

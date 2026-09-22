@@ -20,8 +20,10 @@ export function Page({ kicker, title, aside, actions, children }: {
           </h1>
         </div>
         {aside}
-        {/* Never squeezed: a long title or aside wrapped the button text onto two lines. */}
-        {actions && <div style={{ display: 'flex', gap: 9, paddingBottom: 3, flexShrink: 0, whiteSpace: 'nowrap' }}>{actions}</div>}
+        {/* Kept to a third of the row: a button's words never wrap, and the
+            reason beside a disabled one wraps within that third rather than
+            pushing the title into a column. */}
+        {actions && <div style={{ display: 'flex', gap: 9, paddingBottom: 3, flexShrink: 0, maxWidth: '38%' }}>{actions}</div>}
       </header>
       <div style={{ height: 2, background: 'var(--ink)' }} />
       {children}
@@ -72,7 +74,7 @@ export function Action({ kind = 'primary', disabled, why, onClick, children }: {
     <button type="button" onClick={onClick} disabled={disabled}
       aria-describedby={disabled && why ? 'why-not' : undefined}
       style={{
-        font: 'inherit', fontSize: 13.5, fontWeight: 600, borderRadius: 3, padding: '9px 16px',
+        font: 'inherit', fontSize: 13.5, fontWeight: 600, borderRadius: 3, padding: '9px 16px', whiteSpace: 'nowrap', flexShrink: 0,
         cursor: disabled ? 'not-allowed' : 'pointer',
         ...(disabled
           ? { color: 'var(--ink-2)', background: 'var(--panel-2)', border: '1px solid var(--rule-2)' }

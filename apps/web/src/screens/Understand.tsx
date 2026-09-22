@@ -34,6 +34,15 @@ interface Understanding {
     label: Label | null; reason: string | null; basis: string | null; givenBy: string | null;
   }>;
   coverage: { total: number; placed: number; unplaced: string[]; byLabel: Record<Label, number> };
+  rules: { tables: RuleTable[] | null; refused: string | null } | null;
+}
+
+interface RuleTable {
+  question: string;
+  columns: Array<{ name: string; label: string; readBy: string | null }>;
+  rows: Array<{ when: Array<{ column: string; is: string; value: string | null }>; then: string; sentence: string }>;
+  otherwise: { then: string; sentence: string | null } | null;
+  sentences: string[];
 }
 
 /** Said the way an author thinks of it, and in the order they matter. */
@@ -91,6 +100,7 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
   const confirmed = Boolean(u.confirmed_at);
   const complete = u.coverage.placed === u.coverage.total;
   const forOrbit = u.coverage.byLabel.task + u.coverage.byLabel.rule;
+  const unread = (u.rules?.tables ?? []).flatMap((t) => t.columns.filter((c) => !c.readBy).map((c) => c.label));
 
   const relabel = async (sentence: string, label: Label) => {
     setBusy(true); setRefused(null);
@@ -135,8 +145,9 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
       </p>}
       actions={confirmed
         ? <Action kind="ghost" onClick={() => go({ at: 'agent', id })}>Open the draft</Action>
-        : <Action disabled={!sorted || !complete || forOrbit === 0 || u.more_to_come || busy}
+        : <Action disabled={!sorted || !complete || forOrbit === 0 || u.more_to_come || unread.length > 0 || busy}
             why={!sorted ? 'Orbit is still sorting'
+              : unread.length > 0 ? `No task reads ${unread.join(', ')}: add a sentence that does, or mark the rule for a person`
               : u.more_to_come ? 'You said more is to come: add it, or say that is all'
               : !complete ? `${u.coverage.total - u.coverage.placed} sentences have no label yet`
               : forOrbit === 0 ? 'Nothing is marked for Orbit to do'
@@ -159,6 +170,15 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
       <Section title="Placed" note={`${u.coverage.placed} of ${u.coverage.total} sentences`}>
         <Coverage coverage={u.coverage} />
       </Section>
+
+      {sorted && u.rules && (u.rules.refused || (u.rules.tables?.length ?? 0) > 0) && (
+        <Section title="The rules, as tables"
+          note="for checking; Orbit is given the rule sentences themselves">
+          {u.rules.refused
+            ? <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)', maxWidth: 760 }}>{u.rules.refused}</p>
+            : u.rules.tables!.map((t, i) => <Table key={i} table={t} n={i + 1} />)}
+        </Section>
+      )}
 
       <Section title="The procedure, sentence by sentence"
         note={sorted && !confirmed ? 'change a label and it is kept alongside Orbit\'s, which stays on the record' : undefined}>
@@ -314,4 +334,65 @@ function partNote(part: { source: string; added_at: string; sentences: number } 
   if (!part) return '';
   const from = part.source === 'author' ? 'written by you' : part.source === 'pdf' ? 'from a PDF' : 'pasted';
   return `${from} · ${part.sentences} sentence${part.sentences === 1 ? '' : 's'} · ${new Date(part.added_at).toLocaleString()}`;
+}
+
+const SAYS: Record<string, string> = {
+  is: 'is', isNot: 'is not', isMoreThan: 'is more than', isAtLeast: 'is at least', isLessThan: 'is less than',
+  isAtMost: 'is at most', isBefore: 'is before', isAfter: 'is after', isAbsent: 'is not there', isPresent: 'is there',
+};
+
+/**
+ * One rule as a table. A column no task reads is the one thing marked, because
+ * it is the one thing that blocks: nothing would ever have that value to compare.
+ */
+function Table({ table, n }: { table: RuleTable; n: number }) {
+  const cell = { padding: '8px 10px 8px 0', fontSize: 13, verticalAlign: 'top' as const, borderBottom: '1px solid var(--rule)' };
+  return (
+    <div style={{ paddingBottom: 22, maxWidth: 1100 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, paddingBottom: 6 }}>
+        <span style={{ fontSize: 14.5, fontWeight: 700 }}>Table {n} · {table.question}</span>
+        <span style={{ fontSize: 12, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>from {table.sentences.join(', ')}</span>
+      </div>
+      <table style={{ borderCollapse: 'collapse', width: '100%', borderTop: '1px solid var(--ink)' }}>
+        <thead>
+          <tr>
+            {table.columns.map((c) => (
+              <th key={c.name} scope="col" style={{ ...cell, textAlign: 'left', fontWeight: 600, color: 'var(--ink-2)', fontSize: 12.5 }}>
+                {c.label}
+                <span style={{ display: 'block', fontWeight: 400, fontSize: 11.5, marginTop: 2,
+                  color: c.readBy ? 'var(--ink-2)' : 'var(--attention-ink)' }}>
+                  {c.readBy ? `read by ${c.readBy}` : 'no task reads this'}
+                </span>
+              </th>
+            ))}
+            <th scope="col" style={{ ...cell, textAlign: 'left', fontWeight: 600, color: 'var(--ink-2)', fontSize: 12.5 }}>Then</th>
+            <th scope="col" style={{ ...cell, width: 60 }} />
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((r, i) => (
+            <tr key={i}>
+              {table.columns.map((c) => {
+                const conditions = r.when.filter((w) => w.column === c.name);
+                return <td key={c.name} style={cell}>
+                  {conditions.length === 0 ? <span style={{ color: 'var(--ink-2)' }}>any</span>
+                    : conditions.map((w, j) => <span key={j} style={{ display: 'block' }}>
+                        {SAYS[w.is] ?? w.is}{w.value !== null ? ` ${w.value}` : ''}</span>)}
+                </td>;
+              })}
+              <td style={cell}>{r.then}</td>
+              <td style={{ ...cell, fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink-2)' }}>{r.sentence}</td>
+            </tr>
+          ))}
+          {table.otherwise && (
+            <tr>
+              <td colSpan={table.columns.length} style={{ ...cell, color: 'var(--ink-2)' }}>otherwise</td>
+              <td style={cell}>{table.otherwise.then}</td>
+              <td style={{ ...cell, fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink-2)' }}>{table.otherwise.sentence ?? ''}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
 }

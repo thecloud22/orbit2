@@ -6,7 +6,9 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { checkLabelling, coverage, nextPartKey, sentenceNumber, type SentenceLabel } from './procedure.ts';
+import {
+  checkLabelling, checkRuleTables, coverage, nextPartKey, sentenceNumber, unreadColumns, type SentenceLabel,
+} from './procedure.ts';
 
 const entry = (sentence: string, label = 'task') => ({ sentence, label, reason: 'says to do it', basis: 'stated' });
 const expected = ['1.1', '1.2', '1.3'];
@@ -65,4 +67,37 @@ test('parts are numbered for the document and lettered for the author', () => {
 test('a sentence number says its part and its place', () => {
   for (const ok of ['1.1', '2.14', 'A.1', 'AB.3']) assert.equal(sentenceNumber.safeParse(ok).success, true, ok);
   for (const bad of ['0.1', '1.0', '1', 'a.1', '1.1.1', ' 1.1']) assert.equal(sentenceNumber.safeParse(bad).success, false, bad);
+});
+
+
+const aTable = (over: Record<string, unknown> = {}) => ({
+  question: 'What do we tell the caller?',
+  columns: [{ name: 'claimFound', label: 'Claim found', readBy: '1.2' }, { name: 'outstanding', label: 'Outstanding', readBy: null }],
+  rows: [{ when: [{ column: 'claimFound', is: 'is', value: 'no' }], then: 'No such claim', sentence: '1.3' },
+         { when: [{ column: 'outstanding', is: 'isMoreThan', value: '10000' }], then: 'Team lead', sentence: '1.4' }],
+  otherwise: { then: 'Tell the status', sentence: null },
+  sentences: ['1.3', '1.4'],
+  ...over,
+});
+
+test('a table accounting for every rule sentence once is kept', () => {
+  const checked = checkRuleTables(['1.3', '1.4'], ['1.1', '1.2'], [aTable()]);
+  assert.equal(checked.ok, true);
+  assert.deepEqual(unreadColumns(checked.ok ? checked.tables : []),
+    [{ table: 1, question: 'What do we tell the caller?', label: 'Outstanding' }]);
+});
+
+test('every problem with a set of tables is named', () => {
+  const checked = checkRuleTables(['1.3', '1.4', '1.5'], ['1.1', '1.2'], [aTable({
+    columns: [{ name: 'claimFound', label: 'Claim found', readBy: '1.3' }],
+    rows: [{ when: [{ column: 'age', is: 'isMoreThan', value: null }], then: 'x', sentence: '1.9' }],
+  })]);
+  assert.equal(checked.ok, false);
+  assert.deepEqual(checked.ok ? [] : checked.problems, [
+    'table 1: "Claim found" is said to be read by 1.3, which is not a task',
+    'table 1 row 1 cites 1.9, which the table does not',
+    'table 1 row 1 compares "age", which is not one of its columns',
+    'table 1 row 1 compares "age" with nothing',
+    'rule sentence 1.5 is in no table',
+  ]);
 });

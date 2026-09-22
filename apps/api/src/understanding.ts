@@ -12,7 +12,7 @@
  * add, drop or reword one; the check that enforces that is in the contract,
  * and a sort that fails it is kept as a refusal, not as half an answer.
  */
-import { object, sentenceLabel, sentenceNumber, z, type SentenceLabel } from '@orbit/contract';
+import { object, sentenceLabel, sentenceNumber, unreadColumns, z, type RuleTable, type SentenceLabel } from '@orbit/contract';
 import type { ClientBase, PoolClient } from 'pg';
 import { askedFor, type Queued } from './authoring.ts';
 import { readPdf } from '@orbit/procedure';
@@ -145,9 +145,12 @@ export async function understandingOf(db: ClientBase, workflowId: string) {
     `SELECT p.key, p.source, p.added_at, count(s.id)::int AS sentences
        FROM procedure_part p LEFT JOIN procedure_sentence s ON s.part_id = p.id
       WHERE p.workflow_id = $1 GROUP BY p.id ORDER BY p.added_at, p.key`, [workflowId]);
+  const { rows: [tables] } = await db.query<{ tables: RuleTable[] | null; refused: string | null }>(
+    `SELECT tables, refused FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [workflowId]);
   return {
     ...u,
     parts,
+    rules: tables ?? null,
     sentences: await sentencesWithLabels(db, workflowId),
     coverage: await readCoverage(db, workflowId),
   };
@@ -193,6 +196,12 @@ export async function relabel(db: ClientBase, workflowId: string, body: unknown)
     `INSERT INTO audit_entry (act, object_kind, object_id, changed)
      VALUES ('sentence relabelled', 'workflow', $1, $2)`,
     [workflowId, JSON.stringify({ sentence, label })]);
+  // The rules as tables are made from the labels, so a relabel sends the
+  // draft back to the worker to make them again. Nothing is re-sorted: every
+  // sentence already has a label.
+  await db.query(
+    `UPDATE understanding SET status = 'queued', sorted_at = NULL, lease_expires_at = NULL, claimed_by = NULL
+      WHERE workflow_id = $1`, [workflowId]);
   return { ok: true };
 }
 
@@ -235,6 +244,15 @@ export async function confirmUnderstanding(db: PoolClient, workflowId: string): 
     if (unplaced.length) {
       return refuse(`${unplaced.length === 1 ? 'Sentence' : 'Sentences'} ${unplaced.join(', ')} `
         + `${unplaced.length === 1 ? 'has' : 'have'} no label yet. Every sentence is placed before anything is drafted.`);
+    }
+    // Criterion 5: a rule comparing something no task reads can never be
+    // decided, and confirming it would draft a branch with nothing to test.
+    const { rows: [latest] } = await db.query<{ tables: RuleTable[] | null }>(
+      `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [workflowId]);
+    const unread = unreadColumns(latest?.tables ?? []);
+    if (unread.length) {
+      return refuse(unread.map((c) => `Table ${c.table} ("${c.question}") compares ${c.label}, which no task reads.`).join(' ')
+        + ' Add a sentence that reads it, or mark the rule for a person.');
     }
     const procedure = forTheWalk(sentences);
     if (!procedure) {

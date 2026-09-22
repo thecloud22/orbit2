@@ -6,6 +6,7 @@
 import type { PoolClient } from 'pg';
 import type { ModelProvider } from '@orbit/model';
 import { sortSentences, type SortTurn } from './sort.ts';
+import { tabulate } from './tables.ts';
 
 export type SortStored = { sorted: true; labelled: number } | { sorted: false; describe: string };
 
@@ -60,7 +61,7 @@ export async function sortAndStore(db: PoolClient, workflowId: string, model: Mo
   return result.ok ? { sorted: true, labelled: result.labels.length } : { sorted: false, describe: result.describe };
 }
 
-async function storeTurn(db: PoolClient, workflowId: string, turn: SortTurn): Promise<void> {
+export async function storeTurn(db: PoolClient, workflowId: string, turn: SortTurn): Promise<void> {
   await db.query(
     `INSERT INTO model_call
        (workflow_id, turn, provider, model, shown, answered, verdict, why, tokens_in, tokens_out,
@@ -70,4 +71,32 @@ async function storeTurn(db: PoolClient, workflowId: string, turn: SortTurn): Pr
      turn.answered === null ? null : JSON.stringify(turn.answered),
      turn.verdict, turn.why, turn.tokensIn, turn.tokensOut, turn.tokensCached, turn.tokensCacheWritten,
      turn.costMicros]);
+}
+
+/**
+ * The rules as tables, made again from the labels as they stand now. Run after
+ * every sort, and after a relabel, so the latest set always matches the sort.
+ * A set that could not be made is kept as that, with why: the tables are for
+ * review, and not having them does not stop anything but the check they carry.
+ */
+export async function tabulateAndStore(db: PoolClient, workflowId: string, model: ModelProvider): Promise<void> {
+  const { rows: sentences } = await db.query<{ number: string; text: string; label: string }>(
+    `SELECT p.key || '.' || s.n AS number, s.text, l.label
+       FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
+       JOIN LATERAL (SELECT label FROM sentence_label WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
+      WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, s.n`, [workflowId]);
+  const { rows: [last] } = await db.query<{ turn: number }>(
+    `SELECT coalesce(max(turn), 0)::int AS turn FROM model_call WHERE workflow_id = $1`, [workflowId]);
+  const result = await tabulate(sentences, model, last!.turn + 1);
+
+  await db.query('BEGIN');
+  try {
+    for (const turn of result.turns) await storeTurn(db, workflowId, turn);
+    await db.query(`INSERT INTO rule_tables (workflow_id, tables, refused) VALUES ($1, $2, $3)`,
+      [workflowId, result.ok ? JSON.stringify(result.tables) : null, result.ok ? null : result.describe]);
+    await db.query('COMMIT');
+  } catch (error) {
+    await db.query('ROLLBACK');
+    throw error;
+  }
 }

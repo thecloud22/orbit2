@@ -257,3 +257,26 @@ describe('a procedure brought in as a PDF', () => {
     assert.equal(u!.parts[1]!.source, 'pdf');
   });
 });
+
+describe('the rules, as tables', () => {
+  test('a rule comparing something no task reads blocks confirmation', async () => {
+    const id = await broughtIn();
+    await sorted(id);
+    await db.query(`INSERT INTO rule_tables (workflow_id, tables) VALUES ($1, $2)`, [id, JSON.stringify([{
+      question: 'What do we tell the caller?',
+      columns: [{ name: 'claimAge', label: 'Claim age', readBy: null }],
+      rows: [{ when: [{ column: 'claimAge', is: 'isMoreThan', value: '90' }], then: 'Team lead', sentence: '1.4' }],
+      otherwise: null, sentences: ['1.4'] }])]);
+    const result = await confirmUnderstanding(db as never, id);
+    assert.match(result.ok ? '' : result.because, /compares Claim age, which no task reads/);
+    const u = await understandingOf(db, id);
+    assert.equal(u!.rules?.tables?.[0]?.question, 'What do we tell the caller?');
+  });
+
+  test('a relabel sends the draft back to have its tables made again', async () => {
+    const id = await broughtIn();
+    await sorted(id);
+    await relabel(db, id, { sentence: '1.5', label: 'task' });
+    assert.equal((await understandingOf(db, id))!.status, 'queued');
+  });
+});

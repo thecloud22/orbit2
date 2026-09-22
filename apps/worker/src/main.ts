@@ -11,7 +11,7 @@ import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
 import { authorAndStore, storeDraft } from './author-store.ts';
-import { sortAndStore } from './sort-store.ts';
+import { sortAndStore, tabulateAndStore } from './sort-store.ts';
 import { record } from './record.ts';
 import { openBrowser } from './surface-browser.ts';
 import type { OpenSurface } from './surface.ts';
@@ -87,7 +87,9 @@ async function sortOne(workflowId: string) {
   const db = await pool.connect();
   try {
     console.log(`  sorting the sentences of ${workflowId}`);
-    const result = await sortAndStore(db, workflowId, modelFromEnvironment());
+    const model = modelFromEnvironment();
+    const result = await sortAndStore(db, workflowId, model);
+    if (result.sorted) await tabulateAndStore(db, workflowId, model);
     if (result.sorted) {
       await db.query(`UPDATE understanding SET status = 'sorted', sorted_at = now() WHERE workflow_id = $1`,
         [workflowId]);
