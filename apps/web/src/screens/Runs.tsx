@@ -4,10 +4,25 @@ import { useFetch } from '../fetching.ts';
 import { href, type Route } from '../router.ts';
 
 interface Run { reference: string; status: string; outcome: string | null; workflow_name: string;
-  version: number; started_at: string | null; ended_at: string | null }
+  version: number; started_at: string | null; ended_at: string | null;
+  waiting_for: string | null; waiting_since: string | null }
+
+/** Statuses as a person says them; the vocabulary's names are for the record. */
+const SAID: Record<string, string> = {
+  queued: 'Queued', running: 'Running', waitingForAPerson: 'Waiting for a person', succeeded: 'Succeeded',
+  handedToAPerson: 'Handed to a person', failed: 'Failed', cancelled: 'Cancelled',
+};
+
+/** How long something has waited, as a person says it. */
+const since = (at: string | null) => {
+  if (!at) return '';
+  const m = Math.round((Date.now() - +new Date(at)) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d`;
+};
 
 const stateOf = (s: string) => s === 'succeeded' ? 'ok' as const : s === 'failed' ? 'failed' as const
-  : s === 'running' ? 'running' as const : s === 'waitingForAPerson' ? 'attention' as const : 'quiet' as const;
+  : s === 'running' ? 'running' as const
+  : s === 'waitingForAPerson' || s === 'handedToAPerson' ? 'attention' as const : 'quiet' as const;
 
 const took = (r: Run) => (r.started_at && r.ended_at)
   ? `${((+new Date(r.ended_at) - +new Date(r.started_at)) / 1000).toFixed(1)}s`
@@ -48,6 +63,27 @@ export function Runs({ go }: { go: (to: Route) => void }) {
         </div>
       )}
 
+      {/* Work, not history (spec, Figure 52): runs that cannot go on until a
+          person has done their part. Nothing at all when nothing is waiting,
+          so its presence is itself the signal. */}
+      {runs.state === 'loaded' && runs.value.some((r) => r.status === 'waitingForAPerson') && (
+        <Section title="Waiting on you" note="each carries on the moment somebody says it is done">
+          <div style={{ borderTop: '1px solid var(--ink)' }}>
+            {runs.value.filter((r) => r.status === 'waitingForAPerson').map((r) => (
+              <a key={r.reference} {...link({ at: 'run', reference: r.reference })}
+                style={{ textDecoration: 'none', color: 'var(--ink)', borderBottom: '1px solid var(--rule)',
+                  padding: '12px 0', display: 'flex', gap: 16, alignItems: 'center', background: 'var(--attention-wash)' }}>
+                <span style={{ width: 74, paddingLeft: 10, fontFamily: 'var(--mono)', fontSize: 12.5 }}>{r.reference}</span>
+                <span style={{ width: 210, fontSize: 13.5, fontWeight: 500 }}>{r.workflow_name}</span>
+                <span style={{ flexGrow: 1, fontSize: 13.5 }}>{r.waiting_for ?? 'Waiting for a person'}</span>
+                <span style={{ width: 90, textAlign: 'right', paddingRight: 10, fontSize: 12.5, color: 'var(--attention-ink)' }}>
+                  {since(r.waiting_since)}</span>
+              </a>
+            ))}
+          </div>
+        </Section>
+      )}
+
       <Section title="All runs" note={runs.state === 'loaded' ? String(runs.value.length) : undefined}>
         {runs.state === 'empty'
           ? <div style={{ border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel)' }}>
@@ -75,7 +111,7 @@ export function Runs({ go }: { go: (to: Route) => void }) {
                       <div style={{ fontSize: 13.5, fontWeight: 500 }}>{r.workflow_name}</div>
                       <div style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>version {r.version}</div>
                     </div>
-                    <span style={{ width: 170 }}><Chip state={stateOf(r.status)}>{r.status}</Chip></span>
+                    <span style={{ width: 170 }}><Chip state={stateOf(r.status)}>{SAID[r.status] ?? r.status}</Chip></span>
                     <span style={{ flexGrow: 1, fontSize: 13.5 }}>{r.outcome ?? '—'}</span>
                     <span style={{ width: 64, textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12.5,
                       color: 'var(--ink-2)' }}>{took(r)}</span>

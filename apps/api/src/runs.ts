@@ -60,7 +60,9 @@ export async function readRunSteps(reference: string) {
 
 export async function listRuns() {
   const { rows } = await pool.query(
-    `SELECT r.reference, r.status, r.outcome, r.started_at, r.ended_at, v.version, w.name AS workflow_name
+    `SELECT r.reference, r.status, r.outcome, r.started_at, r.ended_at, v.version, w.name AS workflow_name,
+            r.held->>'request' AS waiting_for,
+            (SELECT max(e.at) FROM run_event e WHERE e.run_id = r.id AND e.kind = 'run.held') AS waiting_since
        FROM run r JOIN workflow_version v ON v.id = r.version_id JOIN workflow w ON w.id = v.workflow_id
       ORDER BY r.queued_at DESC LIMIT 50`);
   return rows;
