@@ -381,6 +381,9 @@ export async function authorFromProcedure(opts: {
    *  what they compare (`decide.ts`), with every sentence number in order. */
   tables?: readonly RuleTable[];
   order?: readonly string[];
+  /** Which of the sentences are work in the application: each must have a
+   *  step before the walk may call the procedure finished. */
+  taskSentences?: readonly string[];
 }): Promise<AuthoredDraft> {
   const { procedure, origin, startPath, inputs, model } = opts;
   // A ceiling, for the same reason `for each` has one: without it nobody can
@@ -400,6 +403,10 @@ export async function authorFromProcedure(opts: {
     : procedure;
 
   let decisionPage: { seen: Seen[]; url: string } | null = null;
+  /** The page the last value was read on: where a decision's values and its
+   *  controls are, wherever the walk happens to end. */
+  let readPage: { seen: Seen[]; url: string } | null = null;
+  const toldUndone = new Set<string>();
   const browser = await chromium.launch();
   const page: Page = await browser.newPage();
   const steps: Step[] = [];
@@ -533,6 +540,26 @@ export async function authorFromProcedure(opts: {
 
       const p = answered.value;
       if (p.act === 'done') {
+        // Not finished while a line of work has no step. Checked against the
+        // numbered sentences, so it is a fact about the procedure rather than
+        // the model's impression of it: one walk wandered off to another page
+        // on a "make sure" line and called the procedure finished, with the
+        // readings and the approval never done. Said once; if it says finished
+        // again, that is recorded as a question rather than argued with.
+        const undone = (opts.sentences ?? [])
+          .filter((x) => !x.waits && !Object.values(provenance).includes(x.number) && !toldUndone.has(x.number))
+          .filter((x) => (opts.taskSentences ?? []).includes(x.number))
+          .map((x) => x.number);
+        if (undone.length) {
+          for (const n of undone) toldUndone.add(n);
+          noteTurn(record('rejected', `it said the procedure is finished, and ${undone.join(', ')} ${undone.length === 1 ? 'has' : 'have'} no step yet`));
+          continue;
+        }
+        const stillUndone = [...toldUndone].filter((n) => !Object.values(provenance).includes(n));
+        if (stillUndone.length) {
+          questions.push(asQuestion(`Orbit finished without a step for ${stillUndone.join(', ')}. `
+            + 'Check whether those lines need doing in the application, and if so, what on the page does them.'));
+        }
         finished = true;
         // Finished, or gave up? The difference is whether the last thing it
         // tried worked. Test case 1 asked for three things: sign in, confirm
@@ -721,6 +748,7 @@ export async function authorFromProcedure(opts: {
 
       steps.push(made);
       if (p.sentence && numbers.includes(p.sentence)) provenance[made.id] = p.sentence;
+      if (made.kind === 'read') readPage = { seen, url: page.url() };
       if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)! })));
       noteTurn(record('kept', conditions.length > 0
         ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
@@ -1033,9 +1061,10 @@ export async function authorFromProcedure(opts: {
   // The decision the procedure makes, from its confirmed tables, on the page
   // the walk ended on — which is where a file's decision controls are,
   // whichever example it was walked with.
-  if (opts.tables?.length && decisionPage) {
+  const onPage = readPage ?? decisionPage;
+  if (opts.tables?.length && onPage) {
     const compiled = await compileTables({ tables: opts.tables, steps, provenance, order: opts.order ?? [],
-      seen: decisionPage.seen, pageUrl: decisionPage.url, model, firstTurn: turns.length + 1 });
+      seen: onPage.seen, pageUrl: onPage.url, model, firstTurn: turns.length + 1 });
     steps.splice(0, steps.length, ...compiled.steps);
     for (const t of compiled.turns) noteTurn(t);
     questions.push(...compiled.questions);

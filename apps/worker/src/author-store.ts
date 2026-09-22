@@ -56,6 +56,7 @@ export async function authorAndStore(db: PoolClient, opts: {
   mayBeAbsentAfter?: readonly string[];
   tables?: readonly import('@orbit/contract').RuleTable[];
   order?: readonly string[];
+  taskSentences?: readonly string[];
   model: ModelProvider;
   /** Each turn as it lands, for whoever is watching the screen. */
   onTurn?: (turn: Turn) => void;

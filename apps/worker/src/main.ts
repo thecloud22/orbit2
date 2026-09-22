@@ -160,8 +160,8 @@ async function authorOne(sessionId: string) {
 
     // A walk after a sort is shown the sentences it was confirmed with,
     // numbered, so each step it drafts can say which one it carries out.
-    const { rows: sentences } = s.into_workflow_id ? await db.query<{ number: string; text: string; waits: boolean }>(
-      `SELECT p.key || '.' || x.n AS number, x.text, l.waits
+    const { rows: sentences } = s.into_workflow_id ? await db.query<{ number: string; text: string; waits: boolean; label: string }>(
+      `SELECT p.key || '.' || x.n AS number, x.text, l.waits, l.label
          FROM procedure_sentence x JOIN procedure_part p ON p.id = x.part_id
          JOIN LATERAL (SELECT label, waits FROM sentence_label WHERE sentence_id = x.id ORDER BY seq DESC LIMIT 1) l ON true
         WHERE p.workflow_id = $1 AND (l.label IN ('task', 'rule') OR l.waits)
@@ -185,7 +185,8 @@ async function authorOne(sessionId: string) {
     const walked = sentences.filter((x) => !ruleSentences.has(x.number));
 
     const result = await authorAndStore(db, {
-      ...(walked.length ? { sentences: walked } : {}),
+      ...(walked.length ? { sentences: walked.map(({ label: _, ...x }) => x),
+        taskSentences: walked.filter((x) => x.label === 'task').map((x) => x.number) } : {}),
       ...(mayBeAbsentAfter.length ? { mayBeAbsentAfter } : {}),
       ...(decides ? { tables: (tables!.tables ?? []) as never, order: order.map((o) => o.number) } : {}),
       name: s.name,
