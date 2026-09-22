@@ -18,6 +18,7 @@ import { cancelRun, retryRun, rerun } from './control.ts';
 import { backToDraft, discardDraft, deleteStep, editStep, insertStep, moveStep } from './edit.ts';
 import { editApplication, registerApplication } from './applications.ts';
 import { describeBlocker } from '@orbit/contract';
+import { bringInToUnderstand, confirmUnderstanding, relabel } from './understanding.ts';
 
 export async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -164,6 +165,23 @@ export const actions = {
   async bringIn(body: unknown) {
     const result = await inTransaction((db) => bringIn(db, body));
     return result.ok ? { status: 202, body: result } : { status: 422, body: { why: result.because } };
+  },
+
+  /** Orbit 2.1's way in: the draft is made at once, and sorted before anything is walked. */
+  async understand(body: unknown) {
+    const result = await inTransaction((db) => bringInToUnderstand(db, body));
+    return result.ok ? { status: 202, body: result } : { status: 422, body: { why: result.because } };
+  },
+
+  async relabel(workflowId: string, body: unknown) {
+    const result = await inTransaction((db) => relabel(db, workflowId, body));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  /** A person confirms the sort; the walk is queued, into this draft. */
+  async confirmUnderstanding(workflowId: string) {
+    const result = await inTransaction((db) => confirmUnderstanding(db, workflowId));
+    return result.ok ? { status: 202, body: result } : { status: 409, body: { why: result.because } };
   },
 
   /** §5's other way in: a demonstration, recorded. */

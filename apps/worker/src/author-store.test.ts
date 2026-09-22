@@ -135,3 +135,33 @@ test('an interpretation that holds together is stored, with its reasoning', asyn
   assert.equal(Number(counts.notes), 1);
   assert.equal(Number(counts.calls), 2, 'including the turn that produced nothing usable');
 });
+
+test('a walk after a sort drafts into the draft that already exists', async () => {
+  // Orbit 2.1: the draft was made when the procedure came in, holding the
+  // whole text, and the sort's calls are already on it.
+  const whole = 'Claim status\n\nOpen the pipeline and record the status. Phone the requester.';
+  const { rows: [w] } = await db.query<{ id: string }>(
+    `INSERT INTO workflow (name, procedure) VALUES ('Sorted first', $1) RETURNING id`, [whole]);
+  await db.query(
+    `INSERT INTO model_call (workflow_id, turn, provider, model, shown, verdict, why)
+     VALUES ($1, 1, 'test', 'test', '{}', 'kept', 'labelled 3 sentences')`, [w!.id]);
+
+  const { opts, draft } = interpretation({
+    steps: [aStep('the status')],
+    turns: [{ turn: 1, provider: 'test', model: 'test', shown: { page: '/pipeline', elements: 3, asking: 'what next?' },
+      answered: null, verdict: 'kept', why: 'a step', tokensIn: 1, tokensOut: 1, tokensCached: 0, tokensCacheWritten: 0,
+      costMicros: 1 }],
+  });
+  const result = await storeDraft(db as never, { ...opts, procedure: 'Open the pipeline and record the status.', into: w!.id }, draft);
+  assert.equal(result.stored, true);
+  assert.equal(result.stored && result.workflowId, w!.id, 'no second workflow');
+
+  const { rows: [after_] } = await db.query<{ procedure: string; steps: number; turns: number[] }>(
+    `SELECT procedure,
+            (SELECT count(*)::int FROM workflow_step WHERE workflow_id = w.id) AS steps,
+            (SELECT array_agg(turn ORDER BY turn) FROM model_call WHERE workflow_id = w.id) AS turns
+       FROM workflow w WHERE id = $1`, [w!.id]);
+  assert.equal(after_!.procedure, whole, 'the author\'s text, not the part the walk was given');
+  assert.equal(after_!.steps, 1);
+  assert.deepEqual(after_!.turns, [1, 2], 'the walk is numbered after the sort');
+});

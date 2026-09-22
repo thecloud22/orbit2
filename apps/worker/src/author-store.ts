@@ -48,6 +48,9 @@ export async function authorAndStore(db: PoolClient, opts: {
   origin: string;
   startPath: string;
   inputs: Record<string, string>;
+  /** Draft into this workflow rather than making one: it was made when the
+   *  procedure was brought in to be understood (Orbit 2.1). */
+  into?: string;
   model: ModelProvider;
   /** Each turn as it lands, for whoever is watching the screen. */
   onTurn?: (turn: Turn) => void;
@@ -129,7 +132,7 @@ function inWords(issue: { path: PropertyKey[]; message: string }): string {
 export async function storeDraft(
   db: PoolClient,
   /** A recording has no written procedure: the demonstration is the description. */
-  opts: { name: string; procedure: string | null },
+  opts: { name: string; procedure: string | null; into?: string },
   draft: AuthoredDraft,
 ): Promise<Stored | NotStored> {
   // Validated before anything is written, and as a whole. Validating inside
@@ -152,10 +155,22 @@ export async function storeDraft(
 
   await db.query('BEGIN');
   try {
-    const { rows: [workflow] } = await db.query<{ id: string }>(
-      `INSERT INTO workflow (name, procedure, declared_inputs) VALUES ($1, $2, $3) RETURNING id`,
-      [opts.name, opts.procedure, JSON.stringify(draft.declaredInputs)]);
-    const workflowId = workflow!.id;
+    // Into the draft that was made when the procedure was brought in, whose
+    // procedure column already holds the whole text as written. The walk was
+    // given only the sentences Orbit does, and that is not what the author
+    // wrote, so it does not replace it.
+    const workflowId = opts.into
+      ? (await db.query<{ id: string }>(
+          `UPDATE workflow SET declared_inputs = $2, updated_at = now() WHERE id = $1 RETURNING id`,
+          [opts.into, JSON.stringify(draft.declaredInputs)])).rows[0]?.id
+      : (await db.query<{ id: string }>(
+          `INSERT INTO workflow (name, procedure, declared_inputs) VALUES ($1, $2, $3) RETURNING id`,
+          [opts.name, opts.procedure, JSON.stringify(draft.declaredInputs)])).rows[0]?.id;
+    if (!workflowId) throw new Error(`there is no draft ${opts.into} to write into`);
+    // The sort's calls are already on this draft; the walk's are numbered after them.
+    const { rows: [before] } = await db.query<{ turn: number }>(
+      `SELECT coalesce(max(turn), 0)::int AS turn FROM model_call WHERE workflow_id = $1`, [workflowId]);
+    const offset = before!.turn;
 
     // Steps carry stable ids so that references survive the reordering §6
     // permits; position is only what the editor shows.
@@ -193,7 +208,7 @@ export async function storeDraft(
            (workflow_id, turn, provider, model, shown, answered, verdict, why, tokens_in, tokens_out,
             tokens_cached, tokens_cache_written, cost_micros)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [workflowId, turn.turn, turn.provider, turn.model,
+        [workflowId, offset + turn.turn, turn.provider, turn.model,
          JSON.stringify(turn.shown), turn.answered ? JSON.stringify(turn.answered) : null,
          turn.verdict, turn.why, turn.tokensIn, turn.tokensOut,
          turn.tokensCached, turn.tokensCacheWritten, turn.costMicros]);

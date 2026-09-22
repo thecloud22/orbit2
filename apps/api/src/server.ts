@@ -6,6 +6,7 @@ import { listWorkflows, readWorkflow } from './workflows.ts';
 import { versionNeeds } from './activate.ts';
 import { actions, readBody } from './actions.ts';
 import { readAdmin, readAudit } from './admin.ts';
+import { readUnderstanding } from './understanding.ts';
 import { pool } from './db.ts';
 
 const port = Number(process.env['ORBIT_PORT'] ?? 4000);
@@ -31,6 +32,9 @@ createServer(async (req, res) => {
       if (kind === 'recordings' && id && verb === 'finish') {
         const r = await actions.finishRecording(id); return json(res, r.status, r.body);
       }
+      if (kind === 'understanding' && !id) {
+        const r = await actions.understand(body); return json(res, r.status, r.body);
+      }
       if (kind === 'authoring' && !id) {
         const r = await actions.bringIn(body); return json(res, r.status, r.body);
       }
@@ -42,6 +46,8 @@ createServer(async (req, res) => {
       }
       if (kind === 'workflows' && id) {
         if (verb === 'confirm') { const r = await actions.confirm(id, body); return json(res, r.status, r.body); }
+        if (verb === 'relabel') { const r = await actions.relabel(id, body); return json(res, r.status, r.body); }
+        if (verb === 'understood') { const r = await actions.confirmUnderstanding(id); return json(res, r.status, r.body); }
         if (verb === 'publish') { const r = await actions.publish(id); return json(res, r.status, r.body); }
         if (verb === 'pause')   { const r = await actions.pause(id, body); return json(res, r.status, r.body); }
         if (verb === 'archive') { const r = await actions.archive(id, body); return json(res, r.status, r.body); }
@@ -81,6 +87,14 @@ createServer(async (req, res) => {
       return session
         ? json(res, 200, session)
         : json(res, 404, { kind: 'nothingMatching', why: 'No authoring session with that reference.' });
+    }
+
+    const understood = /^\/api\/workflows\/([0-9a-f-]{36})\/understanding$/.exec(url.pathname);
+    if (understood) {
+      const found = await readUnderstanding(understood[1]!);
+      return found
+        ? json(res, 200, found)
+        : json(res, 404, { kind: 'nothingMatching', reference: understood[1] });
     }
 
     const workflow = /^\/api\/workflows\/([0-9a-f-]{36})$/.exec(url.pathname);

@@ -11,6 +11,7 @@ import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
 import { authorAndStore, storeDraft } from './author-store.ts';
+import { sortAndStore } from './sort-store.ts';
 import { record } from './record.ts';
 import { openBrowser } from './surface-browser.ts';
 import type { OpenSurface } from './surface.ts';
@@ -65,13 +66,53 @@ async function claimAuthoring(): Promise<string | null> {
   return rows[0]?.id ?? null;
 }
 
+/**
+ * A procedure waiting to be sorted (Orbit 2.1). No browser: the model is shown
+ * numbered sentences and nothing else, so this could live anywhere — it lives
+ * here so that every model call Orbit makes goes out from one place.
+ */
+async function claimSorting(): Promise<string | null> {
+  const { rows } = await pool.query<{ workflow_id: string }>(
+    `UPDATE understanding SET status = 'sorting',
+            claimed_by = $1, lease_expires_at = now() + interval '10 minutes'
+      WHERE workflow_id = (SELECT workflow_id FROM understanding
+                   WHERE status = 'queued'
+                     AND (lease_expires_at IS NULL OR lease_expires_at < now())
+                   ORDER BY queued_at FOR UPDATE SKIP LOCKED LIMIT 1)
+      RETURNING workflow_id`, [worker]);
+  return rows[0]?.workflow_id ?? null;
+}
+
+async function sortOne(workflowId: string) {
+  const db = await pool.connect();
+  try {
+    console.log(`  sorting the sentences of ${workflowId}`);
+    const result = await sortAndStore(db, workflowId, modelFromEnvironment());
+    if (result.sorted) {
+      await db.query(`UPDATE understanding SET status = 'sorted', sorted_at = now() WHERE workflow_id = $1`,
+        [workflowId]);
+      console.log(`  sorted: ${result.labelled} sentences labelled`);
+    } else {
+      await db.query(`UPDATE understanding SET status = 'refused', refused = $2 WHERE workflow_id = $1`,
+        [workflowId, JSON.stringify({ describe: result.describe })]);
+      console.log(`  not sorted: ${result.describe}`);
+    }
+  } catch (error) {
+    await db.query(`UPDATE understanding SET status = 'refused', refused = $2 WHERE workflow_id = $1`,
+      [workflowId, JSON.stringify({ describe: `Orbit could not sort this: ${String(error)}` })]).catch(() => undefined);
+    console.log(`  not sorted: ${String(error)}`);
+  } finally {
+    db.release();
+  }
+}
+
 async function authorOne(sessionId: string) {
   const db = await pool.connect();
   try {
     const { rows: [s] } = await db.query<{
       name: string; procedure: string; application_id: string; start_path: string;
-      inputs: Record<string, string>; host: string;
-    }>(`SELECT s.name, s.procedure, s.application_id, s.start_path, s.inputs,
+      inputs: Record<string, string>; host: string; into_workflow_id: string | null;
+    }>(`SELECT s.name, s.procedure, s.application_id, s.start_path, s.inputs, s.into_workflow_id,
                (r.addresses->0->>'host') AS host, (r.addresses->0->>'scheme') AS scheme
           FROM authoring_session s
           JOIN application_revision r ON r.application_id = s.application_id
@@ -93,6 +134,7 @@ async function authorOne(sessionId: string) {
       origin: originOf(s),
       startPath: s.start_path,
       inputs: s.inputs,
+      ...(s.into_workflow_id ? { into: s.into_workflow_id } : {}),
       model: modelFromEnvironment(),
       onTurn: (t) => {
         console.log(`  turn ${t.turn} ${t.verdict}: ${t.why}`);
@@ -387,6 +429,9 @@ for (;;) {
   // hold one up would make the queue answer to whoever asked most recently.
   const runId = await claimOne();
   if (runId) { await runOne(runId); if (once) break; continue; }
+
+  const sortingId = await claimSorting();
+  if (sortingId) { await sortOne(sortingId); if (once) break; continue; }
 
   const sessionId = await claimAuthoring();
   if (sessionId) { await authorOne(sessionId); if (once) break; continue; }
