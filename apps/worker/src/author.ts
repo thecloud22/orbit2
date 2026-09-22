@@ -271,6 +271,9 @@ export interface Turn {
   provider: string;
   tokensIn: number;
   tokensOut: number;
+  /** Of `tokensIn`, read from the provider's prompt cache, and written to it. */
+  tokensCached: number;
+  tokensCacheWritten: number;
   /** Null when no price is held for the model that answered. Not zero: a turn
    *  that cost something unknown and a turn that cost nothing are different
    *  facts, and the spend record is read by whoever pays for it. */
@@ -458,6 +461,7 @@ export async function authorFromProcedure(opts: {
           answered: answered.value, verdict, why,
           model: answered.model, provider: answered.provider,
           tokensIn: answered.tokensIn, tokensOut: answered.tokensOut,
+          tokensCached: answered.tokensCached, tokensCacheWritten: answered.tokensCacheWritten,
           costMicros: answered.costUnknown ? null : answered.costMicros,
         };
       };
@@ -716,6 +720,7 @@ export async function authorFromProcedure(opts: {
       answered: said as unknown as Proposal, verdict, why,
       model: answered.model, provider: answered.provider,
       tokensIn: answered.tokensIn, tokensOut: answered.tokensOut,
+          tokensCached: answered.tokensCached, tokensCacheWritten: answered.tokensCacheWritten,
       costMicros: answered.costUnknown ? null : answered.costMicros,
     });
 

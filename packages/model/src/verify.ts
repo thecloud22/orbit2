@@ -69,6 +69,6 @@ if (answered.value) {
   console.log('  nothing usable —', answered.refusedBecause);
 }
 console.log(`\n  answered by: ${answered.model}`);
-console.log(`  tokens: ${answered.tokensIn} in, ${answered.tokensOut} out`);
+console.log(`  tokens: ${answered.tokensIn} in (${answered.tokensCached} read from the cache, ${answered.tokensCacheWritten} written to it), ${answered.tokensOut} out`);
 console.log(`  cost: ${answered.costUnknown ? 'not known — no rate held for this model'
   : `$${(answered.costMicros / 1e6).toFixed(6)}`}`);

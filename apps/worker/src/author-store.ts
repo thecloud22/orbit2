@@ -190,11 +190,13 @@ export async function storeDraft(
     for (const turn of draft.turns) {
       await db.query(
         `INSERT INTO model_call
-           (workflow_id, turn, provider, model, shown, answered, verdict, why, tokens_in, tokens_out, cost_micros)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+           (workflow_id, turn, provider, model, shown, answered, verdict, why, tokens_in, tokens_out,
+            tokens_cached, tokens_cache_written, cost_micros)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [workflowId, turn.turn, turn.provider, turn.model,
          JSON.stringify(turn.shown), turn.answered ? JSON.stringify(turn.answered) : null,
-         turn.verdict, turn.why, turn.tokensIn, turn.tokensOut, turn.costMicros]);
+         turn.verdict, turn.why, turn.tokensIn, turn.tokensOut,
+         turn.tokensCached, turn.tokensCacheWritten, turn.costMicros]);
     }
 
     await db.query(

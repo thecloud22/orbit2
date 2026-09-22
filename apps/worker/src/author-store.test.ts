@@ -60,7 +60,7 @@ test('an interpretation with one bad step stores none of the good ones', async (
             aStep('the queue')],
     declaredInputs: [], questions: [asQuestion('something the model could not settle')],
     turns: [{ turn: 1, provider: 'test', model: 'test', shown: { page: '/pipeline', elements: 3, asking: 'what next?' }, answered: null,
-              verdict: 'kept', why: 'a step', tokensIn: 1, tokensOut: 1, costMicros: 1 }],
+              verdict: 'kept', why: 'a step', tokensIn: 1, tokensOut: 1, tokensCached: 0, tokensCacheWritten: 0, costMicros: 1 }],
   });
 
   const result = await storeDraft(db as never, opts, draft);
@@ -121,9 +121,9 @@ test('an interpretation that holds together is stored, with its reasoning', asyn
     declaredInputs: [{ name: 'reference', label: 'Reference', type: 'text', required: true }],
     questions: [asQuestion('what should this be called when it finishes this way?')],
     turns: [{ turn: 1, provider: 'test', model: 'test', shown: { page: '/pipeline', elements: 3, asking: 'what next?' }, answered: null,
-              verdict: 'kept', why: 'a step', tokensIn: 1, tokensOut: 1, costMicros: 1 },
+              verdict: 'kept', why: 'a step', tokensIn: 1, tokensOut: 1, tokensCached: 0, tokensCacheWritten: 0, costMicros: 1 },
             { turn: 2, provider: 'test', model: 'test', shown: { page: '/pipeline', elements: 3, asking: 'what next?' }, answered: null,
-              verdict: 'rejected', why: 'named something not on the page', tokensIn: 1, tokensOut: 1, costMicros: 1 }],
+              verdict: 'rejected', why: 'named something not on the page', tokensIn: 1, tokensOut: 1, tokensCached: 0, tokensCacheWritten: 0, costMicros: 1 }],
   });
 
   const result = await storeDraft(db as never, opts, draft);

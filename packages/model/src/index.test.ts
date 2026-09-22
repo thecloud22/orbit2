@@ -265,3 +265,22 @@ test('a provider with no adapter is refused at start-up, saying what to use inst
     /expected openai or bedrock/,
   );
 });
+
+test('a call is priced by what the cache did with its input', async () => {
+  const { costOf } = await import('./index.ts');
+  const luna = priceFor('gpt-6-luna')!;
+  // The two calls measured on 2026-09-22: the first wrote the prompt to the
+  // cache, the second read it back.
+  const first = { tokensIn: 6183, tokensOut: 26, tokensCached: 0, tokensCacheWritten: 6180 };
+  const second = { tokensIn: 6183, tokensOut: 40, tokensCached: 6162, tokensCacheWritten: 18 };
+  assert.equal(costOf(luna, first), Math.round(3 * 0.1 + 6180 * 0.125 + 26 * 0.5));
+  assert.equal(costOf(luna, second), Math.round(3 * 0.1 + 6162 * 0.01 + 18 * 0.125 + 40 * 0.5));
+  assert.ok(costOf(luna, second) < costOf(luna, first) / 5, 'a reused prompt costs a fraction');
+});
+
+test('a model with no cache rates is priced at its input rate, erring high', async () => {
+  const { costOf } = await import('./index.ts');
+  const nova = priceFor('amazon.nova-lite-v1')!;
+  const usage = { tokensIn: 1000, tokensOut: 0, tokensCached: 600, tokensCacheWritten: 0 };
+  assert.equal(costOf(nova, usage), Math.round(1000 * 0.06));
+});

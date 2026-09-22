@@ -28,8 +28,13 @@ export interface Answered<T> {
    *  a record read in six months must still say which one produced it. */
   model: string;
   provider: string;
+  /** Every input token, including those read from or written to the cache. */
   tokensIn: number;
   tokensOut: number;
+  /** Of `tokensIn`, how many were read from the provider's prompt cache. */
+  tokensCached: number;
+  /** Of `tokensIn`, how many were written to it, which some models bill above the input rate. */
+  tokensCacheWritten: number;
   costMicros: number;
   /** True when no price is held for this model, so the cost above is not a
    *  figure. Reporting zero for a model whose price is unknown would put a
@@ -43,6 +48,28 @@ export interface ModelProvider {
   readonly provider: string;
   readonly model: string;
   propose<T>(asked: Asked, schema: z.ZodType<T>, shape: Record<string, unknown>): Promise<Answered<T>>;
+}
+
+/**
+ * `cached` and `written` are what an input token costs when read from, or
+ * written to, the provider's prompt cache. Where a model has none listed, the
+ * input rate stands in for both: a figure that errs high rather than low.
+ */
+export type Rate = { in: number; out: number; cached?: number; written?: number };
+
+/**
+ * What a call cost, in millionths of a dollar. Input read from the cache and
+ * input written to it are priced at their own rates; the rest at the input
+ * rate. The provider caches on its own, so a figure that ignored this was
+ * wrong in both directions: too high when the prompt was reused, too low when
+ * it was written.
+ */
+export function costOf(rate: Rate, usage: { tokensIn: number; tokensOut: number; tokensCached: number; tokensCacheWritten: number }): number {
+  const plain = Math.max(0, usage.tokensIn - usage.tokensCached - usage.tokensCacheWritten);
+  return Math.round(plain * rate.in
+    + usage.tokensCached * (rate.cached ?? rate.in)
+    + usage.tokensCacheWritten * (rate.written ?? rate.in)
+    + usage.tokensOut * rate.out);
 }
 
 /**
@@ -67,16 +94,17 @@ export interface ModelProvider {
  * is a line, and `pnpm verify:model` says which case a model falls into
  * before a session spends anything on it.
  */
-const PRICE: Record<string, { in: number; out: number }> = {
+const PRICE: Record<string, Rate> = {
   // OpenAI, by the name ORBIT_MODEL holds.
-  'gpt-4.1-nano': { in: 0.1, out: 0.4 },
-  'gpt-4.1-mini': { in: 0.4, out: 1.6 },
-  'gpt-4.1': { in: 2, out: 8 },
+  'gpt-4.1-nano': { in: 0.1, out: 0.4, cached: 0.025 },
+  'gpt-4.1-mini': { in: 0.4, out: 1.6, cached: 0.1 },
+  'gpt-4.1': { in: 2, out: 8, cached: 0.5 },
   // Read from developers.openai.com/api/docs/pricing on 2026-09-22. Both are
   // reasoning models: their thinking is billed as output, so a call costs
   // more tokens than mini's would, and the recorded figure is what shows it.
-  'gpt-5.6-luna': { in: 0.2, out: 1.2 },
-  'gpt-6-luna': { in: 0.1, out: 0.5 },
+  // Writing to the cache costs 1.25× the input rate on these; reading, 0.1×.
+  'gpt-5.6-luna': { in: 0.2, out: 1.2, cached: 0.02, written: 0.25 },
+  'gpt-6-luna': { in: 0.1, out: 0.5, cached: 0.01, written: 0.125 },
 
   // Amazon's own, through the same surface.
   'amazon.nova-premier-v1': { in: 2.5, out: 12.5 },
@@ -109,7 +137,7 @@ const ROUTED = /^(?:us|eu|apac|jp|au|ca|global|us-gov)\./;
  * Authoring sends around 20k, so it does not arise; if a prompt ever grows
  * that far, this is the comment that says what it stopped being true.
  */
-const CLAUDE: Record<string, { in: number; out: number }> = {
+const CLAUDE: Record<string, Rate> = {
   'claude-opus-4-1': { in: 15, out: 75 },
   'claude-opus-4': { in: 15, out: 75 },
   'claude-3-opus': { in: 15, out: 75 },
@@ -149,7 +177,7 @@ function claudeFamily(model: string): string | null {
  * were enough to miss the table entirely and report the cost as unknown for a
  * model whose price is sitting in it.
  */
-export function priceFor(model: string): { in: number; out: number } | undefined {
+export function priceFor(model: string): Rate | undefined {
   const family = claudeFamily(model);
   if (family) return CLAUDE[family];
   return PRICE[model] ?? PRICE[model.replace(ROUTED, '').replace(/:\d+$/, '')];
@@ -191,15 +219,24 @@ class OpenAIProvider implements ModelProvider {
     const body = await response.json() as {
       model: string;
       choices: Array<{ message: { content: string | null } }>;
-      usage?: { prompt_tokens: number; completion_tokens: number };
+      usage?: {
+        prompt_tokens: number; completion_tokens: number;
+        prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+      };
     };
 
-    const tokensIn = body.usage?.prompt_tokens ?? 0;
-    const tokensOut = body.usage?.completion_tokens ?? 0;
+    // OpenAI caches a prompt's prefix on its own, and on the newer models bills
+    // the write. Both are counted here so the record says what was paid.
+    const usage = {
+      tokensIn: body.usage?.prompt_tokens ?? 0,
+      tokensOut: body.usage?.completion_tokens ?? 0,
+      tokensCached: body.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+      tokensCacheWritten: body.usage?.prompt_tokens_details?.cache_write_tokens ?? 0,
+    };
     const price = priceFor(this.model);
     const meta = {
-      model: body.model, provider: this.provider, tokensIn, tokensOut,
-      costMicros: price ? Math.round(tokensIn * price.in + tokensOut * price.out) : 0,
+      model: body.model, provider: this.provider, ...usage,
+      costMicros: price ? costOf(price, usage) : 0,
       ...(price ? {} : { costUnknown: true }),
     };
 
@@ -346,11 +383,14 @@ export class BedrockProvider implements ModelProvider {
     }
 
     const tokensIn = out.usage?.inputTokens ?? 0;
+    // Converse does not cache unless asked to, and Orbit does not ask.
+    const tokensCached = 0;
+    const tokensCacheWritten = 0;
     const tokensOut = out.usage?.outputTokens ?? 0;
     const price = priceFor(this.model);
     const meta = {
-      model: this.model, provider: this.provider, tokensIn, tokensOut,
-      costMicros: price ? Math.round(tokensIn * price.in + tokensOut * price.out) : 0,
+      model: this.model, provider: this.provider, tokensIn, tokensOut, tokensCached, tokensCacheWritten,
+      costMicros: price ? costOf(price, { tokensIn, tokensOut, tokensCached, tokensCacheWritten }) : 0,
       ...(price ? {} : { costUnknown: true }),
     };
 
