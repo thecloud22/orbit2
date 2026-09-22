@@ -72,6 +72,11 @@ const PRICE: Record<string, { in: number; out: number }> = {
   'gpt-4.1-nano': { in: 0.1, out: 0.4 },
   'gpt-4.1-mini': { in: 0.4, out: 1.6 },
   'gpt-4.1': { in: 2, out: 8 },
+  // Read from developers.openai.com/api/docs/pricing on 2026-09-22. Both are
+  // reasoning models: their thinking is billed as output, so a call costs
+  // more tokens than mini's would, and the recorded figure is what shows it.
+  'gpt-5.6-luna': { in: 0.2, out: 1.2 },
+  'gpt-6-luna': { in: 0.1, out: 0.5 },
 
   // Amazon's own, through the same surface.
   'amazon.nova-premier-v1': { in: 2.5, out: 12.5 },
