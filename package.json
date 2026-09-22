@@ -13,7 +13,8 @@
     "test": "pnpm -r test",
     "verify:model": "node --env-file=.env --experimental-strip-types packages/model/src/verify.ts",
     "dev": "pnpm -r --parallel dev",
-    "eval:sort": "node --env-file=.env --experimental-strip-types apps/worker/src/sort-eval.ts docs/testing/sort"
+    "eval:sort": "node --env-file=.env --experimental-strip-types apps/worker/src/sort-eval.ts docs/testing/sort",
+    "test:scenarios": "node scripts/scenarios.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.0"
