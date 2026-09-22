@@ -78,8 +78,6 @@ and the requirement false, in a history that cannot afterwards be corrected.
 
 | Item | Owner | Note |
 |---|---|---|
-| The application slice 1 runs against | **Karthik** | To be provided. Legacy, server-rendered, WebSEAL-fronted. |
-| One accessibility snapshot of a real WebSEAL page | **Karthik** | Determines whether the locator ladder in Decision 11 needs a rung below structural anchors. Cheap to get, expensive to discover late. |
 | The locator's stored shape | Claude | One typed column on `step`, and the only hole left in Decision 14. To be settled from **measurement** against `apps/legacy-portal`, not from argument. |
 | The terminal path | Claude | Not built. `demo/terminal-portal` warns how: drive a real emulator, never decode the datastream, or a misreading on Orbit's side is cancelled by the same misreading in the fixture. |
 | The locator ladder, from measurement | Claude | **Closed** as Decision 15. 181 elements measured against `demo/legacy-portal`; the ladder is ordered by how often each rung is *wrong*, and `text` and `structural` are refused outright without corroboration because 28 of 54 structural matches were confidently wrong. |
@@ -95,6 +93,9 @@ and the requirement false, in a history that cannot afterwards be corrected.
 
 ## Open, not blocking
 
+- **No WebSEAL application will be provided** (Karthik, 2026-09-22). Slice 1 is proved against
+  `demo/legacy-portal` only. The locator ladder (Decision 15) has never met a real WebSEAL page, so
+  whether it needs a rung below structural anchors is unknown. A known risk, no longer a blocker.
 - Which OpenAI model, and the browser tooling behind the authoring session (Decision 7 fixes the
   interface; the model and driver reach no record).
 - When a judged step is built (Decision 13 fixes its shape; slice 1 hands off instead).
