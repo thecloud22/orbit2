@@ -40,7 +40,7 @@ export async function readWorkflow(id: string) {
   // Activation is the workflow's pointer, not a column on the version — a
   // version is a fact and cannot be rewritten to say it went live (0008).
   const { rows: versions } = await pool.query(
-    `SELECT v.id, v.version, v.digest, v.published_at,
+    `SELECT v.id, v.version, v.digest, v.published_at, v.body->'understanding'->'coverage' AS coverage,
             (v.id = w.live_version_id) AS live, w.paused_at
        FROM workflow_version v JOIN workflow w ON w.id = v.workflow_id
       WHERE v.workflow_id = $1 ORDER BY v.version DESC`, [id]);

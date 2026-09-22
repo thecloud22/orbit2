@@ -110,7 +110,14 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
     `SELECT coalesce(max(version), 0) + 1 AS next FROM workflow_version WHERE workflow_id = $1`, [workflowId]);
   const version = Number(previous!.next);
 
-  const body = { steps, declaredInputs: inputs, outcomes, applications: apps };
+  // Orbit 2.1: the sort this was drafted from, as it stood when confirmed —
+  // every sentence, what it was taken to be, and who said so. Inside the body,
+  // so the digest covers it: an auditor can see which sentences the version
+  // does, and which it deliberately leaves to people (§4, criterion 6). A
+  // draft brought in any other way carries none, and its digest is unchanged.
+  const understanding = await sortOf(db, workflowId);
+  const body = { steps, declaredInputs: inputs, outcomes, applications: apps,
+    ...(understanding ? { understanding } : {}) };
   const digest = `sha256:${createHash('sha256').update(canonical(body)).digest('hex')}`;
 
   // Derived from the steps, not asserted. It was written as `false` for every
@@ -151,4 +158,18 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
     [workflowId, JSON.stringify({ version, digest, steps: steps.length })]);
 
   return { outcome: 'published', version, digest };
+}
+
+async function sortOf(db: PoolClient, workflowId: string) {
+  const { rows: [u] } = await db.query(`SELECT 1 FROM understanding WHERE workflow_id = $1`, [workflowId]);
+  if (!u) return null;
+  const { rows: sentences } = await db.query<{ number: string; text: string; label: string | null; givenBy: string | null }>(
+    `SELECT p.key || '.' || s.n AS number, s.text, l.label, l.given_by AS "givenBy"
+       FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
+       LEFT JOIN LATERAL (SELECT label, given_by FROM sentence_label
+                           WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
+      WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, s.n`, [workflowId]);
+  const byLabel: Record<string, number> = {};
+  for (const x of sentences) if (x.label) byLabel[x.label] = (byLabel[x.label] ?? 0) + 1;
+  return { sentences, coverage: { total: sentences.length, byLabel } };
 }

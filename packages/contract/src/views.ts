@@ -91,4 +91,7 @@ export interface RunView {
   events: RunEventView[];
   stepArtefacts: ArtefactView[];
   runArtefacts: ArtefactView[];
+  /** Sentences of the procedure this version deliberately leaves to people or
+   *  will not do (2.1). Empty for a version drafted any other way. */
+  leftToPeople?: Array<{ number: string; text: string; label: string | null }>;
 }

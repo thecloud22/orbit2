@@ -305,6 +305,27 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
         </div>
       </section>
 
+      {/* What the agent deliberately does not do. Said on every run, so work
+          left to a person is never mistaken for work the agent forgot (2.1). */}
+      {(data.leftToPeople?.length ?? 0) > 0 && (
+        <section style={{ padding: '16px 0 18px', borderBottom: '1px solid var(--rule)' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 9 }}>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Not done by this agent, on purpose</h2>
+            <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>from the procedure it was drafted from</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxWidth: 900 }}>
+            {data.leftToPeople!.map((s) => (
+              <div key={s.number} style={{ display: 'flex', gap: 14, fontSize: 13.5, lineHeight: 1.55 }}>
+                <span style={{ width: 40, flexShrink: 0, fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-2)', paddingTop: 2 }}>{s.number}</span>
+                <span style={{ flexGrow: 1 }}>{s.text}</span>
+                <span style={{ width: 150, flexShrink: 0, fontSize: 12.5, color: 'var(--ink-2)' }}>
+                  {s.label === 'wontDo' ? 'The procedure says not to' : 'Left to a person'}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <div style={{ display: 'flex', gap: 30, paddingTop: 20 }}>
         <div style={{ width: 486, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 11 }}>

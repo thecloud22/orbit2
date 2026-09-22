@@ -19,7 +19,9 @@ interface Draft {
                   *  rather than by the `complete` column somebody set. */
                  missing: string[] }>;
   notes: Array<{ id: string; kind: string; body: string; answer: string | null; resolved_at: string | null }>;
-  versions: Array<{ id: string; version: number; digest: string; published_at: string }>;
+  versions: Array<{ id: string; version: number; digest: string; published_at: string;
+    /** What the version was drafted from, when it came through a sort (2.1). */
+    coverage: { total: number; byLabel: Record<string, number> } | null }>;
   authoring: { turns: Turn[]; producedNothing: number; costMicros: number; costUnknown?: boolean };
   /** Present when the procedure was brought in to be understood first (2.1). */
   understanding: { status: string; confirmed_at: string | null } | null;
@@ -686,6 +688,9 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
                 <span style={{ width: 90, fontSize: 13.5, fontWeight: 600 }}>Version {v.version}</span>
                 <span style={{ flexGrow: 1, fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink-2)' }}>
                   {v.digest.replace('sha256:', '').slice(0, 24)}</span>
+                {v.coverage && (
+                  <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{coverageLine(v.coverage)}</span>
+                )}
                 <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
                   {new Date(v.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
               </div>
@@ -743,4 +748,13 @@ function Stages({ confirmed, published, outstanding }: {
       ))}
     </div>
   );
+}
+
+/** A version's sort in one line: how much of the procedure is Orbit's, and what is not. */
+function coverageLine(c: { total: number; byLabel: Record<string, number> }): string {
+  const n = (k: string) => c.byLabel[k] ?? 0;
+  const parts = [`${n('task') + n('rule')} done by Orbit`];
+  if (n('forAPerson')) parts.push(`${n('forAPerson')} left to a person`);
+  if (n('wontDo')) parts.push(`${n('wontDo')} it won't do`);
+  return `${c.total} sentences: ${parts.join(' · ')}`;
 }

@@ -15,7 +15,8 @@ export async function readRun(reference: string) {
             -- person to follow and a reference is what a person quotes.
             original.reference AS rerun_of_reference,
             v.version, v.digest, v.outcomes, v.declared_inputs, v.applications, v.published_at,
-            v.may_change_records, w.name AS workflow_name, w.id AS workflow_id
+            v.may_change_records, w.name AS workflow_name, w.id AS workflow_id,
+            v.body->'understanding' AS understanding
        FROM run r
        JOIN workflow_version v ON v.id = r.version_id
        JOIN workflow w ON w.id = v.workflow_id
@@ -36,8 +37,15 @@ export async function readRun(reference: string) {
   // executed rather than from a draft somebody has edited since.
   const steps = (run.body?.steps ?? []) as unknown[];
 
+  // What this agent deliberately does not do, from the sort its version was
+  // drafted from (2.1, criterion 6). Every run says it, so a reader never
+  // mistakes work left to a person for work the agent forgot.
+  const { understanding, ...rest } = run as { understanding: { sentences: Array<{ number: string; text: string; label: string | null }> } | null };
+  const leftToPeople = (understanding?.sentences ?? [])
+    .filter((s) => s.label === 'forAPerson' || s.label === 'wontDo');
+
   return {
-    run, steps, attempts, events,
+    run: rest, steps, attempts, events, leftToPeople,
     stepArtefacts: artefacts.filter((a) => a.attempt_id !== null),
     runArtefacts: artefacts.filter((a) => a.attempt_id === null),
   };

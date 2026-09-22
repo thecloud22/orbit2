@@ -164,3 +164,49 @@ test('a draft nobody recorded an application for is refused, not guessed', async
   assert.equal(result.outcome, 'refused');
   assert.ok(result.outcome === 'refused' && result.blockers.some((b) => b.kind === 'applicationUnknown'));
 });
+
+test('a version drafted from a sort carries the sort, and its digest covers it', async () => {
+  const id = await aWorkflowWith([{ kind: 'end', declares: { summary: 'done', outcome: 'done', publishes: [] } }]);
+  // aWorkflowWith records the application through an understanding row, as a
+  // 2.1 draft has; give it the sentences and labels one would.
+  const { rows: [part] } = await db.query<{ id: string }>(
+    `INSERT INTO procedure_part (workflow_id, key, source, body) VALUES ($1, '1', 'pasted', 'Log in. Phone them.') RETURNING id`, [id]);
+  const { rows: sentences } = await db.query<{ id: string }>(
+    `INSERT INTO procedure_sentence (part_id, n, text, kind, start_at, end_at)
+     VALUES ($1, 1, 'Log in.', 'prose', 0, 7), ($1, 2, 'Phone them.', 'prose', 8, 19) RETURNING id`, [part!.id]);
+  await db.query(
+    `INSERT INTO sentence_label (sentence_id, label, reason, basis, given_by)
+     VALUES ($1, 'task', 'r', 'stated', 'model'), ($2, 'forAPerson', 'r', 'stated', 'author')`,
+    [sentences[0]!.id, sentences[1]!.id]);
+
+  const result = await mintVersion(db as never, id);
+  assert.equal(result.outcome, 'published');
+  const { rows: [v] } = await db.query<{ body: { understanding?: { sentences: unknown[]; coverage: unknown } } }>(
+    `SELECT body FROM workflow_version WHERE workflow_id = $1`, [id]);
+  assert.deepEqual(v!.body.understanding, {
+    sentences: [
+      { number: '1.1', text: 'Log in.', label: 'task', givenBy: 'model' },
+      { number: '1.2', text: 'Phone them.', label: 'forAPerson', givenBy: 'author' },
+    ],
+    coverage: { total: 2, byLabel: { task: 1, forAPerson: 1 } },
+  });
+});
+
+test('a version drafted any other way carries no sort', async () => {
+  const { rows: [w] } = await db.query<{ id: string }>(
+    `INSERT INTO workflow (name, declared_inputs, outcomes, examples, confirmed_at)
+     VALUES ('Walked directly', '[]', $1, $2, now()) RETURNING id`,
+    [JSON.stringify([{ name: 'done', label: 'Done' }]), JSON.stringify({ done: 'x' })]);
+  await db.query(`INSERT INTO workflow_step (workflow_id, position, kind, declares, complete)
+    VALUES ($1, 1, 'end', $2, true)`, [w!.id, JSON.stringify({ summary: 'done', outcome: 'done', publishes: [] })]);
+  const app = await broughtInAgainst(db, w!.id);
+  // Swap the understanding row for the authoring session a 2.0 walk leaves.
+  await db.query(`DELETE FROM understanding WHERE workflow_id = $1`, [w!.id]);
+  await db.query(`INSERT INTO authoring_session (name, procedure, application_id, start_path, status, workflow_id, ended_at)
+    VALUES ('x', 'y', $1, '/', 'brought in', $2, now())`, [app, w!.id]);
+  const result = await mintVersion(db as never, w!.id);
+  assert.equal(result.outcome, 'published');
+  const { rows: [v] } = await db.query<{ body: Record<string, unknown> }>(
+    `SELECT body FROM workflow_version WHERE workflow_id = $1`, [w!.id]);
+  assert.equal('understanding' in v!.body, false);
+});
