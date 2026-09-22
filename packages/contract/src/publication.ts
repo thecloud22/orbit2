@@ -101,6 +101,10 @@ export const blocker = z.discriminatedUnion('kind', [
 
   /** An ending with no example value, so no test could prove it (§4). */
   object({ kind: z.literal('endingHasNoExample'), outcome: name }),
+  /** Nothing records which application the draft was brought in against, so
+   *  a version could only guess which one to reach — and guessing is how a
+   *  run went to the wrong host. */
+  object({ kind: z.literal('applicationUnknown') }),
 
   /** §4 and acceptance criterion 3: an outstanding question, assumption,
    *  exception or unacknowledged risk. */
@@ -150,6 +154,8 @@ export function describeBlocker(b: Blocker): string {
       return `"${b.label}" at step ${b.step} is found in a way that can return the wrong thing, so it needs something that must also be true.`;
     case 'addressNotPermitted':
       return `Step ${b.step} would reach ${b.address}, which this workflow is not registered to reach.`;
+    case 'applicationUnknown':
+      return 'Orbit does not know which application this was brought in against, so it cannot say which one a run may reach.';
     case 'endingHasNoExample':
       return `"${b.outcome}" has no example value, so no test could prove it.`;
     case 'outstanding':

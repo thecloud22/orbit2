@@ -80,17 +80,31 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
     examples,
   }));
 
-  if (blockers.length > 0) return { outcome: 'refused', blockers };
-
   const { rows: apps } = await db.query(
     // a.surface is copied because Decision 5 requires the version to be
     // "wholly self-contained: surface, host lists and credential name are
     // inside the version". Without it the worker would have to ask the live
     // application what it is driving, and editing that application later would
     // silently change how an already-published version runs.
+    //
+    // Only the application this workflow was brought in against. This copied
+    // the whole registry, and the worker runs against the first entry, so a
+    // version authored against the mortgage portal ran against google.com the
+    // day somebody registered a test application whose id sorted first.
+    // Decision 5 item 8: a workflow names its own set.
     `SELECT DISTINCT ON (a.id) a.name, a.surface, r.revision, r.addresses, r.sign_in_as, r.credential_name, r.formats
        FROM application a JOIN application_revision r ON r.application_id = a.id
-      ORDER BY a.id, r.revision DESC`);
+      WHERE a.id IN (
+        SELECT application_id FROM understanding WHERE workflow_id = $1
+        UNION SELECT application_id FROM authoring_session WHERE workflow_id = $1 OR into_workflow_id = $1
+        UNION SELECT application_id FROM recording_session WHERE workflow_id = $1)
+      ORDER BY a.id, r.revision DESC`, [workflowId]);
+  if (apps.length === 0) blockers.push({ kind: 'applicationUnknown' });
+  // Slice 1 fills the set with exactly one (Decision 5 item 8), and the worker
+  // runs against the first. Two would be a choice the version cannot make yet.
+  if (apps.length > 1) blockers.push({ kind: 'applicationUnknown' });
+
+  if (blockers.length > 0) return { outcome: 'refused', blockers };
 
   const { rows: [previous] } = await db.query<{ next: number }>(
     `SELECT coalesce(max(version), 0) + 1 AS next FROM workflow_version WHERE workflow_id = $1`, [workflowId]);

@@ -19,6 +19,7 @@ import { configureStep } from './configure.ts';
 import { backToDraft, discardDraft, insertStep } from './edit.ts';
 import { confirm } from './confirm.ts';
 import { mintVersion } from './mint.ts';
+import { broughtInAgainst } from './test-fixtures.ts';
 import { asDraftStep } from './publish.ts';
 
 const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.env['USER']}@localhost/orbit2_test`;
@@ -35,6 +36,7 @@ beforeEach(async () => {
     `INSERT INTO workflow (name, outcomes, confirmed_at) VALUES ('Configure', $1, now()) RETURNING id`,
     [JSON.stringify([{ name: 'done', label: 'Done' }])]);
   workflowId = w!.id;
+  await broughtInAgainst(db, workflowId);
   readId = crypto.randomUUID();
   endId = crypto.randomUUID();
   await db.query(

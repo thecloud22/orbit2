@@ -21,6 +21,8 @@ interface Draft {
   notes: Array<{ id: string; kind: string; body: string; answer: string | null; resolved_at: string | null }>;
   versions: Array<{ id: string; version: number; digest: string; published_at: string }>;
   authoring: { turns: Turn[]; producedNothing: number; costMicros: number; costUnknown?: boolean };
+  /** Present when the procedure was brought in to be understood first (2.1). */
+  understanding: { status: string; confirmed_at: string | null } | null;
 }
 interface Turn { turn: number; model: string; verdict: string; why: string;
   /** The model's answer as it came back. `element` is what it named on the
@@ -361,7 +363,7 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
       borderRadius: 6, background: 'var(--panel)' }}><EmptyState of={draft.of} /></div></Page>;
   }
 
-  const { workflow, steps, notes, versions, authoring } = draft.value;
+  const { workflow, steps, notes, versions, authoring, understanding } = draft.value;
   const outstanding = notes.filter((n) => !n.resolved_at);
   /** Readings Orbit took on its own. Settled, so they block nothing — but a
    *  reading nobody is shown is a reading nobody can disagree with. */
@@ -467,6 +469,26 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
         outstanding={outstanding.length} />
 
       {refused && <Refusal title="Nothing was changed" blockers={refused} />}
+
+      {/* Brought in to be understood first (2.1). Until the sort is confirmed
+          there are no steps to check, and the only useful thing on this page
+          is the way back to it. Once confirmed, the sort is still how the
+          draft came to say what it says. */}
+      {understanding && (
+        <div style={{ paddingTop: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ fontSize: 13.5, color: 'var(--ink-2)' }}>
+            {understanding.confirmed_at
+              ? 'Drafted from a sort of the procedure you confirmed.'
+              : understanding.status === 'refused'
+                ? 'Orbit could not sort this procedure.'
+                : 'Nothing is drafted yet: the sort of the procedure has not been confirmed.'}
+          </span>
+          <Action kind={understanding.confirmed_at ? 'ghost' : 'primary'}
+            onClick={() => go({ at: 'understanding', id })}>
+            {understanding.confirmed_at ? 'See the sort' : 'Check the sort'}
+          </Action>
+        </div>
+      )}
 
       {/* Confirming was two acts: a button in the header that revealed the
           form, and the attestation at the foot of it. The first decided

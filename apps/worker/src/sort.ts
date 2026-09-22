@@ -40,7 +40,15 @@ export type Sorted =
 
 const answer = z.object({ labels: z.array(labelEntry) });
 
-const shape = {
+/**
+ * The answer's shape, for one batch. The sentence field is an enum of that
+ * batch's own numbers, so the provider's structured output cannot produce a
+ * number it was not given. `checkLabelling` still checks every answer; this
+ * only means a model is not wasting a call finding out. On the first real
+ * sort, without it, one call in two came back with numbers in a shape the
+ * check refused.
+ */
+const shapeFor = (numbers: readonly string[]) => ({
   type: 'object',
   properties: {
     labels: {
@@ -48,7 +56,7 @@ const shape = {
       items: {
         type: 'object',
         properties: {
-          sentence: { type: 'string' },
+          sentence: { type: 'string', enum: numbers },
           label: { type: 'string', enum: ['task', 'rule', 'forAPerson', 'background', 'wontDo'] },
           reason: { type: 'string' },
           basis: { type: 'string', enum: ['stated', 'inferred'] },
@@ -60,7 +68,7 @@ const shape = {
   },
   required: ['labels'],
   additionalProperties: false,
-};
+});
 
 /**
  * Fixed text, first in every call, so the provider's prompt cache can reuse
@@ -79,9 +87,11 @@ export const SORT = [
   '            "only when ...", "otherwise ...", what counts as which outcome.',
   'forAPerson  Work only a person can do or decide: a phone call, a judgement, waiting for someone,',
   '            asking someone, anything done outside the application.',
-  'background  Says nothing anyone has to do: a title, a heading, a purpose, an explanation, a note on',
-  '            how often something happens.',
+  'background  Says nothing anyone has to do: a title, a heading, a purpose, who the procedure is for.',
   'wontDo      Something the procedure says NOT to do, or that must not be done at all.',
+  '',
+  'A sentence that qualifies a rule belongs to the rule: one saying an outcome is normal, is not an',
+  'error, happens often, or when the rule applies. Label it rule, not background.',
   '',
   'basis is "stated" when the sentence itself says so plainly, and "inferred" when you concluded it.',
   'reason is one short plain sentence saying why.',
@@ -115,7 +125,7 @@ export async function sortSentences(
       const answered = await model.propose(
         { purpose: 'sort the procedure\'s sentences', instruction: SORT,
           shown: [`SENTENCES (${range}):`, ...listed, '', correction, asking].filter(Boolean).join('\n') },
-        answer, shape);
+        answer, shapeFor(numbers));
 
       const record = (verdict: SortTurn['verdict'], why: string) => turns.push(turnOf(
         firstTurn + turns.length, { asking, sentences: numbers }, answered, verdict, why));

@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import { Client } from 'pg';
 import { describeBlocker } from '@orbit/contract';
 import { migrate } from './migrate.ts';
+import { broughtInAgainst } from './test-fixtures.ts';
 import { mintVersion } from './mint.ts';
 
 const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.env['USER']}@localhost/orbit2_test`;
@@ -30,6 +31,7 @@ before(async () => {
      JSON.stringify([{ name: 'found', label: 'Found' }]),
      JSON.stringify({ found: 'SR-4417' })]);
   workflowId = w!.id;
+  await broughtInAgainst(db, workflowId);
 
   await step(1, 'read', { summary: 'the status',
     region: { label: 'Status', binding: { strategy: 'roleAndName', role: 'heading', name: 'Status' } },
@@ -102,6 +104,7 @@ async function aWorkflowWith(steps: Array<{ kind: string; declares: object }>): 
       `INSERT INTO workflow_step (workflow_id, position, kind, declares, complete)
        VALUES ($1, $2, $3, $4, true)`, [w!.id, i + 1, s.kind, JSON.stringify(s.declares)]);
   }
+  await broughtInAgainst(db, w!.id);
   return w!.id;
 }
 
@@ -134,4 +137,30 @@ test('a version that presses something committing says it may change records', a
 
 test('a version that only reads does not claim authority it does not need', async () => {
   assert.equal(await authorityOf(await aWorkflowWith([ending])), false);
+});
+
+test('a version carries only the application it was brought in against', async () => {
+  // Another application registered beside it, whose id may well sort first.
+  const { rows: [other] } = await db.query<{ id: string }>(
+    `INSERT INTO application (name, surface) VALUES ('Somewhere else', 'browser') RETURNING id`);
+  await db.query(`INSERT INTO application_revision (application_id, revision, addresses) VALUES ($1, 1, $2)`,
+    [other!.id, JSON.stringify([{ host: 'google.com', pathPrefix: '/' }])]);
+  const id = await aWorkflowWith([{ kind: 'end', declares: { summary: 'done', outcome: 'done', publishes: [] } }]);
+  const result = await mintVersion(db as never, id);
+  assert.equal(result.outcome, 'published');
+  const { rows: [v] } = await db.query<{ applications: Array<{ addresses: Array<{ host: string }> }> }>(
+    `SELECT applications FROM workflow_version WHERE workflow_id = $1`, [id]);
+  assert.deepEqual(v!.applications.map((a) => a.addresses[0]!.host), ['localhost:4101']);
+});
+
+test('a draft nobody recorded an application for is refused, not guessed', async () => {
+  const { rows: [w] } = await db.query<{ id: string }>(
+    `INSERT INTO workflow (name, declared_inputs, outcomes, examples, confirmed_at)
+     VALUES ('Orphan', '[]', $1, $2, now()) RETURNING id`,
+    [JSON.stringify([{ name: 'done', label: 'Done' }]), JSON.stringify({ done: 'x' })]);
+  await db.query(`INSERT INTO workflow_step (workflow_id, position, kind, declares, complete)
+    VALUES ($1, 1, 'end', $2, true)`, [w!.id, JSON.stringify({ summary: 'done', outcome: 'done', publishes: [] })]);
+  const result = await mintVersion(db as never, w!.id);
+  assert.equal(result.outcome, 'refused');
+  assert.ok(result.outcome === 'refused' && result.blockers.some((b) => b.kind === 'applicationUnknown'));
 });

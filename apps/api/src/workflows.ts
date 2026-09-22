@@ -45,8 +45,12 @@ export async function readWorkflow(id: string) {
        FROM workflow_version v JOIN workflow w ON w.id = v.workflow_id
       WHERE v.workflow_id = $1 ORDER BY v.version DESC`, [id]);
 
+  // Orbit 2.1: where the sort stands, for a draft that was brought in to be understood.
+  const { rows: [understanding] } = await pool.query(
+    `SELECT status, confirmed_at FROM understanding WHERE workflow_id = $1`, [id]);
+
   return {
-    workflow, steps, notes, versions,
+    workflow, steps, notes, versions, understanding: understanding ?? null,
     authoring: {
       turns,
       /** Kept apart on purpose: a count of turns that says nothing about how

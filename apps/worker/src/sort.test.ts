@@ -12,12 +12,15 @@ import { BATCH, SORT, sortSentences } from './sort.ts';
 
 type Reply = (asked: Asked, call: number) => unknown;
 
-function fake(reply: Reply): ModelProvider & { asked: Asked[] } {
+function fake(reply: Reply): ModelProvider & { asked: Asked[]; shapes: unknown[] } {
   const asked: Asked[] = [];
+  const shapes: unknown[] = [];
   return {
-    provider: 'test', model: 'test', asked,
-    async propose<T>(a: Asked, schema: { safeParse(v: unknown): { success: boolean; data?: T } }): Promise<Answered<T>> {
+    provider: 'test', model: 'test', asked, shapes,
+    async propose<T>(a: Asked, schema: { safeParse(v: unknown): { success: boolean; data?: T } },
+      shape: unknown): Promise<Answered<T>> {
       asked.push(a);
+      shapes.push(shape);
       const parsed = schema.safeParse(reply(a, asked.length));
       return {
         value: parsed.success ? parsed.data! : null, model: 'test', provider: 'test',
@@ -25,7 +28,7 @@ function fake(reply: Reply): ModelProvider & { asked: Asked[] } {
         ...(parsed.success ? {} : { refusedBecause: 'not the shape asked for' }),
       };
     },
-  } as ModelProvider & { asked: Asked[] };
+  } as ModelProvider & { asked: Asked[]; shapes: unknown[] };
 }
 
 const sentences = (n: number, part = '1') =>
@@ -94,4 +97,14 @@ test('a long procedure is sorted a batch at a time, and one bad batch refuses al
 test('turns are numbered after the calls already on the draft', async () => {
   const sorted = await sortSentences(sentences(1), fake((a) => labelsFor(a)), 7);
   assert.equal(sorted.turns[0]!.turn, 7);
+});
+
+test('the answer can only name the numbers of its own batch', async () => {
+  const model = fake((a) => labelsFor(a));
+  await sortSentences(sentences(BATCH + 2), model);
+  const numbersIn = (shape: unknown) =>
+    (shape as { properties: { labels: { items: { properties: { sentence: { enum: string[] } } } } } })
+      .properties.labels.items.properties.sentence.enum;
+  assert.equal(numbersIn(model.shapes[0]).length, BATCH);
+  assert.deepEqual(numbersIn(model.shapes[1]), [`1.${BATCH + 1}`, `1.${BATCH + 2}`]);
 });

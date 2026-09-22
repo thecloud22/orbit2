@@ -57,7 +57,6 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const [startPath, setStartPath] = useState('/');
   const [inputs, setInputs] = useState<Array<{ name: string; value: string }>>([{ name: '', value: '' }]);
   const [refused, setRefused] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
 
   /**
    * Only what can actually be chosen.
@@ -76,13 +75,17 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const application = apps.state === 'loaded'
     ? apps.value.applications.find((a) => a.id === chosen) : undefined;
 
+  /**
+   * Orbit 2.1: the draft is made now and sorted before anything is walked, so
+   * this goes to what Orbit understood rather than straight to a browser.
+   */
   async function ask() {
     setRefused(null);
-    const result = await send<{ id: string }>('/api/authoring', {
+    const result = await send<{ id: string }>('/api/understanding', {
       name, procedure, applicationId: chosen, startPath,
       inputs: Object.fromEntries(inputs.filter((i) => i.name.trim()).map((i) => [i.name.trim(), i.value])),
     });
-    if (result.ok) setSessionId(result.value.id);
+    if (result.ok) go({ at: 'understanding', id: result.value.id });
     else setRefused(result.why);
   }
 
@@ -95,8 +98,6 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
     if (result.ok) go({ at: 'recording', id: result.value.id });
     else setRefused(result.why);
   }
-
-  if (sessionId) return <Working id={sessionId} go={go} onAbandon={() => setSessionId(null)} />;
 
   return (
     <Page kicker="New agent" title="Bring in a procedure"
@@ -216,12 +217,12 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
               why={!chosen ? 'Choose which system it runs against'
                 : !name.trim() ? 'Give the agent a name'
                 : 'Say a little more about the procedure — this is everything Orbit works from'}
-              onClick={() => void ask()}>Work through it</Action>
+              onClick={() => void ask()}>Read it through</Action>
             {/* One line beside the button, not two. What is missing matters
                 more than what will happen, so it takes the place. */}
             {ready && (
               <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
-                A browser opens and Orbit does it once, against {application?.name}.
+                Orbit sorts every sentence first. Nothing is drafted until you have checked it.
               </span>
             )}
           </div>
@@ -264,11 +265,12 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
       <Section title="What happens next">
         <div style={{ borderTop: '1px solid var(--ink)' }}>
           {[
-            ['Orbit reads the application', 'It works through what you gave it, looking at each page.'],
-            ['You check every step', 'Each one is shown beside the thing on the page it was matched to.'],
-            ['You confirm, then publish', 'A version is fixed the moment it is made. Editing afterwards changes nothing until you publish again.'],
-          ].map(([title, body], i) => (
-            <div key={title} style={{ borderBottom: i === 2 ? 'none' : '1px solid var(--rule)',
+            ['Orbit sorts every sentence', 'Each one becomes something Orbit does, a rule, something for a person, background, or something Orbit won\'t do. None is left out.'],
+            ['You check the sort', 'Change any sentence that is sorted wrongly, then confirm. Nothing is drafted before you do.'],
+            ['Orbit works through its part', 'It goes through the sentences marked as its own against the application, looking at each page.'],
+            ['You check every step, then publish', 'A version is fixed the moment it is made. Editing afterwards changes nothing until you publish again.'],
+          ].map(([title, body], i, all) => (
+            <div key={title} style={{ borderBottom: i === all.length - 1 ? 'none' : '1px solid var(--rule)',
               padding: '14px 0', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
               <span style={{ width: 20, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right', paddingTop: 2 }}>{i + 1}</span>
               <div>
@@ -293,7 +295,7 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
  * alike, because the rejected ones are the ones that say where the procedure
  * and the application disagree.
  */
-function Working({ id, go, onAbandon }: { id: string; go: (to: Route) => void; onAbandon: () => void }) {
+export function Working({ id, go, onAbandon }: { id: string; go: (to: Route) => void; onAbandon: () => void }) {
   const [state, setState] = useState<Session | null>(null);
 
   useEffect(() => {

@@ -12,6 +12,8 @@ export type Route =
   | { at: 'agents' }
   | { at: 'agent'; id: string }
   | { at: 'bringIn' }
+  /** What Orbit understood of a procedure, before anything is drafted (2.1). */
+  | { at: 'understanding'; id: string }
   /** A recording in progress. Addressable because it outlives the tab: the
    *  browser being driven belongs to the worker, and a refresh used to lose
    *  the only control that ends it — leaving a window open with nobody able
@@ -30,6 +32,7 @@ export function parse(path: string): Route {
     case '': case undefined: return { at: 'home' };
     case 'agents': return second ? { at: 'agent', id: second } : { at: 'agents' };
     case 'bring-in': return { at: 'bringIn' };
+    case 'understanding': return second ? { at: 'understanding', id: second } : { at: 'bringIn' };
     case 'recordings': return second ? { at: 'recording', id: second } : { at: 'bringIn' };
     case 'runs': return second ? { at: 'run', reference: second } : { at: 'runs' };
     case 'start': return second ? { at: 'start', version: second } : { at: 'agents' };
@@ -46,6 +49,7 @@ export function href(route: Route): string {
     case 'agents': return '/agents';
     case 'agent': return `/agents/${route.id}`;
     case 'bringIn': return '/bring-in';
+    case 'understanding': return `/understanding/${route.id}`;
     case 'recording': return `/recordings/${route.id}`;
     case 'runs': return '/runs';
     case 'run': return `/runs/${route.reference}`;
