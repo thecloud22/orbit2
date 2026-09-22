@@ -171,5 +171,10 @@ async function sortOf(db: PoolClient, workflowId: string) {
       WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, s.n`, [workflowId]);
   const byLabel: Record<string, number> = {};
   for (const x of sentences) if (x.label) byLabel[x.label] = (byLabel[x.label] ?? 0) + 1;
-  return { sentences, coverage: { total: sentences.length, byLabel } };
+  // The chat that shaped the draft, in order: what was asked, and what Orbit
+  // did about it (§12, guard rail 9). A blocked message is here as blocked,
+  // with nothing of what it said.
+  const { rows: chat } = await db.query<{ saidBy: string; text: string | null; state: string }>(
+    `SELECT said_by AS "saidBy", text, state FROM chat_message WHERE workflow_id = $1 ORDER BY seq`, [workflowId]);
+  return { sentences, coverage: { total: sentences.length, byLabel }, chat };
 }

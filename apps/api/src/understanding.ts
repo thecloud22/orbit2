@@ -17,6 +17,7 @@ import type { ClientBase, PoolClient } from 'pg';
 import { askedFor, type Queued } from './authoring.ts';
 import { readPdf } from '@orbit/procedure';
 import { insertPart, PART_LIMIT, readCoverage } from './procedure.ts';
+import { chatOf } from './chat.ts';
 import { pool } from './db.ts';
 
 /** A PDF as it travels in a request. 20 MB of file, base64-encoded. */
@@ -151,6 +152,7 @@ export async function understandingOf(db: ClientBase, workflowId: string) {
     ...u,
     parts,
     rules: tables ?? null,
+    chat: await chatOf(db, workflowId),
     sentences: await sentencesWithLabels(db, workflowId),
     coverage: await readCoverage(db, workflowId),
   };

@@ -18,6 +18,7 @@ import { cancelRun, retryRun, rerun } from './control.ts';
 import { backToDraft, discardDraft, deleteStep, editStep, insertStep, moveStep } from './edit.ts';
 import { editApplication, registerApplication } from './applications.ts';
 import { describeBlocker } from '@orbit/contract';
+import { sendMessage, takeOffer } from './chat.ts';
 import { addNextPart, bringInToUnderstand, confirmUnderstanding, relabel, setMoreToCome } from './understanding.ts';
 
 export async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -185,6 +186,17 @@ export const actions = {
 
   async moreToCome(workflowId: string, body: unknown) {
     const result = await inTransaction((db) => setMoreToCome(db, workflowId, body));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  /** The chat on a draft (§12): a message, checked here before any model sees it. */
+  async chat(workflowId: string, body: unknown) {
+    const result = await inTransaction((db) => sendMessage(db, workflowId, body));
+    return result.ok ? { status: 202, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async takeOffer(workflowId: string, body: unknown) {
+    const result = await inTransaction((db) => takeOffer(db, workflowId, body));
     return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
   },
 

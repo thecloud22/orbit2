@@ -47,6 +47,8 @@ createServer(async (req, res) => {
       if (kind === 'workflows' && id) {
         if (verb === 'confirm') { const r = await actions.confirm(id, body); return json(res, r.status, r.body); }
         if (verb === 'relabel') { const r = await actions.relabel(id, body); return json(res, r.status, r.body); }
+        if (verb === 'chat') { const r = await actions.chat(id, body); return json(res, r.status, r.body); }
+        if (verb === 'take-offer') { const r = await actions.takeOffer(id, body); return json(res, r.status, r.body); }
         if (verb === 'parts') { const r = await actions.addPart(id, body); return json(res, r.status, r.body); }
         if (verb === 'more-to-come') { const r = await actions.moreToCome(id, body); return json(res, r.status, r.body); }
         if (verb === 'understood') { const r = await actions.confirmUnderstanding(id); return json(res, r.status, r.body); }

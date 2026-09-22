@@ -12,6 +12,7 @@ import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
 import { authorAndStore, storeDraft } from './author-store.ts';
 import { sortAndStore, tabulateAndStore } from './sort-store.ts';
+import { answerAndStore } from './chat-store.ts';
 import { record } from './record.ts';
 import { openBrowser } from './surface-browser.ts';
 import type { OpenSurface } from './surface.ts';
@@ -103,6 +104,34 @@ async function sortOne(workflowId: string) {
     await db.query(`UPDATE understanding SET status = 'refused', refused = $2 WHERE workflow_id = $1`,
       [workflowId, JSON.stringify({ describe: `Orbit could not sort this: ${String(error)}` })]).catch(() => undefined);
     console.log(`  not sorted: ${String(error)}`);
+  } finally {
+    db.release();
+  }
+}
+
+/** A chat message waiting for an answer (§12). Somebody is watching the screen for it. */
+async function claimChat(): Promise<string | null> {
+  const { rows } = await pool.query<{ id: string }>(
+    `UPDATE chat_message SET claimed_by = $1, lease_expires_at = now() + interval '2 minutes'
+      WHERE id = (SELECT id FROM chat_message
+                   WHERE state = 'waiting' AND (lease_expires_at IS NULL OR lease_expires_at < now())
+                   ORDER BY seq FOR UPDATE SKIP LOCKED LIMIT 1)
+      RETURNING id`, [worker]);
+  return rows[0]?.id ?? null;
+}
+
+async function chatOne(messageId: string) {
+  const db = await pool.connect();
+  try {
+    console.log(`  chat: ${await answerAndStore(db, messageId, modelFromEnvironment())}`);
+  } catch (error) {
+    // Answered with a refusal rather than left waiting for a lease to lapse.
+    await db.query(`UPDATE chat_message SET state = 'answered' WHERE id = $1 AND state = 'waiting'`, [messageId]).catch(() => undefined);
+    await db.query(
+      `INSERT INTO chat_message (workflow_id, said_by, text, state, outcome, answers)
+       SELECT workflow_id, 'orbit', $2, 'refused', '{"refused":"failed"}', id FROM chat_message WHERE id = $1`,
+      [messageId, 'Orbit could not answer that just now. Nothing was changed.']).catch(() => undefined);
+    console.log(`  chat failed: ${String(error)}`);
   } finally {
     db.release();
   }
@@ -431,6 +460,9 @@ for (;;) {
   // hold one up would make the queue answer to whoever asked most recently.
   const runId = await claimOne();
   if (runId) { await runOne(runId); if (once) break; continue; }
+
+  const chatId = await claimChat();
+  if (chatId) { await chatOne(chatId); if (once) break; continue; }
 
   const sortingId = await claimSorting();
   if (sortingId) { await sortOne(sortingId); if (once) break; continue; }

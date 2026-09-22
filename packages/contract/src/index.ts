@@ -6,3 +6,4 @@ export * from './views.ts';
 export * from './failures.ts';
 export * from './publication.ts';
 export * from './procedure.ts';
+export * from './chat.ts';

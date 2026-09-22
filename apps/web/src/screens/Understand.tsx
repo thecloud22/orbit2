@@ -35,6 +35,12 @@ interface Understanding {
   }>;
   coverage: { total: number; placed: number; unplaced: string[]; byLabel: Record<Label, number> };
   rules: { tables: RuleTable[] | null; refused: string | null } | null;
+  chat: ChatMessage[];
+}
+
+interface ChatMessage {
+  id: string; said_by: 'author' | 'orbit'; text: string | null; state: string;
+  outcome: { departs?: boolean; refused?: string; offer?: string } | null; answers: string | null;
 }
 
 interface RuleTable {
@@ -67,6 +73,7 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
   const [nextPdf, setNextPdf] = useState<{ name: string; bytes: number; base64: string } | null>(null);
 
   const status = state.ok ? state.value.status : null;
+  const chatWaiting = state.ok && state.value.chat.some((m) => m.state === 'waiting');
   useEffect(() => {
     let live = true;
     const load = async () => {
@@ -83,10 +90,10 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
     void load();
     // Polled only while the worker has it. Once sorted, the page changes when
     // the author changes it, and not otherwise.
-    const waiting = status === null || status === 'queued' || status === 'sorting';
+    const waiting = status === null || status === 'queued' || status === 'sorting' || chatWaiting;
     const timer = waiting ? setInterval(() => { void load(); }, 1200) : null;
     return () => { live = false; if (timer) clearInterval(timer); };
-  }, [id, refresh, status]);
+  }, [id, refresh, status, chatWaiting]);
 
   if (walking) return <Working id={walking} go={go} onAbandon={() => setWalking(null)} />;
 
@@ -177,6 +184,27 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
           {u.rules.refused
             ? <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)', maxWidth: 760 }}>{u.rules.refused}</p>
             : u.rules.tables!.map((t, i) => <Table key={i} table={t} n={i + 1} />)}
+        </Section>
+      )}
+
+      {!confirmed && (sorted || u.chat.length > 0) && (
+        <Section title="Ask for a change" note="drafting only: this changes this draft and nothing else">
+          <Chat messages={u.chat} busy={busy || !sorted}
+            onSend={async (text) => {
+              setBusy(true); setRefused(null);
+              const result = await send(`/api/workflows/${id}/chat`, { text });
+              setBusy(false);
+              if (!result.ok) setRefused(result.why);
+              setRefresh((n) => n + 1);
+              return result.ok;
+            }}
+            onTake={async (messageId) => {
+              setBusy(true); setRefused(null);
+              const result = await send(`/api/workflows/${id}/take-offer`, { messageId });
+              setBusy(false);
+              if (!result.ok) setRefused(result.why);
+              setRefresh((n) => n + 1);
+            }} />
         </Section>
       )}
 
@@ -393,6 +421,59 @@ function Table({ table, n }: { table: RuleTable; n: number }) {
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/**
+ * The chat (§12). Orbit's answers are its own fixed words where it changed
+ * something or refused, and the model's only where it explained; each says
+ * what happened to the draft, so nobody has to infer it from a changed label.
+ */
+function Chat({ messages, busy, onSend, onTake }: {
+  messages: ChatMessage[]; busy: boolean;
+  onSend: (text: string) => Promise<boolean>; onTake: (messageId: string) => Promise<void>;
+}) {
+  const [text, setText] = useState('');
+  const taken = new Set(messages.filter((m) => m.state === 'applied' && m.answers).map((m) => m.answers!));
+  const waiting = messages.some((m) => m.state === 'waiting');
+  const tag = (m: ChatMessage): [string, string] | null =>
+    m.state === 'applied' ? (m.outcome?.departs ? ['Not in the procedure', 'var(--attention-ink)'] : ['Applied', 'var(--ok-ink)'])
+      : m.state === 'offered' ? ['Offered', 'var(--attention-ink)']
+      : m.state === 'refused' ? ['Not done', 'var(--failed-ink)']
+      : null;
+  return (
+    <div style={{ maxWidth: 900, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {messages.map((m) => m.said_by === 'author' ? (
+        <div key={m.id} style={{ alignSelf: 'flex-end', maxWidth: 620, background: 'var(--panel-2)', borderRadius: 8,
+          padding: '9px 12px', fontSize: 13.5, lineHeight: 1.5, color: m.text === null ? 'var(--ink-2)' : 'var(--ink)' }}>
+          {m.text ?? 'A message that looked like a secret. It was not sent and not kept.'}
+        </div>
+      ) : (
+        <div key={m.id} style={{ maxWidth: 700, border: '1px solid var(--rule-2)', borderRadius: 6, padding: '10px 13px',
+          background: 'var(--panel)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {tag(m) && <span style={{ fontSize: 12, fontWeight: 700, color: tag(m)![1] }}>{tag(m)![0]}</span>}
+          <span style={{ fontSize: 13.5, lineHeight: 1.55 }}>{m.text}</span>
+          {m.state === 'offered' && !taken.has(m.id) && (
+            <span><Action kind="ghost" disabled={busy} onClick={() => void onTake(m.id)}>Add it for a person</Action></span>
+          )}
+        </div>
+      ))}
+      {waiting && (
+        <div className="orbit-working" style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+          Orbit is reading that<span style={{ fontFamily: 'var(--mono)' }}>
+            <span className="orbit-dot">.</span><span className="orbit-dot">.</span><span className="orbit-dot">.</span></span>
+        </div>
+      )}
+      <label htmlFor="ask" style={{ fontSize: 12.5, fontWeight: 600, marginTop: 4 }}>Ask for a change to this draft</label>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <textarea id="ask" rows={2} value={text} onChange={(e) => setText(e.target.value)}
+          placeholder="Add a step in your words, say what a sentence is for, or ask why"
+          style={{ flexGrow: 1, font: 'inherit', fontSize: 13.5, border: '1px solid var(--rule-2)', borderRadius: 4,
+            padding: '9px 10px', resize: 'none', background: 'var(--panel)' }} />
+        <Action disabled={busy || waiting || !text.trim()} why={waiting ? 'Orbit is still answering' : 'Say what to change'}
+          onClick={() => void onSend(text).then((ok) => { if (ok) setText(''); })}>Send</Action>
+      </div>
     </div>
   );
 }
