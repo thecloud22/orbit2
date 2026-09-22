@@ -1,0 +1,19 @@
+Meridian Home Lending
+Underwriting Risk Review (Procedure UW-14)
+
+Purpose
+Use this procedure for any purchase file whose automated underwriting result needs a human decision on risk. It applies to conventional, FHA and jumbo files.
+
+Procedure
+1. Sign in to Meridian Home Lending with any user ID and password.
+2. Search the pipeline for the loan number and open the file.
+3. Read the loan program, the credit score, the debt-to-income ratio, the loan amount and the FEMA flood zone.
+4. If the credit score is below 620, decline the file citing a low credit score. The credit floor for FHA files is 580, not 620.
+5. If the debt-to-income ratio is over 43%, refer the file to a senior underwriter instead of deciding it. Do not attach conditions to a referred file.
+6. If the loan amount is over $806,500 and the program is not jumbo, refer the file to a senior underwriter.
+7. If the FEMA flood zone is anything other than X, attach the condition requiring flood insurance.
+8. Otherwise approve the file.
+9. For a referred file, wait for the senior underwriter to sign off, then record their decision on the file.
+10. If the borrower is self-employed, a person must read the income analyst's note and decide whether two years of tax returns are needed.
+
+Do not change the loan amount, the note rate or the borrower's details. Never approve a file that has been referred.

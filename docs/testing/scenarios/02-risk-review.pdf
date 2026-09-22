@@ -1,0 +1,56 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 2143 >>
+stream
+BT /F1 12 Tf 72 720 Td (Meridian Home Lending) Tj ET
+BT /F1 12 Tf 72 702 Td (Underwriting Risk Review \(Procedure UW-14\)) Tj ET
+BT /F1 12 Tf 72 684 Td (Purpose) Tj ET
+BT /F1 12 Tf 72 666 Td (Use this procedure for any purchase file whose automated underwriting result needs a) Tj ET
+BT /F1 12 Tf 72 648 Td (human decision on risk. It applies to conventional, FHA and jumbo files.) Tj ET
+BT /F1 12 Tf 72 630 Td (Procedure) Tj ET
+BT /F1 12 Tf 72 612 Td (1. Sign in to Meridian Home Lending with any user ID and password.) Tj ET
+BT /F1 12 Tf 72 594 Td (2. Search the pipeline for the loan number and open the file.) Tj ET
+BT /F1 12 Tf 72 576 Td (3. Read the loan program, the credit score, the debt-to-income ratio, the loan amount) Tj ET
+BT /F1 12 Tf 72 558 Td (and the FEMA flood zone.) Tj ET
+BT /F1 12 Tf 72 540 Td (4. If the credit score is below 620, decline the file citing a low credit score. The) Tj ET
+BT /F1 12 Tf 72 522 Td (credit floor for FHA files is 580, not 620.) Tj ET
+BT /F1 12 Tf 72 504 Td (5. If the debt-to-income ratio is over 43%, refer the file to a senior underwriter) Tj ET
+BT /F1 12 Tf 72 486 Td (instead of deciding it. Do not attach conditions to a referred file.) Tj ET
+BT /F1 12 Tf 72 468 Td (6. If the loan amount is over $806,500 and the program is not jumbo, refer the file to a) Tj ET
+BT /F1 12 Tf 72 450 Td (senior underwriter.) Tj ET
+BT /F1 12 Tf 72 432 Td (7. If the FEMA flood zone is anything other than X, attach the condition requiring flood) Tj ET
+BT /F1 12 Tf 72 414 Td (insurance.) Tj ET
+BT /F1 12 Tf 72 396 Td (8. Otherwise approve the file.) Tj ET
+BT /F1 12 Tf 72 378 Td (9. For a referred file, wait for the senior underwriter to sign off, then record their) Tj ET
+BT /F1 12 Tf 72 360 Td (decision on the file.) Tj ET
+BT /F1 12 Tf 72 342 Td (10. If the borrower is self-employed, a person must read the income analyst's note and) Tj ET
+BT /F1 12 Tf 72 324 Td (decide whether two years of tax returns are needed.) Tj ET
+BT /F1 12 Tf 72 306 Td (Do not change the loan amount, the note rate or the borrower's details. Never approve a) Tj ET
+BT /F1 12 Tf 72 288 Td (file that has been referred.) Tj ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 4 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+4 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+5 0 obj
+<< /Type /Catalog /Pages 4 0 R >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000002274 00000 n 
+0000002400 00000 n 
+0000002457 00000 n 
+trailer
+<< /Size 6 /Root 5 0 R >>
+startxref
+2506
+%%EOF

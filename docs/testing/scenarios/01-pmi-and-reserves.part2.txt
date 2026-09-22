@@ -1,0 +1,6 @@
+condition must be on the file before any decision is made.
+6. If the reserves are under 6 months, attach the condition requiring additional reserves.
+7. Then approve the file. It will show as conditionally approved when conditions are attached, and as approved when none are.
+8. Phone the borrower's loan officer if two or more conditions were attached, so they can warn the borrower before the commitment letter goes out.
+
+Never decline a file under this procedure, and never change the loan amount or the note rate. Declines go through the credit review procedure.
