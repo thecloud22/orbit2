@@ -168,16 +168,26 @@ async function authorOne(sessionId: string) {
         ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
 
     // Which task finds a record the rules say may not exist.
-    const { rows: [tables] } = s.into_workflow_id ? await db.query<{ tables: Array<{
+    const { rows: [tables] } = s.into_workflow_id ? await db.query<{ tables: Array<{ sentences: string[];
       columns: Array<{ name: string; readBy: string | null }>; rows: Array<{ when: Array<{ column: string; is: string }> }> }> | null }>(
       `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [s.into_workflow_id]) : { rows: [] };
     const mayBeAbsentAfter = [...new Set((tables?.tables ?? []).flatMap((t) => t.rows.flatMap((r) => r.when
       .filter((w) => w.is === 'isAbsent')
       .flatMap((w) => t.columns.find((c) => c.name === w.column)?.readBy ?? []))))];
+    // A procedure that decides something has its decision compiled from the
+    // confirmed tables, so the walk is given the work and not the rules: it
+    // reads what the rules compare, and Orbit builds the branches (decide.ts).
+    const decides = (tables?.tables ?? []).some((t) => !t.rows.every((r) => r.when.length === 1 && r.when[0]!.is === 'isAbsent'));
+    const { rows: order } = s.into_workflow_id ? await db.query<{ number: string }>(
+      `SELECT p.key || '.' || x.n AS number FROM procedure_sentence x JOIN procedure_part p ON p.id = x.part_id
+        WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
+    const ruleSentences = new Set(decides ? (tables?.tables ?? []).flatMap((t) => t.sentences) : []);
+    const walked = sentences.filter((x) => !ruleSentences.has(x.number));
 
     const result = await authorAndStore(db, {
-      ...(sentences.length ? { sentences } : {}),
+      ...(walked.length ? { sentences: walked } : {}),
       ...(mayBeAbsentAfter.length ? { mayBeAbsentAfter } : {}),
+      ...(decides ? { tables: (tables!.tables ?? []) as never, order: order.map((o) => o.number) } : {}),
       name: s.name,
       procedure: s.procedure,
       applicationId: s.application_id,

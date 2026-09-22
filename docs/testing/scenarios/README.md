@@ -74,12 +74,14 @@ Loop case); a judgement left to a person; prohibitions.
 
 ## Known limits, so they aren't mistaken for new faults
 
-- **One path per walk.** The walk drafts the path the example loan takes. Conditions it sees become
-  branches, but a branch whose path the example never took has no steps of its own (ACTIVE_TASK,
-  "A conditional path takes no action"). Bring a scenario in with a different example loan to see a
-  different path drafted.
-- **The second ending on `gpt-6-luna`.** The walk tends to mark the loan file as always present, so
-  "no such file" may not be drafted as its own ending (plan §16).
+- **Every path from one example.** The confirmed rule tables are compiled into branches, and each
+  outcome's button is connected on the loan page, so decline, refer and approve are all drafted from
+  one example loan. Check the tables before confirming: the draft does what they say.
+- **Scenario 1, sentence 1.8** ("Make sure the file has been through automated underwriting") is a
+  check a person makes before the review. Left as *Orbit does this*, the walk goes to the automated
+  underwriting page and presses *Run*; mark it and 1.9 *For a person*.
+- **"No such file"** is drafted when the procedure says what to do about a missing file (scenario 1
+  does; scenario 2 does not, so 99999 halts there, correctly).
 - **The Human in the Loop step** (scenario 2, step 9) is built. On the sort screen, tick *The run
   waits here until this is done* under that sentence. The walk places a waiting step there, opens the
   application again and drafts what follows. A run of it pauses as *Waiting for a person*; press

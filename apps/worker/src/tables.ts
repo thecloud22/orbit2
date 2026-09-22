@@ -35,6 +35,12 @@ export const TABLES = [
   '          isAbsent and isPresent take no value. then is what happens, in the procedure\'s words.',
   '          sentence is the rule sentence that says so.',
   'otherwise What happens when no row holds, if the procedure says; else null.',
+  '',
+  'Rows are tried in order and the first that holds decides, so write them in the procedure\'s order.',
+  'A column is only ever a value read from the application. What this procedure has itself already',
+  'decided ("a referred file", "once it is approved") is never a column: that is the order of the rows.',
+  'A sentence that says so ("do not attach conditions to a referred file", "never approve a referred',
+  'file") goes in the table\'s sentences and needs no column or row of its own.',
 ].join('\n');
 
 const answer = z.object({ tables: z.array(ruleTable) });

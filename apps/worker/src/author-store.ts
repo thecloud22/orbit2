@@ -54,6 +54,8 @@ export async function authorAndStore(db: PoolClient, opts: {
   /** The confirmed sentences, numbered, for a walk after a sort. */
   sentences?: ReadonlyArray<{ number: string; text: string; waits?: boolean }>;
   mayBeAbsentAfter?: readonly string[];
+  tables?: readonly import('@orbit/contract').RuleTable[];
+  order?: readonly string[];
   model: ModelProvider;
   /** Each turn as it lands, for whoever is watching the screen. */
   onTurn?: (turn: Turn) => void;

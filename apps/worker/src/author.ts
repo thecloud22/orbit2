@@ -16,7 +16,8 @@
  * because it is what a reviewer reads to answer "why does the workflow say
  * that?".
  */
-import { z, type Step } from '@orbit/contract';
+import { z, type RuleTable, type Step } from '@orbit/contract';
+import { compileTables } from './decide.ts';
 import type { ModelProvider } from '@orbit/model';
 import { chromium, type Page } from 'playwright';
 import { asAssumption, asQuestion, type Note } from './note.ts';
@@ -376,6 +377,10 @@ export async function authorFromProcedure(opts: {
    *  may not be there ("if there is no such file, say so"). The first value
    *  read after each is taken as possibly absent (Orbit 2.1). */
   mayBeAbsentAfter?: readonly string[];
+  /** The confirmed rule tables, compiled into branches once the walk has read
+   *  what they compare (`decide.ts`), with every sentence number in order. */
+  tables?: readonly RuleTable[];
+  order?: readonly string[];
 }): Promise<AuthoredDraft> {
   const { procedure, origin, startPath, inputs, model } = opts;
   // A ceiling, for the same reason `for each` has one: without it nobody can
@@ -394,6 +399,7 @@ export async function authorFromProcedure(opts: {
        'or null if it carries out none of them.'].join('\n')
     : procedure;
 
+  let decisionPage: { seen: Seen[]; url: string } | null = null;
   const browser = await chromium.launch();
   const page: Page = await browser.newPage();
   const steps: Step[] = [];
@@ -749,6 +755,11 @@ export async function authorFromProcedure(opts: {
         + ' only as far as it got. Check it against what you wrote, and say what should happen after the last step.'));
     }
   } finally {
+    // The page a decision is made on, kept for compiling the rule tables
+    // after the endings are settled; the browser does not outlive the walk.
+    if (opts.tables?.length) {
+      decisionPage = { seen: await snapshot(page).catch(() => []), url: page.url() };
+    }
     await page.close();
     await browser.close();
   }
@@ -1019,6 +1030,17 @@ export async function authorFromProcedure(opts: {
     }
   }
 
+  // The decision the procedure makes, from its confirmed tables, on the page
+  // the walk ended on — which is where a file's decision controls are,
+  // whichever example it was walked with.
+  if (opts.tables?.length && decisionPage) {
+    const compiled = await compileTables({ tables: opts.tables, steps, provenance, order: opts.order ?? [],
+      seen: decisionPage.seen, pageUrl: decisionPage.url, model, firstTurn: turns.length + 1 });
+    steps.splice(0, steps.length, ...compiled.steps);
+    for (const t of compiled.turns) noteTurn(t);
+    questions.push(...compiled.questions);
+  }
+
   const declaredInputs = [...new Set(
     steps.flatMap((s) => (s.kind === 'enter' && s.value.from === 'input' ? [s.value.value] : [])),
   )].map((name) => ({ name, label: name, type: 'text' as const, required: true as const }));
@@ -1219,3 +1241,6 @@ function makeStep(p: Proposal, element: Seen, procedure: string,
 /** Reached by tests only: the rules worth pinning without driving a browser. */
 export const forTest = {
   toType, comparisonFor, valueToEnter };
+
+/** For the rule-table compiler (`decide.ts`), which builds comparisons the same way. */
+export { comparisonFor, readable };

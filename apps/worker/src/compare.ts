@@ -70,14 +70,22 @@ export function decide(when: Comparison, resolve: Resolve): Decided {
   }
 
   switch (when.of) {
-    case 'text':
+    case 'text': {
+      // Compared the way a person reads them: letter case and the space
+      // around the words do not change what a value says. A procedure written
+      // "if the program is not jumbo" met a screen showing "Jumbo", compared
+      // exactly, and referred a jumbo file it should have approved. Both
+      // operands are still recorded exactly as they arrived (§10).
+      const l = left.trim().toLowerCase();
+      const r = right.trim().toLowerCase();
       switch (when.operator) {
-        case 'is':         return { decided: true, held: left === right, left, right };
-        case 'isNot':      return { decided: true, held: left !== right, left, right };
-        case 'contains':   return { decided: true, held: left.includes(right), left, right };
-        case 'startsWith': return { decided: true, held: left.startsWith(right), left, right };
+        case 'is':         return { decided: true, held: l === r, left, right };
+        case 'isNot':      return { decided: true, held: l !== r, left, right };
+        case 'contains':   return { decided: true, held: l.includes(r), left, right };
+        case 'startsWith': return { decided: true, held: l.startsWith(r), left, right };
       }
       break;
+    }
 
     case 'number': {
       const a = asNumber(left);

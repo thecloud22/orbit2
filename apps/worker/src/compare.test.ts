@@ -124,3 +124,12 @@ test('yes or no means the two words it means, and nothing else', () => {
   assert.equal(decided.decided, false);
   assert.equal(decided.decided === false && decided.kind, 'valueNotOfDeclaredType');
 });
+
+test('text is compared as a person reads it: letter case and surrounding space do not count', () => {
+  const when = (operator: 'is' | 'isNot', text: string) => ({ of: 'text', operator,
+    left: { from: 'step', value: 'loanProgram' }, right: { from: 'literal', literal: { type: 'text', text } } }) as never;
+  const read = (ref: { from: string }) => (ref.from === 'step' ? 'Jumbo ' : 'jumbo');
+  assert.equal((decide(when('is', 'jumbo'), read) as { held: boolean }).held, true);
+  assert.equal((decide(when('isNot', 'jumbo'), read) as { held: boolean }).held, false);
+  assert.equal((decide(when('is', 'jumbo'), read) as { left: string }).left, 'Jumbo ', 'kept exactly as read');
+});

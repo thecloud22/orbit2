@@ -1,0 +1,270 @@
+/**
+ * The confirmed rule tables, compiled into the draft (Orbit 2.1-d and f).
+ *
+ * A walk follows the one path its example takes, so a procedure that decides
+ * — decline, refer, or approve — was drafted as the example's path and nothing
+ * else. The confirmed tables already hold the whole decision. Orbit builds it
+ * from them, without a model: each row's conditions become branches in the
+ * order the procedure gives them, and each row's action follows. A model is
+ * asked one thing per table: which value the walk read is each column, and
+ * which control on the page carries out each action. Both answers are checked
+ * — a value from the list of what was read, a control that is on the page
+ * exactly once — or the table is not compiled and a person is asked.
+ *
+ * How the rows behave, stated so it can be checked against a procedure:
+ *  - a row whose action ends the procedure (decline, refer) is exclusive: when
+ *    its conditions hold it acts and finishes under its own conclusion;
+ *  - a row whose action does not end it (attach a condition) adds its action
+ *    and carries on to the next row;
+ *  - `otherwise` runs after the rows, unless a row ended the procedure.
+ */
+import { z, type RuleTable, type Step } from '@orbit/contract';
+import type { ModelProvider } from '@orbit/model';
+import { comparisonFor, couldMean, readable, type Turn } from './author.ts';
+import { asAssumption, asQuestion, type Note } from './note.ts';
+import { asText, calledIn, normaliseName, type Seen } from './snapshot.ts';
+
+export const DECIDE = [
+  'You are connecting a decision table from a written procedure to a page of the business application.',
+  'The procedure was worked through and its values were read; you are shown what was read, the table, and',
+  'the page as a numbered list of elements (kind — name).',
+  '',
+  'columns  For each column of the table, the value that was read which IS that column, copied exactly from',
+  '         VALUES READ, or null if none of them is.',
+  'actions  For each action, the controls on the page to press to carry it out, in order, each the NAME',
+  '         only (the part after the dash), at most three. ends=true when the action finishes the procedure',
+  '         (declining, referring, sending away); false when the procedure carries on after it (attaching a',
+  '         condition). For an action that ends, outcome is a short camelCase name for the conclusion and',
+  '         label how it reads to a person.',
+].join('\n');
+
+type Read = Extract<Step, { kind: 'read' }>;
+
+const answer = z.object({
+  columns: z.array(z.object({ column: z.string(), value: z.string().nullable() })),
+  actions: z.array(z.object({
+    action: z.string(), controls: z.array(z.string()).max(3), ends: z.boolean(),
+    outcome: z.string().nullable(), label: z.string().nullable(),
+  })),
+  why: z.string(),
+});
+
+const shapeFor = (columns: string[], actions: string[], values: string[]) => ({
+  type: 'object',
+  properties: {
+    columns: { type: 'array', items: { type: 'object',
+      properties: { column: { type: 'string', enum: columns }, value: { type: ['string', 'null'], enum: [...values, null] } },
+      required: ['column', 'value'], additionalProperties: false } },
+    actions: { type: 'array', items: { type: 'object',
+      properties: { action: { type: 'string', enum: actions }, controls: { type: 'array', items: { type: 'string' } },
+        ends: { type: 'boolean' }, outcome: { type: ['string', 'null'] }, label: { type: ['string', 'null'] } },
+      required: ['action', 'controls', 'ends', 'outcome', 'label'], additionalProperties: false } },
+    why: { type: 'string' },
+  },
+  required: ['columns', 'actions', 'why'],
+  additionalProperties: false,
+});
+
+/** A table the absence check already handles: every row is "the record is not there". */
+const onlyAbsence = (t: RuleTable) => t.rows.every((r) => r.when.length === 1 && r.when[0]!.is === 'isAbsent');
+
+export async function compileTables(opts: {
+  tables: readonly RuleTable[];
+  steps: Step[];
+  provenance: Record<string, string>;
+  /** Every sentence number, in the procedure's order. */
+  order: readonly string[];
+  seen: Seen[];
+  pageUrl: string;
+  model: ModelProvider;
+  firstTurn: number;
+}): Promise<{ steps: Step[]; turns: Turn[]; questions: Note[]; compiled: number }> {
+  const turns: Turn[] = [];
+  const questions: Note[] = [];
+  const at = (n: string) => opts.order.indexOf(n);
+  let steps = [...opts.steps];
+  let compiled = 0;
+
+  for (const table of opts.tables.filter((t) => !onlyAbsence(t))) {
+    const reads = steps.filter((x): x is Read => x.kind === 'read');
+    const values = reads.map((r) => r.produces.name);
+    const actionsSaid = [...new Set([...table.rows.map((r) => r.then), ...(table.otherwise ? [table.otherwise.then] : [])])];
+    const asking = `Connect "${table.question}" to the page.`;
+
+    const answered = await opts.model.propose(
+      { purpose: 'connect a rule table', instruction: DECIDE,
+        shown: [
+          `VALUES READ: ${reads.map((r) => `${r.produces.name} (${r.produces.label})`).join(', ') || 'none'}`, '',
+          `TABLE: ${table.question}`,
+          `COLUMNS: ${table.columns.map((c) => `${c.name} (${c.label})`).join(', ')}`,
+          ...table.rows.map((r, i) => `ROW ${i + 1}: when ${r.when.map((w) => `${w.column} ${w.is} ${w.value ?? ''}`.trim()).join(' and ')} → ${r.then}`),
+          ...(table.otherwise ? [`OTHERWISE → ${table.otherwise.then}`] : []),
+          `ACTIONS: ${actionsSaid.map((a) => `"${a}"`).join(', ')}`, '',
+          `PAGE (${opts.pageUrl}):`, asText(opts.seen), '', asking].join('\n') },
+      answer, shapeFor(table.columns.map((c) => c.name), actionsSaid, values));
+
+    const problems: string[] = [];
+    const said = answered.value;
+    const valueOf = new Map<string, Read>();
+    for (const c of table.columns) {
+      const named = said?.columns.find((x) => x.column === c.name)?.value;
+      const read = reads.find((r) => r.produces.name === named);
+      if (read) valueOf.set(c.name, read);
+      else problems.push(`no value that was read is "${c.label}"`);
+    }
+    const acts = new Map<string, { steps: Step[]; ends: boolean; outcome: string; label: string }>();
+    for (const action of actionsSaid) {
+      const a = said?.actions.find((x) => x.action === action);
+      if (!a || a.controls.length === 0) { problems.push(`nothing on the page carries out "${action}"`); continue; }
+      const made: Step[] = [];
+      for (const control of a.controls) {
+        const wanted = normaliseName(control);
+        const named = opts.seen.filter((s) => calledIn(s) === wanted && couldMean('activate', s));
+        if (named.length !== 1) {
+          problems.push(named.length === 0 ? `"${control}" is not something on the page that can be pressed`
+            : `"${control}" is on the page ${named.length} times, so it names neither`);
+          continue;
+        }
+        const e = named[0]!;
+        made.push({ id: crypto.randomUUID(), kind: 'activate', summary: e.name,
+          control: { label: e.labelledBy ?? e.name, binding: e.binding },
+          then: { describe: 'the page moves on' },
+          // Pressing a control that carries out a rule's action is taken to
+          // commit something: approving, declining and referring all do.
+          changesARecord: true });
+      }
+      const outcome = a.outcome && /^[a-z][a-zA-Z0-9]*$/.test(a.outcome) ? a.outcome : null;
+      if (a.ends && !outcome) problems.push(`"${action}" ends the procedure and has no name for that conclusion`);
+      acts.set(action, { steps: made, ends: a.ends, outcome: outcome ?? '', label: a.label?.trim() || action });
+    }
+
+    // Every condition must become a comparison Orbit can carry out.
+    const comparisons = table.rows.map((r) => r.when.map((w) => {
+      const read = valueOf.get(w.column);
+      if (!read) return null;
+      if (w.is === 'isAbsent' || w.is === 'isPresent') {
+        return { of: 'absence' as const, operator: (w.is === 'isAbsent' ? 'isAbsent' : 'isNotAbsent') as 'isAbsent',
+          left: { from: 'step' as const, value: read.produces.name } };
+      }
+      const made = comparisonFor({ value: read.produces.name, is: w.is, than: withoutUnit(w.value ?? '', read.produces.type) }, read.produces);
+      if (!made) problems.push(`"${read.produces.label} ${readable(w.is)} ${w.value}" is not a comparison Orbit can carry out`);
+      return made;
+    }));
+
+    const record = (verdict: Turn['verdict'], why: string) => turns.push({
+      turn: opts.firstTurn + turns.length, shown: { page: opts.pageUrl, elements: opts.seen.length, asking },
+      answered: said as never, verdict, why, model: answered.model, provider: answered.provider,
+      tokensIn: answered.tokensIn, tokensOut: answered.tokensOut,
+      tokensCached: answered.tokensCached, tokensCacheWritten: answered.tokensCacheWritten,
+      costMicros: answered.costUnknown ? null : answered.costMicros,
+    });
+
+    if (!said || problems.length) {
+      record(said ? 'rejected' : 'discarded', said ? problems.join('; ') : (answered.refusedBecause ?? 'no answer'));
+      questions.push(asQuestion(`Orbit could not build "${table.question}" (${table.sentences.join(', ')}) into the steps: `
+        + `${said ? problems.join('; ') : 'the model gave no usable answer'}. Those rules are not in the draft yet.`));
+      continue;
+    }
+
+    // Where the table goes: before the first step drafted from a sentence
+    // that comes after the table's last sentence, or before the final ending.
+    const last = Math.max(...table.sentences.map(at));
+    let insertAt = steps.findIndex((x) => opts.provenance[x.id] !== undefined && at(opts.provenance[x.id]!) > last);
+    if (insertAt === -1) insertAt = steps.map((x) => x.kind === 'end').indexOf(true);
+    if (insertAt === -1) insertAt = steps.length;
+    // The final ending, or the "not found" check, is never displaced by a table.
+    const before = steps.slice(0, insertAt);
+    const after = steps.slice(insertAt);
+    const readBefore = before.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : []));
+
+    const block: Step[] = [];
+    const rowEntry: string[] = table.rows.map(() => crypto.randomUUID());
+    const AFTER = `after-${crypto.randomUUID()}`;
+    const otherwise = table.otherwise ? acts.get(table.otherwise.then)! : null;
+    const afterRows = otherwise?.steps[0]?.id ?? AFTER;
+    table.rows.forEach((row, i) => {
+      const conds = comparisons[i]!;
+      const ids = conds.map((_, j) => (j === 0 ? rowEntry[i]! : crypto.randomUUID()));
+      const act = acts.get(row.then)!;
+      const actSteps = act.steps.map((x) => ({ ...x, id: crypto.randomUUID() }));
+      const next = i + 1 < table.rows.length ? rowEntry[i + 1]! : afterRows;
+      conds.forEach((when, j) => block.push({
+        id: ids[j]!, kind: 'branch',
+        summary: `${table.question} Row ${i + 1}: ${row.when[j]!.column} ${readable(row.when[j]!.is)} ${row.when[j]!.value ?? ''}`.trim(),
+        when: when!, ifTrue: j + 1 < ids.length ? ids[j + 1]! : (actSteps[0]?.id ?? next), ifFalse: next,
+      }));
+      for (const [k, x] of actSteps.entries()) { opts.provenance[x.id] = row.sentence; block.push(x); void k; }
+      if (act.ends) {
+        block.push({ id: crypto.randomUUID(), kind: 'end', summary: act.label, outcome: act.outcome, publishes: readBefore });
+      }
+    });
+    if (otherwise) {
+      for (const x of otherwise.steps) { if (table.otherwise?.sentence) opts.provenance[x.id] = table.otherwise.sentence; block.push(x); }
+      if (otherwise.ends) block.push({ id: crypto.randomUUID(), kind: 'end', summary: otherwise.label, outcome: otherwise.outcome, publishes: readBefore });
+    }
+
+    steps = [...before, ...block, ...after];
+    const afterId = after[0]?.id;
+    // Inserted before a step, so it is also inserted before every jump to that
+    // step: a later table placed ahead of an earlier table's "otherwise" was
+    // being jumped straight past.
+    if (afterId) {
+      const inBlock = new Set(block.map((x) => x.id));
+      for (const x of steps) {
+        if (x.kind !== 'branch' || inBlock.has(x.id)) continue;
+        if (x.ifTrue === afterId) x.ifTrue = block[0]!.id;
+        if (x.ifFalse === afterId) x.ifFalse = block[0]!.id;
+      }
+    }
+    for (const x of steps) {
+      if (x.kind !== 'branch') continue;
+      if (x.ifTrue === AFTER || x.ifFalse === AFTER) {
+        if (!afterId) { problems.push('nothing follows the table'); break; }
+        if (x.ifTrue === AFTER) x.ifTrue = afterId;
+        if (x.ifFalse === AFTER) x.ifFalse = afterId;
+      }
+    }
+    compiled += 1;
+    record('kept', `"${table.question}": ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`
+      + `${table.otherwise ? ' and otherwise' : ''}, from ${table.sentences.join(', ')}`);
+    questions.push(asAssumption(
+      `"${table.question}" is built from the rules as confirmed (${table.sentences.join(', ')}): rows are tried in order; a row that ends the procedure decides it, a row that does not adds its action and carries on${table.otherwise ? ', and otherwise follows' : ''}.`,
+      'Taken from the confirmed table. Check each branch against the procedure.'));
+  }
+  return { steps: withoutUnreachableEndings(steps), turns, questions, compiled };
+}
+
+/**
+ * An ending nothing can reach is dropped. When a table's rows and its
+ * "otherwise" each finish the procedure, the ending the walk put at the end
+ * is never reached, and publication rightly refuses an outcome no run could
+ * report. Only endings are dropped: anything else unreachable is a fault a
+ * person should see, and publication names it.
+ */
+function withoutUnreachableEndings(steps: Step[]): Step[] {
+  const index = new Map(steps.map((x, i) => [x.id, i]));
+  const seen = new Set<number>();
+  const queue = [0];
+  while (queue.length) {
+    const i = queue.pop()!;
+    if (seen.has(i) || i >= steps.length) continue;
+    seen.add(i);
+    const x = steps[i]!;
+    if (x.kind === 'end' || (x.kind === 'handOff' && !x.waits)) continue;
+    if (x.kind === 'branch') {
+      for (const t of [x.ifTrue, x.ifFalse]) { const n = index.get(t); if (n !== undefined) queue.push(n); }
+    } else queue.push(i + 1);
+  }
+  return steps.filter((x, i) => x.kind !== 'end' || seen.has(i));
+}
+
+/**
+ * "6 months", "90 days": a number with the unit the procedure writes it in.
+ * The page shows the number, so the unit is dropped — only where the value is
+ * a number, and only a trailing word, never anything inside the figure.
+ */
+export function withoutUnit(value: string, type: string): string {
+  if (type !== 'number') return value;
+  const m = /^\s*([$£€]?\s?[\d,]*\.?\d+\s?%?)\s+[a-z][a-z ]*$/i.exec(value);
+  return m ? m[1]!.trim() : value;
+}
