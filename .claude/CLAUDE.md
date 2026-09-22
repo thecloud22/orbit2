@@ -21,4 +21,3 @@ The authoritative documents, in `docs/`:
 | `docs/TODO.md` | Work understood well enough to do and deliberately not done yet: a divergence from the spec, a gap already looked at, a decision left open. |
 | `docs/pilot-readiness.md` | What stands between the working loop and a real pilot, ranked, with the evidence for each. |
 | `docs/decision-draft-model-driven-browser.md` | Provenance for Decision 6. Not a pending decision; do not edit. |
-| `docs/plans/2026-09-22-orbit-2.1-*.md` | **Proposed, not scheduled.** Orbit 2.1: a procedure model between the document and the draft, rule tables, the InMem, and a drafting-only chat. Not scope until accepted and its decisions are recorded in `docs/decisions.md`. |
