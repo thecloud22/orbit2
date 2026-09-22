@@ -32,6 +32,9 @@ interface Ctx {
   account: string | null;
   /** The ending actually reached, which is not the last step in the list. */
   reached: string | null;
+  /** Set when the run stopped at the edge of its authority and handed the
+   *  work to a person: a successful run, not a failure (§10). */
+  handedOff: { request: string; shown: Record<string, string | null> } | null;
 }
 
 /**
@@ -294,6 +297,17 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       }
       await end('ok'); return 'ok';
     }
+    case 'handOff': {
+      // §10: the agent did everything it was permitted to do and stopped at
+      // the edge of its authority. What the person is asked, and every value
+      // they are shown, go on the record exactly as the run held them.
+      const shown = Object.fromEntries(step.show.map((ref) =>
+        [('value' in ref && typeof ref.value === 'string') ? ref.value : ref.from, resolveRef(ctx, ref)]));
+      await event(ctx, attemptId, 'handed.off', { request: step.request, shown });
+      await screenshot(ctx, attemptId);
+      ctx.handedOff = { request: step.request, shown };
+      await end('ok'); return 'ok';
+    }
     case 'end': {
       await event(ctx, attemptId, 'ended', { outcome: step.outcome });
       ctx.reached = step.outcome;
@@ -319,7 +333,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
  */
 export async function execute(db: PoolClient, runId: string, steps: Step[],
   inputs: Record<string, string>, surface: Surface, account: string | null = null) {
-  const ctx: Ctx = { db, runId, surface, values: new Map(), inputs, account, reached: null };
+  const ctx: Ctx = { db, runId, surface, values: new Map(), inputs, account, reached: null, handedOff: null };
   const positionOf = new Map(steps.map((s, i) => [s.id, i + 1]));
   try {
     let position = 1;
@@ -342,10 +356,10 @@ export async function execute(db: PoolClient, runId: string, steps: Step[],
       const outcome = await runStep(ctx, step, position, positionOf);
       if (typeof outcome === 'object' && 'kind' in outcome) return { halted: outcome, values: ctx.values };
       if (typeof outcome === 'object' && 'goto' in outcome) { position = outcome.goto; continue; }
-      if (step.kind === 'end') break;
+      if (step.kind === 'end' || step.kind === 'handOff') break;
       position += 1;
     }
-    return { halted: null, values: ctx.values, reached: ctx.reached };
+    return { halted: null, values: ctx.values, reached: ctx.reached, handedOff: ctx.handedOff };
   } finally {
     await surface.close();
   }

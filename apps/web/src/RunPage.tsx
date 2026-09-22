@@ -237,6 +237,11 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
     : run.status === 'running' ? 'running' : 'attention';
   /** Still going: nothing about it is in the past tense yet. */
   const going = run.status === 'queued' || run.status === 'running';
+  /** Stopped at the edge of its authority (§10): a success, with work for a person. */
+  const handedOff = run.status === 'handedToAPerson';
+  const handOffRequest = handedOff
+    ? String((events.find((e) => e.kind === 'handed.off')?.detail as { request?: string } | undefined)?.request ?? '')
+    : '';
   const trace = runArtefacts.find((a) => a.kind === 'trace');
   /**
    * The step an attempt was of, found by its position.
@@ -275,12 +280,15 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
           saying so put a verdict on the screen before there was one. */}
       <OutcomePair state={state}
         status={stoppedByACheck ? 'Stopped by a check'
+          : handedOff ? 'Handed to a person'
           : run.status[0]!.toUpperCase() + run.status.slice(1)}
         outcome={run.outcome ? label(run.outcome)
+          : handedOff ? 'For a person to finish'
           : stoppedByACheck ? String((run.error as { describe?: string }).describe ?? 'A check did not hold')
           : going ? 'Not yet'
           : 'No conclusion reached'}
-        note={stoppedByACheck
+        note={handedOff ? `The agent did everything it may do and stopped where the procedure says a person takes over: ${handOffRequest}`
+          : stoppedByACheck
           ? 'A check in this procedure did not hold, so the run stopped where the procedure says to stop. '
             + 'Nothing technical failed. The record stores it as a failure, because that is where an error belongs.'
           : going

@@ -370,7 +370,7 @@ async function runOne(runId: string) {
       [runId, JSON.stringify({ worker, origin, surface: app.surface })]);
     console.log(`  ${row.reference}: ${steps.length} steps against ${origin} (${app.surface})`);
 
-    const { halted, values, reached } = await execute(
+    const { halted, values, reached, handedOff } = await execute(
       db, runId, steps, row.inputs, await open(origin), app.sign_in_as ?? null);
 
     if (halted) {
@@ -396,6 +396,18 @@ async function runOne(runId: string) {
     // The conclusion is the ending the run actually reached — not the last
     // step in the list, which is simply the one written last. The technical
     // status is a separate fact and is never merged with it (§10).
+    if (handedOff) {
+      // Stopped at the edge of its authority, as the version says to. A
+      // success with no conclusion of its own: a person takes it from here.
+      await db.query(
+        `UPDATE run SET status = 'handedToAPerson', outputs = $2, ended_at = now() WHERE id = $1`,
+        [runId, JSON.stringify(Object.fromEntries(values))]);
+      await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.succeeded', $2)`,
+        [runId, JSON.stringify({ handedToAPerson: handedOff.request })]);
+      console.log(`  ${row.reference}: handed to a person — ${handedOff.request}`);
+      return;
+    }
+
     const outcome = reached;
     const outputs = Object.fromEntries(values);
     await db.query(

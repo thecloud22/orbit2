@@ -281,3 +281,26 @@ test('a check that does not hold stops the run, saying what was expected', async
   assert.equal(result.halted?.kind, 'checkFailed');
   assert.equal(result.halted?.describe, 'The credit score is below the program floor');
 });
+
+test('a hand-off ends the run at the edge of its authority, carrying what the person is shown', async () => {
+  const ids = Array.from({ length: 3 }, () => crypto.randomUUID());
+  const steps: Step[] = [
+    { id: ids[0]!, kind: 'read', summary: 'the claim status', region: { label: 'Status', binding: byName('Status') },
+      produces: { name: 'claimStatus', label: 'Status', type: 'text', required: true } },
+    { id: ids[1]!, kind: 'handOff', summary: 'pass it to the claims team',
+      request: 'The claim is closed. Pass the enquiry to the claims team with what you found.',
+      show: [{ from: 'step', value: 'claimStatus' }], handsBack: [] },
+    { id: ids[2]!, kind: 'end', summary: 'never reached', outcome: 'found', publishes: [] },
+  ];
+  const result = await execute(db as never, runId, steps, {}, paperSurface({ Status: 'Closed' }));
+
+  assert.equal(result.halted, null, 'not a failure');
+  assert.equal(result.reached, null, 'and no conclusion of its own: a person takes it from here');
+  assert.deepEqual(result.handedOff, {
+    request: 'The claim is closed. Pass the enquiry to the claims team with what you found.',
+    shown: { claimStatus: 'Closed' },
+  });
+  const { rows } = await db.query<{ kind: string }>(
+    `SELECT kind FROM run_event WHERE run_id = $1 AND kind = 'handed.off'`, [runId]);
+  assert.equal(rows.length, 1);
+});
