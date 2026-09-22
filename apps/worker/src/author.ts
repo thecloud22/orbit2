@@ -97,10 +97,12 @@ export async function settleAfterActivating(page: Page, wasAt: string): Promise<
  *
  * Decision 12 is untouched: two buttons called "Sign in" remain a refusal.
  */
-export function couldMean(act: 'enter' | 'activate' | 'read' | 'done', s: Pick<Seen, 'what'>): boolean {
+export function couldMean(act: 'enter' | 'activate' | 'read' | 'done' | 'wait', s: Pick<Seen, 'what'>): boolean {
   return act === 'enter' ? s.what === 'field'
     : act === 'activate' ? s.what === 'button' || s.what === 'link'
     : act === 'read' ? s.what === 'value' || s.what === 'heading'
+    // A wait acts on nothing on the page; Orbit builds it without an element.
+    : act === 'wait' ? false
     : true;
 }
 
@@ -117,7 +119,7 @@ export function mismatchOf(act: string, it: Pick<Seen, 'what' | 'name'>): string
  * because no field accepts one.
  */
 const proposal = z.object({
-  act: z.enum(['enter', 'activate', 'read', 'done']),
+  act: z.enum(['enter', 'activate', 'read', 'done', 'wait']),
   /** The element's name, exactly as it appeared in the list it was shown.
    *  A name rather than an index: the model reasons about names, and asking
    *  it to carry a number alongside is an indirection Orbit introduced and
@@ -244,7 +246,7 @@ const shapeWith = (numbers: readonly string[]) => ({
   type: 'object',
   properties: {
     sentence: numbers.length ? { type: ['string', 'null'], enum: [...numbers, null] } : { type: 'null' },
-    act: { type: 'string', enum: ['enter', 'activate', 'read', 'done'] },
+    act: { type: 'string', enum: ['enter', 'activate', 'read', 'done', 'wait'] },
     element: { type: ['string', 'null'] },
     value: { type: ['string', 'null'] },
     optional: { type: ['boolean', 'null'] },
@@ -326,6 +328,8 @@ const INSTRUCTION = [
   '            step reads what the page says now rather than checking it still says what it said.',
   '            optional=true if the procedure says this may legitimately not be there.',
   'act=done    the procedure is finished, or the page does not show what comes next.',
+  'act=wait    the next line to carry out is marked WAIT FOR A PERSON: the run stops there until a person',
+  '            has done it. element=null, and sentence is that line\'s number.',
   '',
   'Each line of the page is:   kind — name',
   'element = the NAME only, the part after the dash. Not the kind, not the whole line.',
@@ -367,19 +371,21 @@ export async function authorFromProcedure(opts: {
   /** The confirmed sentences the procedure was built from (Orbit 2.1). When
    *  given, the procedure is shown numbered and each step says which one it
    *  carries out. */
-  sentences?: ReadonlyArray<{ number: string; text: string }>;
+  sentences?: ReadonlyArray<{ number: string; text: string; waits?: boolean }>;
 }): Promise<AuthoredDraft> {
   const { procedure, origin, startPath, inputs, model } = opts;
   // A ceiling, for the same reason `for each` has one: without it nobody can
   // say what an authoring session could have cost.
-  const maxTurns = opts.maxTurns ?? 12;
+  // A wait means signing in and finding the record again afterwards, so each
+  // one the author marked buys the turns that takes.
+  const maxTurns = opts.maxTurns ?? 12 + 8 * (opts.sentences ?? []).filter((x) => x.waits).length;
 
   const numbers = (opts.sentences ?? []).map((x) => x.number);
   const provenance: Record<string, string> = {};
   // Numbered when there are numbers to give; the plain text otherwise, as 2.0
   // walks have always been shown.
   const shownProcedure = opts.sentences?.length
-    ? [...opts.sentences.map((x) => `${x.number} ${x.text.replace(/\s+/g, ' ')}`), '',
+    ? [...opts.sentences.map((x) => `${x.number} ${x.waits ? 'WAIT FOR A PERSON: ' : ''}${x.text.replace(/\s+/g, ' ')}`), '',
        'Each line above starts with its number. Set sentence to the number of the line the next step carries out,',
        'or null if it carries out none of them.'].join('\n')
     : procedure;
@@ -434,7 +440,18 @@ export async function authorFromProcedure(opts: {
         questions.push(asQuestion('The page stopped changing, so the rest of the procedure could not be worked out here.'));
         break;
       }
-      const done = steps.slice(1).map((s, i) => `${i + 1}. ${s.kind} — ${s.summary}`);
+      // After a wait the run starts a new session, so what was done before it
+      // is not "already done" on this page: signing in and finding the record
+      // happen again. Only what has been done since the wait counts, and the
+      // model is told why the slate is clean.
+      const lastWait = steps.map((x) => x.kind === 'handOff' && x.waits).lastIndexOf(true);
+      const sinceWait = lastWait >= 0 ? steps.slice(lastWait + 2) : steps.slice(1);
+      const done = sinceWait.map((s, i) => `${i + 1}. ${s.kind} — ${s.summary}`);
+      const afterWait = lastWait >= 0
+        ? `The run has just waited for a person at ${provenance[steps[lastWait]!.id] ?? 'the marked line'}, and the application `
+          + 'has been opened again in a new session. Sign in again and find the record again as needed, then carry on '
+          + 'with the lines AFTER the wait. Do not wait at that line again.'
+        : '';
       // A rejected turn used to tell the model nothing, so it answered the
       // same way again — and again, until the ceiling. One session spent ten
       // of its twelve turns on the identical rejection, and another repeated
@@ -448,8 +465,9 @@ export async function authorFromProcedure(opts: {
         : '';
 
       const asking = done.length === 0
-        ? [correction, 'Nothing has been done yet. What is the first thing to do?'].filter(Boolean).join('\n\n')
-        : [`ALREADY DONE (do not repeat any of these):`, ...done, '', correction,
+        ? [afterWait, correction, afterWait ? 'Nothing has been done since the wait. What is the first thing to do?'
+            : 'Nothing has been done yet. What is the first thing to do?'].filter(Boolean).join('\n\n')
+        : [afterWait, `ALREADY DONE${afterWait ? ' SINCE THE WAIT' : ''} (do not repeat any of these):`, ...done, '', correction,
            unchanged >= 1
              ? 'The page has NOT changed since your last act. Either something else is needed first, or the procedure is finished.'
              : '', 'What is the next thing to do?'].filter(Boolean).join('\n');
@@ -516,6 +534,39 @@ export async function authorFromProcedure(opts: {
         }
         noteTurn(record('kept', 'the model said the procedure is finished'));
         break;
+      }
+
+      if (p.act === 'wait') {
+        // The Human in the Loop step. Only where the author marked a sentence
+        // as the run waiting for a person: the model says it has reached one,
+        // and Orbit builds the step — it never decides on its own that a
+        // procedure should stop and wait.
+        const wait = opts.sentences?.find((x) => x.waits && x.number === p.sentence);
+        if (!wait || Object.values(provenance).includes(wait.number)) {
+          noteTurn(record('rejected', wait
+            ? `it waited at ${wait.number} again`
+            : 'it tried to wait where the procedure marks no wait for a person'));
+          continue;
+        }
+        const read = steps.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : []));
+        const waitStep: Step = {
+          id: crypto.randomUUID(), kind: 'handOff', summary: `Wait: ${wait.text.slice(0, 160)}`,
+          request: wait.text, show: read.map((value) => ({ from: 'step' as const, value })), handsBack: [],
+          waits: true,
+        };
+        steps.push(waitStep);
+        provenance[waitStep.id] = wait.number;
+        // The run carries on in a new session after the wait, so the draft
+        // does too: the application is opened again, as the run will open it.
+        steps.push({
+          id: crypto.randomUUID(), kind: 'open', summary: `Open ${startPath} again, after the wait`,
+          application: 'app', path: startPath, arrives: { describe: 'the page is showing' }, changesARecord: false,
+        });
+        await page.context().clearCookies();
+        await page.goto(`${origin}${startPath}`, { waitUntil: 'domcontentloaded' });
+        lastActMoved = true;
+        noteTurn(record('kept', `step ${steps.length - 1}: waits for a person (${wait.number}), then opens the application again`));
+        continue;
       }
 
       const wanted = normaliseName(p.element ?? '');

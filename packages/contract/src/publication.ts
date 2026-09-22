@@ -105,6 +105,8 @@ export const blocker = z.discriminatedUnion('kind', [
    *  a version could only guess which one to reach — and guessing is how a
    *  run went to the wrong host. */
   object({ kind: z.literal('applicationUnknown') }),
+  /** A run resumes after a wait in a new session, so it must open the application again. */
+  object({ kind: z.literal('waitNotFollowedByOpen'), step: z.number().int().positive() }),
 
   /** §4 and acceptance criterion 3: an outstanding question, assumption,
    *  exception or unacknowledged risk. */
@@ -154,6 +156,8 @@ export function describeBlocker(b: Blocker): string {
       return `"${b.label}" at step ${b.step} is found in a way that can return the wrong thing, so it needs something that must also be true.`;
     case 'addressNotPermitted':
       return `Step ${b.step} would reach ${b.address}, which this workflow is not registered to reach.`;
+    case 'waitNotFollowedByOpen':
+      return `Step ${b.step} waits for a person, and the run carries on afterwards in a new session, so the step after it must open the application again.`;
     case 'applicationUnknown':
       return 'Orbit does not know which application this was brought in against, so it cannot say which one a run may reach.';
     case 'endingHasNoExample':

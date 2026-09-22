@@ -163,12 +163,15 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
 async function sortOf(db: PoolClient, workflowId: string) {
   const { rows: [u] } = await db.query(`SELECT 1 FROM understanding WHERE workflow_id = $1`, [workflowId]);
   if (!u) return null;
-  const { rows: sentences } = await db.query<{ number: string; text: string; label: string | null; givenBy: string | null }>(
-    `SELECT p.key || '.' || s.n AS number, s.text, l.label, l.given_by AS "givenBy"
+  const { rows: raw } = await db.query<{ number: string; text: string; label: string | null; givenBy: string | null; waits: boolean }>(
+    `SELECT p.key || '.' || s.n AS number, s.text, l.label, l.given_by AS "givenBy", coalesce(l.waits, false) AS waits
        FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
-       LEFT JOIN LATERAL (SELECT label, given_by FROM sentence_label
+       LEFT JOIN LATERAL (SELECT label, given_by, waits FROM sentence_label
                            WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
       WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, s.n`, [workflowId]);
+  // `waits` only where it is true, so a version with no wait carries the same
+  // sentences — and the same digest — as before the Human in the Loop step.
+  const sentences = raw.map(({ waits, ...x }) => (waits ? { ...x, waits } : x));
   const byLabel: Record<string, number> = {};
   for (const x of sentences) if (x.label) byLabel[x.label] = (byLabel[x.label] ?? 0) + 1;
   // The chat that shaped the draft, in order: what was asked, and what Orbit

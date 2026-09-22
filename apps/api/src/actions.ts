@@ -14,7 +14,7 @@ import { confirm, confirmation } from './confirm.ts';
 import { configureStep } from './configure.ts';
 import { mintVersion } from './mint.ts';
 import { bringIn, finishRecording, startRecording } from './authoring.ts';
-import { cancelRun, retryRun, rerun } from './control.ts';
+import { cancelRun, continueRun, retryRun, rerun } from './control.ts';
 import { backToDraft, discardDraft, deleteStep, editStep, insertStep, moveStep } from './edit.ts';
 import { editApplication, registerApplication } from './applications.ts';
 import { describeBlocker } from '@orbit/contract';
@@ -215,6 +215,12 @@ export const actions = {
   async finishRecording(id: string) {
     const result = await inTransaction((db) => finishRecording(db, id));
     return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  /** A person answers a run that is waiting for them (the Human in the Loop step). */
+  async continueRun(reference: string, body: unknown) {
+    const result = await inTransaction((db) => continueRun(db, reference, body));
+    return result.ok ? { status: 202, body: result } : { status: 409, body: { why: result.because } };
   },
 
   async rerun(reference: string) {

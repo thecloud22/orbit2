@@ -280,3 +280,19 @@ describe('the rules, as tables', () => {
     assert.equal((await understandingOf(db, id))!.status, 'queued');
   });
 });
+
+describe('the Human in the Loop step', () => {
+  test('only a sentence for a person can be where the run waits, and it goes to the walk', async () => {
+    const id = await broughtIn();
+    await sorted(id);
+    assert.equal((await relabel(db, id, { sentence: '1.2', label: 'task', waits: true })).ok, false);
+    assert.deepEqual(await relabel(db, id, { sentence: '1.5', label: 'forAPerson', waits: true }), { ok: true });
+    await db.query(`UPDATE understanding SET status = 'sorted' WHERE workflow_id = $1`, [id]);
+    const result = await confirmUnderstanding(db as never, id);
+    assert.ok(result.ok);
+    const { rows: [s] } = await db.query<{ procedure: string }>(`SELECT procedure FROM authoring_session WHERE id = $1`, [result.id]);
+    assert.match(s!.procedure, /Phone the requester if they sound upset\./, 'the wait is given to the walk');
+    const { rows: notes } = await db.query<{ body: string }>(`SELECT body FROM workflow_note WHERE workflow_id = $1`, [id]);
+    assert.ok(!notes.some((n) => n.body.includes('Phone the requester')), 'and is a step, not a note');
+  });
+});

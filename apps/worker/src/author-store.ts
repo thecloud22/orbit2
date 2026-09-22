@@ -52,7 +52,7 @@ export async function authorAndStore(db: PoolClient, opts: {
    *  procedure was brought in to be understood (Orbit 2.1). */
   into?: string;
   /** The confirmed sentences, numbered, for a walk after a sort. */
-  sentences?: ReadonlyArray<{ number: string; text: string }>;
+  sentences?: ReadonlyArray<{ number: string; text: string; waits?: boolean }>;
   model: ModelProvider;
   /** Each turn as it lands, for whoever is watching the screen. */
   onTurn?: (turn: Turn) => void;

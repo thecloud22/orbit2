@@ -35,6 +35,8 @@ interface Ctx {
   /** Set when the run stopped at the edge of its authority and handed the
    *  work to a person: a successful run, not a failure (§10). */
   handedOff: { request: string; shown: Record<string, string | null> } | null;
+  /** Set when the run stopped to wait for a person, and where it resumes. */
+  waiting: { resumeAt: number; request: string; shown: Record<string, string | null> } | null;
 }
 
 /**
@@ -303,9 +305,10 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       // they are shown, go on the record exactly as the run held them.
       const shown = Object.fromEntries(step.show.map((ref) =>
         [('value' in ref && typeof ref.value === 'string') ? ref.value : ref.from, resolveRef(ctx, ref)]));
-      await event(ctx, attemptId, 'handed.off', { request: step.request, shown });
+      await event(ctx, attemptId, 'handed.off', { request: step.request, shown, waits: Boolean(step.waits) });
       await screenshot(ctx, attemptId);
-      ctx.handedOff = { request: step.request, shown };
+      if (step.waits) ctx.waiting = { resumeAt: position + 1, request: step.request, shown };
+      else ctx.handedOff = { request: step.request, shown };
       await end('ok'); return 'ok';
     }
     case 'end': {
@@ -332,11 +335,15 @@ async function runStep(ctx: Ctx, step: Step, position: number,
  * discovering what it is driving, so it cannot come to depend on one.
  */
 export async function execute(db: PoolClient, runId: string, steps: Step[],
-  inputs: Record<string, string>, surface: Surface, account: string | null = null) {
-  const ctx: Ctx = { db, runId, surface, values: new Map(), inputs, account, reached: null, handedOff: null };
+  inputs: Record<string, string>, surface: Surface, account: string | null = null,
+  /** Resuming after a wait: the step to carry on from, and the values the run
+   *  had read before it, with whatever the person handed back. */
+  resume?: { at: number; values: Record<string, string | null> }) {
+  const ctx: Ctx = { db, runId, surface, values: new Map(Object.entries(resume?.values ?? {})), inputs, account,
+    reached: null, handedOff: null, waiting: null };
   const positionOf = new Map(steps.map((s, i) => [s.id, i + 1]));
   try {
-    let position = 1;
+    let position = resume?.at ?? 1;
     while (position <= steps.length) {
       // The safe boundary §10 asks for. Cancellation is cooperative: a run
       // stops *between* steps, never part-way through one, so what completed
@@ -359,7 +366,7 @@ export async function execute(db: PoolClient, runId: string, steps: Step[],
       if (step.kind === 'end' || step.kind === 'handOff') break;
       position += 1;
     }
-    return { halted: null, values: ctx.values, reached: ctx.reached, handedOff: ctx.handedOff };
+    return { halted: null, values: ctx.values, reached: ctx.reached, handedOff: ctx.handedOff, waiting: ctx.waiting };
   } finally {
     await surface.close();
   }

@@ -160,11 +160,11 @@ async function authorOne(sessionId: string) {
 
     // A walk after a sort is shown the sentences it was confirmed with,
     // numbered, so each step it drafts can say which one it carries out.
-    const { rows: sentences } = s.into_workflow_id ? await db.query<{ number: string; text: string }>(
-      `SELECT p.key || '.' || x.n AS number, x.text
+    const { rows: sentences } = s.into_workflow_id ? await db.query<{ number: string; text: string; waits: boolean }>(
+      `SELECT p.key || '.' || x.n AS number, x.text, l.waits
          FROM procedure_sentence x JOIN procedure_part p ON p.id = x.part_id
-         JOIN LATERAL (SELECT label FROM sentence_label WHERE sentence_id = x.id ORDER BY seq DESC LIMIT 1) l ON true
-        WHERE p.workflow_id = $1 AND l.label IN ('task', 'rule')
+         JOIN LATERAL (SELECT label, waits FROM sentence_label WHERE sentence_id = x.id ORDER BY seq DESC LIMIT 1) l ON true
+        WHERE p.workflow_id = $1 AND (l.label IN ('task', 'rule') OR l.waits)
         ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
 
     const result = await authorAndStore(db, {
@@ -348,7 +348,7 @@ async function runOne(runId: string) {
   const db = await pool.connect();
   try {
     const { rows: [row] } = await db.query(
-      `SELECT r.reference, r.inputs, v.body, v.applications
+      `SELECT r.reference, r.inputs, r.held, v.body, v.applications
          FROM run r JOIN workflow_version v ON v.id = r.version_id WHERE r.id = $1`, [runId]);
     // Validated coming out of the store as well as going in: persistence is a
     // boundary like any other (Decision 9).
@@ -381,8 +381,33 @@ async function runOne(runId: string) {
       [runId, JSON.stringify({ worker, origin, surface: app.surface })]);
     console.log(`  ${row.reference}: ${steps.length} steps against ${origin} (${app.surface})`);
 
-    const { halted, values, reached, handedOff } = await execute(
-      db, runId, steps, row.inputs, await open(origin), app.sign_in_as ?? null);
+    // A run resuming after a wait carries on from the step after it, with the
+    // values it had read and whatever the person handed back.
+    const held = row.held as { resumeAt: number; values: Record<string, string | null>;
+                               handedBack?: Record<string, string> } | null;
+    const resume = held?.handedBack
+      ? { at: held.resumeAt, values: { ...held.values, ...held.handedBack } }
+      : undefined;
+    if (resume) {
+      await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.resumed', $2)`,
+        [runId, JSON.stringify({ at: resume.at, handedBack: held!.handedBack })]);
+    }
+
+    const { halted, values, reached, handedOff, waiting } = await execute(
+      db, runId, steps, row.inputs, await open(origin), app.sign_in_as ?? null, resume);
+
+    if (waiting) {
+      // Paused, not finished: the values it has read are kept so it can carry
+      // on where it stopped once somebody has done their part (§10).
+      await db.query(
+        `UPDATE run SET status = 'waitingForAPerson', held = $2 WHERE id = $1`,
+        [runId, JSON.stringify({ resumeAt: waiting.resumeAt, request: waiting.request,
+          values: Object.fromEntries(values) })]);
+      await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.held', $2)`,
+        [runId, JSON.stringify({ request: waiting.request, resumesAt: waiting.resumeAt })]);
+      console.log(`  ${row.reference}: waiting for a person — ${waiting.request}`);
+      return;
+    }
 
     if (halted) {
       // Cancelling is a decision, not a fault. §13 records a cancelled run as

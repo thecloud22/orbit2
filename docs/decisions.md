@@ -1966,6 +1966,27 @@ Nothing in the acceptance criteria needs it, and it is the kind most likely to g
 
 ---
 
+### Amendment to Decision 14: a hand-off can wait (2026-09-22)
+
+The ten kinds stand; there is no eleventh. `hand off` gains one field, `waits`, for the case Orbit 2.1
+calls the Human in the Loop step: a procedure that stops for a person — an approval, an overnight
+batch — and then carries on. Chosen by Karthik on 2026-09-22, over an eleventh kind, because the act is
+the same one: the agent reaches the edge of what it may do and a person takes over. What differs is
+whether the run ends there or comes back.
+
+- **`waits` absent or false:** unchanged. The run ends as *Handed to a person*, a success (§10), and
+  nothing after the step is reachable, so publication treats it as the end of its path.
+- **`waits: true`:** the run pauses as *Waiting for a person*, keeping the values it has read. A
+  person does the work, fills in what the step declares it hands back, and says so; the run is queued
+  again and carries on from the next step with those values. That next step must be `open`: the run
+  resumes in a new session, hours or days later, and the page it was on is gone (publication blocker
+  `waitNotFollowedByOpen`).
+- **Where one comes from:** only a person marks a sentence as the point the run waits (on the sort
+  screen, 2.1). The walk places the step there and opens the application again after it. A model never
+  decides that a procedure should stop and wait.
+
+Nothing about a version that does not use `waits` changes, and its digest is unchanged.
+
 ## Decision 15 — The locator, from measurement
 
 **Status:** adopted.

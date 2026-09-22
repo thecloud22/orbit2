@@ -55,7 +55,9 @@ Loop case); a judgement left to a person; prohibitions.
   conforming limit, and flood zone, each read by sentence 9 (step 3). If a table compares the loan
   program and nothing reads it, that's the check working: sentence 9 lists it, so it should be read.
 - Step 9 (wait for the senior underwriter to sign off, then record their decision) is the Human in the
-  Loop case. Step 10 (a person reads the income note) is for a person.
+  Loop case: it should sort as *for a person*, and you tick *The run waits here*. Step 10 (a person
+  reads the income note) stays for a person, unticked.
+- Run ML-26-04529 (referred): it should pause at the wait. Press *It's done. Carry on* and it resumes.
 
 **Loans to run**
 
@@ -78,5 +80,7 @@ Loop case); a judgement left to a person; prohibitions.
   different path drafted.
 - **The second ending on `gpt-6-luna`.** The walk tends to mark the loan file as always present, so
   "no such file" may not be drafted as its own ending (plan §16).
-- **The Human in the Loop step** (scenario 2, step 9) is being built now. Until it is in, that
-  sentence is recorded as work for a person, not as a step that waits.
+- **The Human in the Loop step** (scenario 2, step 9) is built. On the sort screen, tick *The run
+  waits here until this is done* under that sentence. The walk places a waiting step there, opens the
+  application again and drafts what follows. A run of it pauses as *Waiting for a person*; press
+  *It's done. Carry on* on the run page and it resumes after the wait.

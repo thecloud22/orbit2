@@ -39,6 +39,8 @@ const unfinished = (s: DraftStep): s is Extract<DraftStep, { incomplete: true }>
 function successors(step: DraftStep, index: number, byId: Map<string, number>): number[] {
   if (unfinished(step)) return index + 1 < byId.size ? [index + 1] : [];
   if (step.kind === 'end') return [];
+  // A hand-off that does not wait ends the run: nothing after it is reached.
+  if (step.kind === 'handOff' && !step.waits) return [];
   if (step.kind === 'branch') {
     return [byId.get(step.ifTrue), byId.get(step.ifFalse)]
       .filter((n): n is number => n !== undefined);
@@ -154,6 +156,17 @@ export function checkForPublication(
     if (step.kind !== 'end' && step.kind !== 'handOff'
         && successors(step, index, byId).length === 0 && reachable.has(index)) {
       blockers.push({ kind: 'pathReachesNoEnding', step: at(index) });
+    }
+
+    // ── a wait the run could not come back from ────────────────────────────
+    // The run resumes in a fresh session hours or days later; whatever page
+    // it was on is gone. The next step opens the application again, or the
+    // version would resume against a page that no longer exists.
+    if (step.kind === 'handOff' && step.waits) {
+      const next = steps[index + 1];
+      if (!next || unfinished(next) || next.kind !== 'open') {
+        blockers.push({ kind: 'waitNotFollowedByOpen', step: at(index) });
+      }
     }
 
     // ── a conclusion nothing declared ──────────────────────────────────────

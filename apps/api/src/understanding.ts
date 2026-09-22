@@ -106,16 +106,18 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
 export type SentenceView = {
   number: string; part: string; n: number; text: string; kind: string; unterminated: boolean; page: number | null;
   label: SentenceLabel | null; reason: string | null; basis: string | null; givenBy: string | null;
+  /** Marked by the author: the run waits here for this person (Human in the Loop). */
+  waits: boolean;
 };
 
 async function sentencesWithLabels(db: ClientBase, workflowId: string): Promise<SentenceView[]> {
   const { rows } = await db.query<SentenceView>(
     `SELECT p.key || '.' || s.n AS number, p.key AS part, s.n, s.text, s.kind, s.unterminated, s.page,
-            l.label, l.reason, l.basis, l.given_by AS "givenBy"
+            l.label, l.reason, l.basis, l.given_by AS "givenBy", coalesce(l.waits, false) AS waits
        FROM procedure_sentence s
        JOIN procedure_part p ON p.id = s.part_id
        LEFT JOIN LATERAL (
-         SELECT label, reason, basis, given_by FROM sentence_label
+         SELECT label, reason, basis, given_by, waits FROM sentence_label
           WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
       WHERE p.workflow_id = $1
       ORDER BY p.added_at, p.key, s.n`, [workflowId]);
@@ -162,6 +164,8 @@ export const relabelAskedFor = object({
   sentence: sentenceNumber,
   label: sentenceLabel,
   reason: z.string().trim().max(500).optional(),
+  /** Only with forAPerson: the run stops here until the person has done it. */
+  waits: z.boolean().optional(),
 });
 
 export type Done = { ok: true } | { ok: false; because: string };
@@ -173,7 +177,8 @@ export type Done = { ok: true } | { ok: false; because: string };
 export async function relabel(db: ClientBase, workflowId: string, body: unknown): Promise<Done> {
   const asked = relabelAskedFor.safeParse(body);
   if (!asked.success) return { ok: false, because: 'Say which sentence, and which of the five it is.' };
-  const { sentence, label, reason } = asked.data;
+  const { sentence, label, reason, waits } = asked.data;
+  if (waits && label !== 'forAPerson') return { ok: false, because: 'Only a sentence for a person can be where the run waits.' };
 
   const { rows: [u] } = await db.query<{ status: string; confirmed_at: string | null }>(
     `SELECT status, confirmed_at FROM understanding WHERE workflow_id = $1`, [workflowId]);
@@ -191,13 +196,13 @@ export async function relabel(db: ClientBase, workflowId: string, body: unknown)
   if (!found) return { ok: false, because: `This procedure has no sentence ${sentence}.` };
 
   await db.query(
-    `INSERT INTO sentence_label (sentence_id, label, reason, basis, given_by)
-     VALUES ($1, $2, $3, 'stated', 'author')`,
-    [found.id, label, reason?.trim() || 'Changed by the author.']);
+    `INSERT INTO sentence_label (sentence_id, label, reason, basis, given_by, waits)
+     VALUES ($1, $2, $3, 'stated', 'author', $4)`,
+    [found.id, label, reason?.trim() || (waits ? 'The run waits here for this person.' : 'Changed by the author.'), Boolean(waits)]);
   await db.query(
     `INSERT INTO audit_entry (act, object_kind, object_id, changed)
      VALUES ('sentence relabelled', 'workflow', $1, $2)`,
-    [workflowId, JSON.stringify({ sentence, label })]);
+    [workflowId, JSON.stringify({ sentence, label, ...(waits ? { waits } : {}) })]);
   // The rules as tables are made from the labels, so a relabel sends the
   // draft back to the worker to make them again. Nothing is re-sorted: every
   // sentence already has a label.
@@ -207,10 +212,14 @@ export async function relabel(db: ClientBase, workflowId: string, body: unknown)
   return { ok: true };
 }
 
-/** What the walk is given: the sentences Orbit is to do, in the author's order and words. */
+/**
+ * What the walk is given: the sentences Orbit is to do, and the ones where the
+ * run waits for a person, in the author's order and words.
+ */
 export function forTheWalk(sentences: readonly SentenceView[]): string {
-  return sentences.filter((s) => s.label === 'task' || s.label === 'rule').map((s) => s.text).join('\n');
+  return sentences.filter(forOrbitOrAWait).map((s) => s.text).join('\n');
 }
+const forOrbitOrAWait = (s: SentenceView) => s.label === 'task' || s.label === 'rule' || (s.label === 'forAPerson' && s.waits);
 
 /**
  * A person confirms the sort, and the walk is queued.
@@ -269,7 +278,8 @@ export async function confirmUnderstanding(db: PoolClient, workflowId: string): 
 
     // Settled when written: these are decisions the author just confirmed, not
     // questions left open, and they block nothing.
-    for (const s of sentences.filter((x) => x.label === 'forAPerson' || x.label === 'wontDo')) {
+    // A sentence the run waits at becomes a step, not a note.
+    for (const s of sentences.filter((x) => (x.label === 'forAPerson' && !x.waits) || x.label === 'wontDo')) {
       await db.query(
         `INSERT INTO workflow_note (workflow_id, kind, body, answer, resolved_at)
          VALUES ($1, 'assumption', $2, $3, now())`,

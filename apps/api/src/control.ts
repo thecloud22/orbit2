@@ -136,3 +136,36 @@ export async function rerun(db: PoolClient, reference: string): Promise<Control>
   await audit(db, 'run started', run.id, { reference: fresh, rerunOf: reference });
   return { ok: true, reference: fresh };
 }
+
+/**
+ * A person has done what a waiting run asked, and says so (the Human in the
+ * Loop step). What they hand back is checked against what the step declared
+ * it would, and the run is queued to carry on from the step after the wait.
+ */
+export async function continueRun(db: PoolClient, reference: string, body: unknown): Promise<Control> {
+  const given = (body as { handedBack?: unknown } | null)?.handedBack ?? {};
+  if (typeof given !== 'object' || given === null || Array.isArray(given)) {
+    return { ok: false, because: 'Say what the person handed back, by name.' };
+  }
+  const { rows: [run] } = await db.query<{ id: string; status: string; held: { resumeAt: number } | null; body: { steps: Array<Record<string, unknown>> } }>(
+    `SELECT r.id, r.status, r.held, v.body FROM run r JOIN workflow_version v ON v.id = r.version_id
+      WHERE r.reference = $1 FOR UPDATE OF r`, [reference]);
+  if (!run) return { ok: false, because: 'There is no run with that reference.' };
+  if (run.status !== 'waitingForAPerson' || !run.held) return { ok: false, because: 'This run is not waiting for anybody.' };
+
+  const wait = run.body.steps[run.held.resumeAt - 2] as { kind?: string; handsBack?: Array<{ name: string; label: string; required: boolean }> } | undefined;
+  const declared = wait?.kind === 'handOff' ? wait.handsBack ?? [] : [];
+  const handedBack = given as Record<string, unknown>;
+  const unknown = Object.keys(handedBack).filter((k) => !declared.some((d) => d.name === k));
+  if (unknown.length) return { ok: false, because: `This step does not ask for ${unknown.join(', ')}.` };
+  const missing = declared.filter((d) => d.required && !String(handedBack[d.name] ?? '').trim());
+  if (missing.length) return { ok: false, because: `Still needed: ${missing.map((d) => d.label).join(', ')}.` };
+  const values = Object.fromEntries(declared.flatMap((d) =>
+    handedBack[d.name] === undefined ? [] : [[d.name, String(handedBack[d.name]).trim()]]));
+
+  await db.query(
+    `UPDATE run SET status = 'queued', held = held || $2::jsonb, lease_expires_at = NULL, claimed_by = NULL
+      WHERE id = $1`, [run.id, JSON.stringify({ handedBack: values })]);
+  await audit(db, 'waiting run answered', run.id, { handedBack: Object.keys(values) });
+  return { ok: true, reference };
+}

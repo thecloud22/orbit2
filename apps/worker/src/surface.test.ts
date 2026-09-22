@@ -304,3 +304,34 @@ test('a hand-off ends the run at the edge of its authority, carrying what the pe
     `SELECT kind FROM run_event WHERE run_id = $1 AND kind = 'handed.off'`, [runId]);
   assert.equal(rows.length, 1);
 });
+
+test('a hand-off that waits pauses the run, and resuming carries on after it with what it had', async () => {
+  const ids = Array.from({ length: 5 }, () => crypto.randomUUID());
+  const steps: Step[] = [
+    { id: ids[0]!, kind: 'read', summary: 'the status', region: { label: 'Status', binding: byName('Status') },
+      produces: { name: 'claimStatus', label: 'Status', type: 'text', required: true } },
+    { id: ids[1]!, kind: 'handOff', summary: 'wait for sign-off', request: 'Wait for the senior underwriter to sign off.',
+      show: [{ from: 'step', value: 'claimStatus' }],
+      handsBack: [{ name: 'signedOffBy', label: 'Signed off by', type: 'text', required: true }], waits: true },
+    { id: ids[2]!, kind: 'open', summary: 'open again', application: 'register', path: '/register',
+      arrives: { describe: 'open' }, changesARecord: false },
+    { id: ids[3]!, kind: 'read', summary: 'the decision', region: { label: 'Decision', binding: byName('Decision') },
+      produces: { name: 'decision', label: 'Decision', type: 'text', required: true } },
+    { id: ids[4]!, kind: 'end', summary: 'recorded', outcome: 'found', publishes: ['claimStatus', 'decision', 'signedOffBy'] },
+  ];
+
+  const paused = await execute(db as never, runId, steps, {}, paperSurface({ Status: 'Referred' }));
+  assert.equal(paused.halted, null);
+  assert.equal(paused.reached, null);
+  assert.deepEqual(paused.waiting, { resumeAt: 3, request: 'Wait for the senior underwriter to sign off.',
+    shown: { claimStatus: 'Referred' } });
+
+  const surface = paperSurface({ Decision: 'Approved' });
+  const resumed = await execute(db as never, runId, steps, {}, surface, null,
+    { at: 3, values: { claimStatus: 'Referred', signedOffBy: 'T. Nakamura' } });
+  assert.equal(resumed.reached, 'found');
+  assert.equal(resumed.values.get('claimStatus'), 'Referred', 'what it read before the wait');
+  assert.equal(resumed.values.get('signedOffBy'), 'T. Nakamura', 'what the person handed back');
+  assert.equal(resumed.values.get('decision'), 'Approved');
+  assert.equal(surface.did[0], 'open /register', 'it opened the application again, and did not repeat step 1');
+});

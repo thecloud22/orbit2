@@ -68,6 +68,7 @@ createServer(async (req, res) => {
       if (kind === 'runs' && id) {
         if (verb === 'cancel') { const r = await actions.cancelRun(id); return json(res, r.status, r.body); }
         if (verb === 'retry')  { const r = await actions.retryRun(id); return json(res, r.status, r.body); }
+        if (verb === 'continue') { const r = await actions.continueRun(id, body); return json(res, r.status, r.body); }
         if (verb === 'rerun')  { const r = await actions.rerun(id); return json(res, r.status, r.body); }
       }
       if (kind === 'versions' && id) {

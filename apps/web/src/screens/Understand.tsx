@@ -31,7 +31,7 @@ interface Understanding {
   application: string;
   sentences: Array<{
     number: string; part: string; text: string; kind: string; unterminated: boolean; page: number | null;
-    label: Label | null; reason: string | null; basis: string | null; givenBy: string | null;
+    label: Label | null; reason: string | null; basis: string | null; givenBy: string | null; waits: boolean;
   }>;
   coverage: { total: number; placed: number; unplaced: string[]; byLabel: Record<Label, number> };
   rules: { tables: RuleTable[] | null; refused: string | null } | null;
@@ -109,9 +109,9 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
   const forOrbit = u.coverage.byLabel.task + u.coverage.byLabel.rule;
   const unread = (u.rules?.tables ?? []).flatMap((t) => t.columns.filter((c) => !c.readBy).map((c) => c.label));
 
-  const relabel = async (sentence: string, label: Label) => {
+  const relabel = async (sentence: string, label: Label, waits?: boolean) => {
     setBusy(true); setRefused(null);
-    const result = await send('/api/workflows/' + id + '/relabel', { sentence, label });
+    const result = await send('/api/workflows/' + id + '/relabel', { sentence, label, ...(waits ? { waits } : {}) });
     setBusy(false);
     if (!result.ok) setRefused(result.why);
     setRefresh((n) => n + 1);
@@ -267,6 +267,17 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
                 ) : (
                   <span style={{ fontSize: 13.5, fontWeight: 600 }}>{NAME[s.label]}</span>
                 )}
+                {/* The Human in the Loop step: only a person marks where the
+                    run stops for somebody, never the model. */}
+                {s.label === 'forAPerson' && (sorted && !confirmed ? (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}>
+                    <input type="checkbox" checked={s.waits} disabled={busy}
+                      onChange={(e) => void relabel(s.number, 'forAPerson', e.target.checked)} />
+                    The run waits here until this is done
+                  </label>
+                ) : s.waits && (
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>The run waits here</span>
+                ))}
                 {s.reason && (
                   <span style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>
                     {s.givenBy === 'author' ? 'You: ' : s.basis === 'inferred' ? 'Orbit concluded: ' : 'Orbit: '}

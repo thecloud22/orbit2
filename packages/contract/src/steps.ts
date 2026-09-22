@@ -107,6 +107,14 @@ export const step = z.discriminatedUnion('kind', [
     request: z.string().min(1).max(1000),
     show: z.array(valueRef).max(16),
     handsBack: z.array(declaredValue).max(8),
+    /**
+     * The Human in the Loop step (Decision 14, amended 2026-09-22). Absent or
+     * false: the run ends here, handed to a person. True: the run waits for
+     * the person to do the work and say so, then carries on with the next
+     * step, which must open the application afresh — a browser session does
+     * not survive an approval that takes a day.
+     */
+    waits: z.boolean().optional(),
   }),
   object({
     ...base, kind: z.literal('end'),

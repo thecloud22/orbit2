@@ -10,7 +10,7 @@
 import { strict as assert } from 'node:assert';
 import { after, before, beforeEach, test } from 'node:test';
 import { Client } from 'pg';
-import { cancelRun, retryRun, rerun } from './control.ts';
+import { cancelRun, continueRun, retryRun, rerun } from './control.ts';
 import { migrate } from './migrate.ts';
 
 const owner = process.env['ORBIT_TEST_DATABASE_URL'] ?? `postgres://${process.env['USER']}@localhost/orbit2_test`;
@@ -164,4 +164,31 @@ test('a re-run uses the version the original used, not whichever is live now', a
   const { rows } = await db.query<{ version_id: string }>(
     `SELECT version_id FROM run WHERE reference = $1`, [result.ok === true ? result.reference : '']);
   assert.equal(rows[0]!.version_id, before.rows[0]!.version_id);
+});
+
+
+test('a waiting run carries on only with what its step asked to be handed back', async () => {
+  const { rows: [w] } = await db.query<{ id: string }>(`INSERT INTO workflow (name) VALUES ('Waits') RETURNING id`);
+  const body = { steps: [
+    { id: crypto.randomUUID(), kind: 'handOff', summary: 'wait', request: 'Wait for sign-off.', show: [], waits: true,
+      handsBack: [{ name: 'signedOffBy', label: 'Signed off by', type: 'text', required: true }] },
+    { id: crypto.randomUUID(), kind: 'open', summary: 'again', application: 'app', path: '/', arrives: { describe: 'x' }, changesARecord: false },
+  ] };
+  const { rows: [v] } = await db.query<{ id: string }>(
+    `INSERT INTO workflow_version (workflow_id, version, body, digest, outcomes, declared_inputs, applications)
+     VALUES ($1, 1, $2, 'sha256:w', '[]', '[]', '[]') RETURNING id`, [w!.id, JSON.stringify(body)]);
+  const reference = `W${crypto.randomUUID().slice(0, 5).toUpperCase()}`;
+  await db.query(
+    `INSERT INTO run (version_id, reference, status, inputs, held) VALUES ($1, $2, 'waitingForAPerson', '{}', $3)`,
+    [v!.id, reference, JSON.stringify({ resumeAt: 2, request: 'Wait for sign-off.', values: { status: 'Referred' } })]);
+
+  assert.match(((await continueRun(db as never, reference, { handedBack: {} })) as { because: string }).because, /Signed off by/);
+  assert.match(((await continueRun(db as never, reference, { handedBack: { signedOffBy: 'x', extra: 'y' } })) as { because: string }).because, /does not ask for extra/);
+  assert.deepEqual(await continueRun(db as never, reference, { handedBack: { signedOffBy: 'T. Nakamura' } }), { ok: true, reference });
+  const { rows: [after_] } = await db.query<{ status: string; held: { handedBack: unknown; values: unknown } }>(
+    `SELECT status, held FROM run WHERE reference = $1`, [reference]);
+  assert.equal(after_!.status, 'queued');
+  assert.deepEqual(after_!.held.handedBack, { signedOffBy: 'T. Nakamura' });
+  assert.deepEqual(after_!.held.values, { status: 'Referred' }, 'what it had read is kept');
+  assert.equal((await continueRun(db as never, reference, { handedBack: { signedOffBy: 'again' } })).ok, false, 'once');
 });

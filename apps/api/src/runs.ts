@@ -9,7 +9,7 @@ import { pool } from './db.ts';
  */
 export async function readRun(reference: string) {
   const { rows: [run] } = await pool.query(
-    `SELECT r.id, r.reference, r.status, r.outcome, r.is_test, r.inputs, r.outputs, r.error,
+    `SELECT r.id, r.reference, r.status, r.outcome, r.is_test, r.inputs, r.outputs, r.error, r.held,
             r.started_by, r.queued_at, r.started_at, r.ended_at, r.retries,
             -- The reference rather than the id, because the link is for a
             -- person to follow and a reference is what a person quotes.

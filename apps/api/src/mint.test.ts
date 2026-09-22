@@ -212,3 +212,23 @@ test('a version drafted any other way carries no sort', async () => {
     `SELECT body FROM workflow_version WHERE workflow_id = $1`, [w!.id]);
   assert.equal('understanding' in v!.body, false);
 });
+
+test('a hand-off that waits must be followed by opening the application again', async () => {
+  const wait = { kind: 'handOff', declares: { summary: 'wait', request: 'Wait for sign-off.', show: [], handsBack: [], waits: true } };
+  const refused = await mintVersion(db as never, await aWorkflowWith([
+    wait, { kind: 'end', declares: { summary: 'done', outcome: 'done', publishes: [] } }]));
+  assert.ok(refused.outcome === 'refused' && refused.blockers.some((b) => b.kind === 'waitNotFollowedByOpen'));
+
+  const published = await mintVersion(db as never, await aWorkflowWith([
+    wait,
+    { kind: 'open', declares: { summary: 'open again', application: 'app', path: '/', arrives: { describe: 'open' }, changesARecord: false } },
+    { kind: 'end', declares: { summary: 'done', outcome: 'done', publishes: [] } }]));
+  assert.equal(published.outcome, 'published');
+});
+
+test('a hand-off that does not wait ends the path: a step after it is never reached', async () => {
+  const result = await mintVersion(db as never, await aWorkflowWith([
+    { kind: 'handOff', declares: { summary: 'to a person', request: 'Pass it on.', show: [], handsBack: [] } },
+    { kind: 'end', declares: { summary: 'done', outcome: 'done', publishes: [] } }]));
+  assert.ok(result.outcome === 'refused' && result.blockers.some((b) => b.kind === 'stepUnreachable'));
+});

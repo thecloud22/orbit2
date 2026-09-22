@@ -275,15 +275,21 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
 
       <Controls run={run} again={again} />
 
+      {run.status === 'waitingForAPerson' && (
+        <WaitingForYou run={run} steps={steps as unknown as Array<Record<string, unknown>>} again={again} />
+      )}
+
       {/* "No conclusion reached" is a finding about a run that finished. A
           run that has not started has not failed to reach anything yet, and
           saying so put a verdict on the screen before there was one. */}
       <OutcomePair state={state}
         status={stoppedByACheck ? 'Stopped by a check'
           : handedOff ? 'Handed to a person'
+          : run.status === 'waitingForAPerson' ? 'Waiting for a person'
           : run.status[0]!.toUpperCase() + run.status.slice(1)}
         outcome={run.outcome ? label(run.outcome)
           : handedOff ? 'For a person to finish'
+          : run.status === 'waitingForAPerson' ? 'Not yet'
           : stoppedByACheck ? String((run.error as { describe?: string }).describe ?? 'A check did not hold')
           : going ? 'Not yet'
           : 'No conclusion reached'}
@@ -327,7 +333,8 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
                 <span style={{ width: 40, flexShrink: 0, fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-2)', paddingTop: 2 }}>{s.number}</span>
                 <span style={{ flexGrow: 1 }}>{s.text}</span>
                 <span style={{ width: 150, flexShrink: 0, fontSize: 12.5, color: 'var(--ink-2)' }}>
-                  {s.label === 'wontDo' ? 'The procedure says not to' : 'Left to a person'}</span>
+                  {s.label === 'wontDo' ? 'The procedure says not to'
+                    : (s as { waits?: boolean }).waits ? 'The run waits for this' : 'Left to a person'}</span>
               </div>
             ))}
           </div>
@@ -634,3 +641,61 @@ const Operand = ({ label, value }: { label: string; value: unknown }) => (
     <span style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 600 }}>{String(value)}</span>
   </div>
 );
+
+/**
+ * A run waiting for a person (the Human in the Loop step). What it asks, what
+ * it has found so far, and the one act that lets it carry on — with whatever
+ * the step asked to be handed back. Waiting is not failure: the run is intact
+ * and holds for as long as it takes (§10).
+ */
+function WaitingForYou({ run, steps, again }: {
+  run: RunView['run']; steps: Array<Record<string, unknown>>; again: () => void;
+}) {
+  const held = (run as unknown as { held?: { resumeAt: number; request: string; values: Record<string, string | null> } }).held;
+  const step = held ? steps[held.resumeAt - 2] as { handsBack?: Array<{ name: string; label: string; required: boolean }> } | undefined : undefined;
+  const asks = step?.handsBack ?? [];
+  const [given, setGiven] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  if (!held) return null;
+
+  const carryOn = async () => {
+    setBusy(true); setRefused(null);
+    const res = await fetch(`/api/runs/${run.reference}/continue`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handedBack: given }) });
+    const body = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (res.ok) again(); else setRefused(body.why ?? 'That did not work.');
+  };
+
+  return (
+    <section style={{ margin: '18px 0 4px', background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)',
+      borderRadius: 5, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--attention-ink)' }}>Waiting for a person</div>
+      <div style={{ fontSize: 14, lineHeight: 1.6 }}>{held.request}</div>
+      {Object.keys(held.values).length > 0 && (
+        <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', fontSize: 13 }}>
+          {Object.entries(held.values).map(([k, v]) => (
+            <span key={k}><span style={{ color: 'var(--ink-2)' }}>{k} </span><Verbatim>{v ?? 'not there'}</Verbatim></span>
+          ))}
+        </div>
+      )}
+      {asks.map((a) => (
+        <label key={a.name} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5 }}>
+          <span style={{ width: 180 }}>{a.label}{a.required ? '' : ' (if any)'}</span>
+          <input value={given[a.name] ?? ''} onChange={(e) => setGiven((g) => ({ ...g, [a.name]: e.target.value }))}
+            style={{ font: 'inherit', fontSize: 13.5, padding: '7px 9px', border: '1px solid var(--rule-2)', borderRadius: 3, width: 280 }} />
+        </label>
+      ))}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button type="button" disabled={busy} onClick={() => void carryOn()}
+          style={{ font: 'inherit', fontSize: 13.5, fontWeight: 600, padding: '9px 16px', borderRadius: 3, border: 0,
+            background: 'var(--ink)', color: 'var(--page)', cursor: busy ? 'default' : 'pointer' }}>
+          It's done. Carry on</button>
+        <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+          The run opens the application again and continues from step {held.resumeAt}.</span>
+      </div>
+      {refused && <div style={{ fontSize: 13, color: 'var(--failed-ink)' }}>{refused}</div>}
+    </section>
+  );
+}
