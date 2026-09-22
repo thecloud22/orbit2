@@ -1,0 +1,16 @@
+{
+  "labelledBy": "Claude, 2026-09-22 — a starter fixture; replace with an SOP labelled by the person who owns it",
+  "labels": {
+    "1.1": "background", "1.2": "background", "1.3": "background", "1.4": "background", "1.5": "background",
+    "1.6": "background", "1.7": "forAPerson", "1.8": "background",
+    "1.9": "task", "1.10": "task", "1.11": "rule", "1.12": "rule", "1.13": "task", "1.14": "rule",
+    "1.15": "forAPerson", "1.16": "rule", "1.17": "rule", "1.18": "forAPerson",
+    "1.19": "wontDo", "1.20": "forAPerson"
+  },
+  "judgementCalls": {
+    "1.6": "A prerequisite, not an act: background.",
+    "1.14": "A conditional prohibition. It decides what happens to a closed claim, so rule rather than wontDo.",
+    "1.15": "Handing the enquiry to a team is work people do: forAPerson.",
+    "1.18": "Waits on a team lead's approval — the Human in the Loop case: forAPerson."
+  }
+}

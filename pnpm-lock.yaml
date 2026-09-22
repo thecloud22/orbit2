@@ -76,6 +76,9 @@ importers:
       '@orbit/model':
         specifier: file:../../packages/model
         version: link:../../packages/model
+      '@orbit/procedure':
+        specifier: file:../../packages/procedure
+        version: link:../../packages/procedure
       pg:
         specifier: ^8.13.0
         version: 8.23.0

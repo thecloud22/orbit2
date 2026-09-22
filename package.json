@@ -12,7 +12,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "verify:model": "node --env-file=.env --experimental-strip-types packages/model/src/verify.ts",
-    "dev": "pnpm -r --parallel dev"
+    "dev": "pnpm -r --parallel dev",
+    "eval:sort": "node --env-file=.env --experimental-strip-types apps/worker/src/sort-eval.ts docs/testing/sort"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

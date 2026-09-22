@@ -1,0 +1,11 @@
+{
+  "labelledBy": "Claude, 2026-09-22 — a starter fixture; replace with an SOP labelled by the person who owns it",
+  "labels": {
+    "1.1": "background", "1.2": "background", "1.3": "background", "1.4": "background", "1.5": "background",
+    "1.6": "task", "1.7": "task", "1.8": "rule", "1.9": "rule", "1.10": "rule",
+    "1.11": "forAPerson", "1.12": "wontDo"
+  },
+  "judgementCalls": {
+    "1.10": "Qualifies the rule in 1.9 (a missing file is normal), so it is part of the rule rather than background."
+  }
+}

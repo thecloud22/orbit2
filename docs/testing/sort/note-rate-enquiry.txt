@@ -1,0 +1,13 @@
+Note rate enquiry
+
+Purpose
+This procedure is used when a broker asks for the note rate on a loan file. It applies to every underwriting desk.
+
+Steps
+1. Sign in to Meridian Home Lending with any user ID and password.
+2. Search the pipeline for the loan number the broker gave us and open the file.
+3. If the file is there, record the note rate.
+4. If there is no such file, say so. That happens a lot, it is not an error.
+5. Phone the broker back if they asked for a call.
+
+Do not change anything on the file.
