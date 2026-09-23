@@ -710,6 +710,25 @@ export async function authorFromProcedure(opts: {
       }
 
       const p = answered.value;
+      if (p.act === 'done' && across) {
+        // "Finished" while the next line of work happens on another
+        // application is the walk not knowing to go there (Orbit 2.2). The
+        // line and where it happens are confirmed, so Orbit goes itself — a
+        // move, never a press — and says why.
+        const next = (opts.sentences ?? []).find((x) => !x.waits && (opts.taskSentences ?? []).includes(x.number)
+          && !Object.values(provenance).includes(x.number));
+        if (next?.application && next.application !== current && apps.some((a) => a.name === next.application)) {
+          const from = current;
+          await goTo(next.application);
+          steps.push({ id: crypto.randomUUID(), kind: 'open', summary: `Go to ${next.application}`,
+            application: applicationKey(next.application), path: appNamed(next.application).startPath,
+            arrives: { describe: 'the application is showing' }, changesARecord: false });
+          lastActMoved = true;
+          noteTurn(record('kept', `step ${steps.length}: goes to ${next.application} for ${next.number} — the next line of work `
+            + `happens there, and the walk said ${from} was finished`));
+          continue;
+        }
+      }
       if (p.act === 'done') {
         // Not finished while a line of work has no step. Checked against the
         // numbered sentences, so it is a fact about the procedure rather than
@@ -800,6 +819,23 @@ export async function authorFromProcedure(opts: {
         lastActMoved = true;
         noteTurn(record('kept', `step ${steps.length - 1}: waits for a person (${wait.number}), then opens the application again`));
         continue;
+      }
+
+      // An act for a line that happens on another application, asked while
+      // looking at this one: the walk goes there first, and the act is asked
+      // again against that screen (Orbit 2.2).
+      if (across && p.sentence) {
+        const line = opts.sentences?.find((x) => x.number === p.sentence);
+        if (line?.application && line.application !== current && apps.some((a) => a.name === line.application)
+            && !(opts.ruleSentences ?? []).includes(line.number)) {
+          await goTo(line.application);
+          steps.push({ id: crypto.randomUUID(), kind: 'open', summary: `Go to ${line.application}`,
+            application: applicationKey(line.application), path: appNamed(line.application).startPath,
+            arrives: { describe: 'the application is showing' }, changesARecord: false });
+          lastActMoved = true;
+          noteTurn(record('kept', `step ${steps.length}: goes to ${line.application}, where ${line.number} happens`));
+          continue;
+        }
       }
 
       // A press citing a RULE line is answered before anything is looked up:
