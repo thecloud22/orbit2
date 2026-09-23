@@ -127,6 +127,28 @@ const SCENARIOS = {
       'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
     },
   },
+  // Orbit 2.3: scenario 9's own words again, on a real mainframe: MVS 3.8j
+  // on Hercules, signed on through VTAM and TSO, the servicing screens a CICS
+  // program under KICKS, the loans in VSAM (demo/mvs). The example is not one
+  // of the loans run, because the walk presses what it maps, and on this host
+  // an approval stays approved.
+  13: {
+    name: 'Scenario 13: scenario 9, on the mainframe (MVS, TSO, KICKS)',
+    procedure: readFileSync(join(DIR, '09-live-edit.txt'), 'utf8'),
+    example: 'ML-26-04561',
+    on: 'mainframe',
+    loans: {
+      'ML-26-04488': { status: 'succeeded', pressed: ['ATTACH PMI', 'APPROVE'] },
+      'ML-26-04471': { status: 'succeeded', pressed: ['APPROVE'] },
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+    },
+    // What the host holds afterwards, read from the loan file on MVS: a press
+    // that the application refused leaves the loan as it was.
+    host: {
+      'ML-26-04488': { status: 'APPROVED', conditions: ['PMI'] },
+      'ML-26-04471': { status: 'APPROVED', conditions: [] },
+    },
+  },
   // The swivel chair, part one: the web file, the borrower's existing loans on
   // the green screen, and the decision made back on the web.
   11: {
@@ -203,6 +225,27 @@ async function servicing(apps) {
   return again.find((a) => a.id === made.body.id);
 }
 
+/**
+ * The loan servicing on the mainframe (Orbit 2.3), registered the way a person
+ * registers a green screen: TN3270 to the host demo/mvs runs, signing on as
+ * the servicing account. Its files are loaded afresh first, as the twin's
+ * session starts afresh: on this host what a run changes stays changed.
+ */
+async function mainframe(apps) {
+  const host = await import('../demo/mvs/host.mjs');
+  if (host.state() !== 'running') throw new Error('the mainframe is not running: node demo/mvs/host.mjs start');
+  const { loadFiles, CLERK } = await import('../demo/mvs/servicing.mjs');
+  await loadFiles();
+  const known = apps.find((a) => !a.retired_at && a.surface === 'terminal' && a.addresses.some((x) => x.host === 'localhost:3272'));
+  if (known) return known;
+  const made = await call('/api/applications', { name: 'Loan Servicing (mainframe)', surface: 'terminal',
+    addresses: [{ host: 'tn3270://localhost:3272' }], signInAs: CLERK.user, credentialValue: CLERK.password,
+    terminal: { codePage: 'cp037', model: '3278-2' } });
+  if (!made.body.id) throw new Error(`the mainframe could not be registered: ${made.body.why ?? made.status}`);
+  const again = (await call('/api/applications')).body.applications ?? [];
+  return again.find((a) => a.id === made.body.id);
+}
+
 async function call(path, body) {
   const res = await fetch(API + path, body === undefined ? {}
     : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -228,11 +271,11 @@ async function run(key) {
   // signs in cannot be walked against a registration without one.
   const portal = apps.find((a) => !a.retired_at && a.sign_in_as && a.addresses.some((x) => x.host === 'localhost:4101'));
   if (!portal) throw new Error('no application at localhost:4101 registered with an account to sign in as');
-  const app = s.on === 'servicing' ? await servicing(apps) : portal;
+  const app = s.on === 'servicing' ? await servicing(apps) : s.on === 'mainframe' ? await mainframe(apps) : portal;
   console.log(`  against "${app.name}", signing in as ${app.sign_in_as}`);
 
   const brought = await call('/api/understanding', {
-    name: `${s.name} (${new Date().toISOString().slice(0, 16)})`, applicationId: app.id, startPath: s.on === 'servicing' ? '/' : '/login',
+    name: `${s.name} (${new Date().toISOString().slice(0, 16)})`, applicationId: app.id, startPath: s.on ? '/' : '/login',
     inputs: { loanNumber: s.example },
     ...(s.pdf ? { pdf: readFileSync(s.pdf).toString('base64') } : { procedure: s.procedure }),
   });
@@ -268,6 +311,16 @@ async function run(key) {
   const published = await confirmAndPublish(W, s.example);
   if (!published.ok) return fail(published.why);
   await runLoans(published.version, s.loans, failures, s.objects);
+  if (s.host) {
+    const { readLoans } = await import('../demo/mvs/servicing.mjs');
+    const held = await readLoans();
+    for (const [loan, want] of Object.entries(s.host)) {
+      const got = held[loan];
+      const same = got && got.status === want.status && got.conditions.join(',') === want.conditions.join(',');
+      console.log(`  ${same ? 'ok  ' : 'FAIL'}  on the host ${loan} is ${got ? `${got.status}${got.conditions.length ? ` with ${got.conditions.join(', ')}` : ''}` : 'missing'}`);
+      if (!same) failures.push(`${loan} on the host: ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
+    }
+  }
 
   // A live edit (scenario 9): back to editing on the same page, the words
   // changed in place, only that sentence mapped, and version 2 published.
@@ -355,9 +408,11 @@ async function runLoans(version, loans, failures, objects) {
 }
 
 // `node scripts/scenarios.mjs 5 6 7` runs those; `demo` runs the demo set, 5 to 9.
+// `mainframe` runs 13, which needs demo/mvs's host up and so is not in the default run.
 const asked = process.argv.slice(2);
 const which = asked[0] === 'demo' ? ['5', '6', '7', '8', '9'] : asked[0] === 'green' ? ['10', '11', '12']
-  : asked.length ? asked : Object.keys(SCENARIOS);
+  : asked[0] === 'mainframe' ? ['13']
+  : asked.length ? asked : Object.keys(SCENARIOS).filter((k) => SCENARIOS[k].on !== 'mainframe');
 let failed = 0;
 for (const k of which) failed += (await run(k)).length;
 console.log(failed ? `\n${failed} FAILED` : '\nall passed');
