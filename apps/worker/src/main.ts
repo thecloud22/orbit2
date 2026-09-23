@@ -16,6 +16,8 @@ import { sortAndStore, tabulateAndStore } from './sort-store.ts';
 import { answerAndStore } from './chat-store.ts';
 import { record } from './record.ts';
 import { CONNECTORS } from './connectors.ts';
+import { surfaceAcross } from './surface-across.ts';
+import type { Surface } from './surface.ts';
 
 const pool = new Pool({
   connectionString: process.env['ORBIT_DATABASE_URL']
@@ -457,15 +459,19 @@ async function runOne(runId: string) {
     // Read from the version's own copy, never from the live application: a
     // version that could be made to run somewhere else by editing a row
     // afterwards would not be the fixed thing every run names.
-    const open = CONNECTORS[app.surface]?.run;
+    // Every application the version names, each through its connector
+    // (Orbit 2.2). One application runs exactly as it always has.
+    const apps = row.applications as Array<{ name: string; surface: string; addresses: Array<{ host: string; scheme?: string }>; sign_in_as: string | null }>;
+    const missing = apps.find((a) => !CONNECTORS[a.surface]?.run);
+    const open = missing ? undefined : CONNECTORS[app.surface]?.run;
     if (!open) {
       // Orbit does not guess what it is driving. A version that does not say
       // is refused rather than assumed to be a browser, because assuming is
       // how a terminal procedure would one day be run against a web page and
       // the record would say it went fine.
       const halt = { kind: 'pathReachesNothing' as const, step: 1,
-        describe: app.surface
-          ? `This version is registered against a ${app.surface} surface, which this worker cannot drive.`
+        describe: (missing ?? app).surface
+          ? `This version is registered against a ${(missing ?? app).surface} surface, which this worker cannot drive.`
           : 'This version does not record what kind of application it runs against, so it cannot be run.' };
       await db.query(`UPDATE run SET status = 'failed', error = $2, ended_at = now() WHERE id = $1`,
         [runId, JSON.stringify(halt)]);
@@ -491,8 +497,11 @@ async function runOne(runId: string) {
         [runId, JSON.stringify({ at: resume.at, handedBack: held!.handedBack })]);
     }
 
+    const surface: Surface = apps.length > 1
+      ? surfaceAcross(apps.map((a) => ({ name: a.name, origin: originOf(a.addresses[0]), open: CONNECTORS[a.surface]!.run, signsInAs: a.sign_in_as ?? null })))
+      : await open(origin);
     const { halted, values, reached, handedOff, waiting } = await execute(
-      db, runId, steps, row.inputs, await open(origin), app.sign_in_as ?? null, resume);
+      db, runId, steps, row.inputs, surface, app.sign_in_as ?? null, resume);
 
     if (waiting) {
       // Paused, not finished: the values it has read are kept so it can carry
