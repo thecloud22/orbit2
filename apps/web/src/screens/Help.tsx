@@ -34,6 +34,18 @@ const TOPICS: Array<{ topic: string; answers: Array<{ q: string; a: string }> }>
     { q: 'Can I change an agent that is already published?',
       a: 'Yes. Press "Edit for a new version". The words, the chat and the steps open again; publishing makes the next version. The version already published never changes, and every run of it keeps naming it.' },
   ] },
+  { topic: 'Green screens, and the swivel chair', answers: [
+    { q: 'Can an agent work on a mainframe green screen?',
+      a: 'Yes, over TN3270. Register the application in Admin with the connector "Terminal · TN3270": its host and port, TLS if the host uses it, its code page and screen model, and who it signs in as. The procedure is written exactly as for a web application — Orbit signs on, types into the field after a label, presses the keys the screen names (Enter, PF5), and reads what a label shows. Nothing in your words says "terminal".' },
+    { q: 'How does a step find its field on a green screen?',
+      a: 'By the screen it was mapped on, the label beside it, and where it sits. When a run gets there the screen must be the same one, the label must be there once, and the field where it was. If any of that disagrees the run stops and says which, rather than typing into whatever is there now. A key is named by what it does — APPROVE, not PF5.' },
+    { q: 'Can one agent work across the web portal and the green screen?',
+      a: 'Yes — that is the swivel chair. On the agent\'s page, "Add an application". Orbit places each line of work on the system it happens on, and you can change it like a label. It reads on one, types what it read on the other, and brings the answer back. Where the two spell the same thing differently (the web\'s Conventional, the green screen\'s CONV) it proposes a table of codes and asks you once.' },
+    { q: 'What if it stops half-way across the two?',
+      a: 'Nothing spans two systems as one transaction, so Orbit never guesses a reversal. The run page says what each system now holds: what went through, and a press that never got an answer. Until somebody says they have checked, it will not retry or run it again — doing that blind could board a loan twice.' },
+    { q: 'Is a password on a green screen ever captured?',
+      a: 'No. A password field on a green screen is one the host marks as not displayed. Orbit never reads what is in it, and it is blanked before the model, a picture or a log could see it.' },
+  ] },
   { topic: 'Writing a procedure', answers: [
     { q: 'It never asked for a user ID or a password',
       a: 'It does not need to. The account and password come from the system you registered, so every run signs in as that account and nobody starting a run can choose a different one. A password is never typed into a procedure, never stored in a workflow, and never appears in a run.' },
