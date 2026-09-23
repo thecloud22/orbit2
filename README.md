@@ -280,7 +280,7 @@ per session. See Decisions 18 and 19.
 ## Working on it
 
 ```
-pnpm test        # 403 tests: contract, model, procedure, api, worker, and the green-screen twin
+pnpm test        # 404 tests: contract, model, procedure, api, worker, and the green-screen twin
 pnpm typecheck
 ```
 
