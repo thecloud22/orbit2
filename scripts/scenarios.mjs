@@ -239,7 +239,9 @@ async function confirmAndPublish(W, example) {
   const open = draft.notes.filter((n) => !n.resolved_at);
   const ends = draft.steps.filter((x) => x.kind === 'end');
   const confirmed = await call(`/api/workflows/${W}/confirm`, {
-    endings: ends.map((e) => ({ stepId: e.id, outcome: e.declares.outcome, label: e.declares.summary,
+    // A person types the label into an empty box; the runner names it from the
+    // ending's summary, within the 120 characters the box takes.
+    endings: ends.map((e) => ({ stepId: e.id, outcome: e.declares.outcome, label: e.declares.summary.slice(0, 120).trim(),
       example: { loanNumber: example } })),
     answers: open.map((n) => ({ noteId: n.id, answer: 'Answered by the scenario runner.', acknowledged: false })),
     attested: true,
