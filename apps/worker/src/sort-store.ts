@@ -5,6 +5,7 @@
  */
 import type { PoolClient } from 'pg';
 import type { ModelProvider } from '@orbit/model';
+import { numberTables, tableNumber, type RuleTable } from '@orbit/contract';
 import { sortSentences, type SortTurn } from './sort.ts';
 import { tabulate } from './tables.ts';
 import { inDocumentOrder } from '../../api/src/procedure.ts';
@@ -99,8 +100,20 @@ export async function tabulateAndStore(db: PoolClient, workflowId: string, model
   await db.query('BEGIN');
   try {
     for (const turn of result.turns) await storeTurn(db, workflowId, turn);
+    // Each table keeps the number it was given when the tables were last
+    // made, and a number that has gone is never given again: the highest
+    // ever given is read across every set kept, counting an unnumbered one by place.
+    const { rows: [before] } = await db.query<{ tables: Array<RuleTable & { id?: number }> | null }>(
+      `SELECT tables FROM rule_tables WHERE workflow_id = $1 AND tables IS NOT NULL ORDER BY seq DESC LIMIT 1`, [workflowId]);
+    const { rows: [ever] } = await db.query<{ highest: number }>(
+      `SELECT coalesce(max(coalesce((t.value->>'id')::int, t.ordinality::int)), 0)::int AS highest
+         FROM rule_tables r, jsonb_array_elements(r.tables) WITH ORDINALITY t
+        WHERE r.workflow_id = $1 AND r.tables IS NOT NULL`, [workflowId]);
+    const tables = result.ok
+      ? numberTables(result.tables, (before?.tables ?? []).map((t, i) => ({ id: tableNumber(t, i), sentences: t.sentences })), ever!.highest)
+      : null;
     await db.query(`INSERT INTO rule_tables (workflow_id, tables, refused) VALUES ($1, $2, $3)`,
-      [workflowId, result.ok ? JSON.stringify(result.tables) : null, result.ok ? null : result.describe]);
+      [workflowId, tables ? JSON.stringify(tables) : null, result.ok ? null : result.describe]);
     await db.query('COMMIT');
   } catch (error) {
     await db.query('ROLLBACK');

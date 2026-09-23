@@ -456,17 +456,18 @@ export function RulesPanel({ tables, steps }: { tables: RuleTable[] | null; step
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <PanelNote>Your rule sentences, as tables, each with its identifier. The steps a rule became carry it too. A table is changed by changing its sentence, so it can never say something the procedure does not (R15).</PanelNote>
       {tables.map((t, i) => {
-        const became = steps.filter((s) => ids.ofStep(s)?.startsWith(`BR${i + 1}`)).map((s) => s.position);
+        const table = `BR${t.id ?? i + 1}`;
+        const became = steps.filter((s) => { const of = ids.ofStep(s); return of === table || of?.startsWith(`${table}.`); }).map((s) => s.position);
         return (
           <div key={i}>
-            <div style={{ fontSize: 13.5, fontWeight: 700 }}><span style={{ ...mono, color: 'var(--running-ink)' }}>BR{i + 1}</span> {'·'} {t.question}</div>
+            <div style={{ fontSize: 13.5, fontWeight: 700 }}><span style={{ ...mono, color: 'var(--running-ink)' }}>{table}</span> {'·'} {t.question}</div>
             <div style={{ fontSize: 12, color: 'var(--ink-2)', margin: '2px 0 7px' }}>
               from {t.sentences.join(', ')} {'·'} {became.length ? `became step${became.length === 1 ? '' : 's'} ${became.join(', ')}` : 'not in the draft yet'}
             </div>
             <div style={{ borderTop: '1px solid var(--ink)' }}>
               {t.rows.map((r, j) => (
                 <div key={j} style={{ display: 'flex', gap: 10, fontSize: 12.5, padding: '6px 0', borderBottom: '1px solid var(--rule)' }}>
-                  <span style={{ width: 44, flexShrink: 0, ...mono, fontSize: 11, color: 'var(--running-ink)' }}>BR{i + 1}.{j + 1}</span>
+                  <span style={{ width: 44, flexShrink: 0, ...mono, fontSize: 11, color: 'var(--running-ink)' }}>{table}.{j + 1}</span>
                   <span style={{ width: 140, flexShrink: 0, ...mono, fontSize: 11.5 }}>
                     {r.when.map((w) => `${w.column} ${IS[w.is] ?? w.is}${w.value !== null ? ` ${w.value}` : ''}`).join(' and ') || 'always'}
                   </span>
