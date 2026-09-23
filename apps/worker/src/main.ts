@@ -181,16 +181,19 @@ async function authorOne(sessionId: string) {
     const { rows: order } = s.into_workflow_id ? await db.query<{ number: string }>(
       `SELECT p.key || '.' || x.n AS number FROM procedure_sentence x JOIN procedure_part p ON p.id = x.part_id
         WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
-    const ruleSentences = new Set(decides ? (tables?.tables ?? []).flatMap((t) => t.sentences) : []);
+    // The walk still reads what the rule sentences name — "if the file is
+    // there, record the note rate" is where the reading is — but it may not
+    // press anything on a rule's behalf: that comes from the compiled table.
+    const ruleSentences = decides ? [...new Set((tables?.tables ?? []).flatMap((t) => t.sentences))] : [];
     // A sentence that reads like instructions to a machine never reaches the
     // walk: it could be cited as the line that asked for a press.
-    const walked = sentences.filter((x) => !ruleSentences.has(x.number) && !looksLikeInstructions(x.text));
+    const walked = sentences.filter((x) => !looksLikeInstructions(x.text));
 
     const result = await authorAndStore(db, {
       ...(walked.length ? { sentences: walked.map(({ label: _, ...x }) => x),
         taskSentences: walked.filter((x) => x.label === 'task').map((x) => x.number) } : {}),
       ...(mayBeAbsentAfter.length ? { mayBeAbsentAfter } : {}),
-      ...(decides ? { tables: (tables!.tables ?? []) as never, order: order.map((o) => o.number) } : {}),
+      ...(decides ? { tables: (tables!.tables ?? []) as never, order: order.map((o) => o.number), ruleSentences } : {}),
       name: s.name,
       procedure: s.procedure,
       applicationId: s.application_id,
@@ -203,7 +206,7 @@ async function authorOne(sessionId: string) {
         console.log(`  turn ${t.turn} ${t.verdict}: ${t.why}`);
         appending = appending.then(() => pool.query(
           `UPDATE authoring_session SET captured = captured || $2::jsonb WHERE id = $1`,
-          [sessionId, JSON.stringify([{ turn: t.turn, verdict: t.verdict, why: t.why }])]));
+          [sessionId, JSON.stringify([{ turn: t.turn, verdict: t.verdict, why: t.why, screenshot: t.screenshot ?? null }])]));
       },
     });
 

@@ -13,7 +13,7 @@
 import { strict as assert } from 'node:assert';
 import { describe, test } from 'node:test';
 import { chromium } from 'playwright';
-import { couldMean, forTest, mismatchOf, settleAfterActivating } from './author.ts';
+import { couldMean, forTest, mismatchOf, onlyARuleAsksFor, settleAfterActivating } from './author.ts';
 
 const el = (what: 'field' | 'button' | 'link' | 'value' | 'heading', name: string) => ({ what, name });
 
@@ -190,4 +190,17 @@ test('page text that reads like instructions is withheld from the model', async 
   const shown = withheld(page);
   assert.equal(shown[0]!.name, '[withheld: reads like instructions to a machine]');
   assert.equal(shown[1]!.name, 'Approve file', 'the rest of the page is untouched');
+});
+
+// ── what the walk is not offered ─────────────────────────────────────────
+// A control only a RULE line asks for is pressed by the compiled table. Told
+// not to press it, the walk pressed for it four times in one session.
+test('a control only a rule asks for is kept from the walk; one a line of work asks for is not', () => {
+  const rules = ['5. If the loan-to-value is over 80%, attach the condition requiring private mortgage insurance.'];
+  const work = ['2. Open the loan file using the loan number.', '7. Then approve the file.'];
+  assert.equal(onlyARuleAsksFor(el('button', 'Require private mortgage insurance'), rules, work), true);
+  assert.equal(onlyARuleAsksFor(el('button', 'Approve file'), rules, work), false, 'a line of work asks for it');
+  assert.equal(onlyARuleAsksFor(el('button', 'Open file'), rules, work), false, 'it changes nothing');
+  assert.equal(onlyARuleAsksFor(el('value', 'Loan-to-value'), rules, work), false, 'a value is read, not pressed');
+  assert.equal(onlyARuleAsksFor(el('button', 'Require private mortgage insurance'), [], work), false, 'no rules, nothing kept');
 });

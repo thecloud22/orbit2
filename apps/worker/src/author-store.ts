@@ -57,6 +57,7 @@ export async function authorAndStore(db: PoolClient, opts: {
   tables?: readonly import('@orbit/contract').RuleTable[];
   order?: readonly string[];
   taskSentences?: readonly string[];
+  ruleSentences?: readonly string[];
   model: ModelProvider;
   /** Each turn as it lands, for whoever is watching the screen. */
   onTurn?: (turn: Turn) => void;
@@ -212,12 +213,13 @@ export async function storeDraft(
       await db.query(
         `INSERT INTO model_call
            (workflow_id, turn, provider, model, shown, answered, verdict, why, tokens_in, tokens_out,
-            tokens_cached, tokens_cache_written, cost_micros)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            tokens_cached, tokens_cache_written, cost_micros, screenshot)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [workflowId, offset + turn.turn, turn.provider, turn.model,
          JSON.stringify(turn.shown), turn.answered ? JSON.stringify(turn.answered) : null,
          turn.verdict, turn.why, turn.tokensIn, turn.tokensOut,
-         turn.tokensCached, turn.tokensCacheWritten, turn.costMicros]);
+         turn.tokensCached, turn.tokensCacheWritten, turn.costMicros,
+         turn.screenshot ? JSON.stringify(turn.screenshot) : null]);
     }
 
     await db.query(

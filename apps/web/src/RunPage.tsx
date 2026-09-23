@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { isRetryable, type ArtefactView, type ErrorKind, type RunEventView, type RunView, type StepAttemptView } from '@orbit/contract';
 import { Dot, EmptyState, OutcomePair, Row, Verbatim, type Emptiness } from './ui.tsx';
+import { InMem } from './InMem.tsx';
 import { useLinkProps, type Route } from './router.ts';
 
 type Loaded = { kind: 'loaded'; data: RunView } | { kind: 'empty'; of: Emptiness };
@@ -318,6 +319,8 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
             {run.may_change_records ? '' : 'This version has no authority to write.'}</Row>
         </div>
       </section>
+
+      <InMem data={data} />
 
       {/* What the agent deliberately does not do. Said on every run, so work
           left to a person is never mistaken for work the agent forgot (2.1). */}

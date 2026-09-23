@@ -32,7 +32,8 @@ export const DECIDE = [
   'columns  For each column of the table, the value that was read which IS that column, copied exactly from',
   '         VALUES READ, or null if none of them is.',
   'actions  For each action, the controls on the page to press to carry it out, in order, each the NAME',
-  '         only (the part after the dash), at most three. ends=true when the action finishes the procedure',
+  '         only (the part after the dash), at most three; none when the action presses nothing (recording or',
+  '         reporting a value that was read, saying so). ends=true when the action finishes the procedure',
   '         (declining, referring, sending away); false when the procedure carries on after it (attaching a',
   '         condition). For an action that ends, outcome is a short camelCase name for the conclusion and',
   '         label how it reads to a person.',
@@ -54,10 +55,10 @@ const answer = z.object({
 const shapeFor = (columns: string[], actions: string[], values: string[]) => ({
   type: 'object',
   properties: {
-    columns: { type: 'array', items: { type: 'object',
+    columns: { type: 'array', minItems: columns.length, maxItems: columns.length, items: { type: 'object',
       properties: { column: { type: 'string', enum: columns }, value: { type: ['string', 'null'], enum: [...values, null] } },
       required: ['column', 'value'], additionalProperties: false } },
-    actions: { type: 'array', items: { type: 'object',
+    actions: { type: 'array', minItems: actions.length, maxItems: actions.length, items: { type: 'object',
       properties: { action: { type: 'string', enum: actions }, controls: { type: 'array', items: { type: 'string' } },
         ends: { type: 'boolean' }, outcome: { type: ['string', 'null'] }, label: { type: ['string', 'null'] } },
       required: ['action', 'controls', 'ends', 'outcome', 'label'], additionalProperties: false } },
@@ -93,73 +94,14 @@ export async function compileTables(opts: {
     const actionsSaid = [...new Set([...table.rows.map((r) => r.then), ...(table.otherwise ? [table.otherwise.then] : [])])];
     const asking = `Connect "${table.question}" to the page.`;
 
-    const answered = await opts.model.propose(
-      { purpose: 'connect a rule table', instruction: DECIDE,
-        shown: [
-          `VALUES READ: ${reads.map((r) => `${r.produces.name} (${r.produces.label})`).join(', ') || 'none'}`, '',
-          'TABLE:', fence('PROCEDURE', [
-            `QUESTION: ${table.question}`,
-            `COLUMNS: ${table.columns.map((c) => `${c.name} (${c.label})`).join(', ')}`,
-            ...table.rows.map((r, i) => `ROW ${i + 1}: when ${r.when.map((w) => `${w.column} ${w.is} ${w.value ?? ''}`.trim()).join(' and ')} → ${r.then}`),
-            ...(table.otherwise ? [`OTHERWISE → ${table.otherwise.then}`] : []),
-            `ACTIONS: ${actionsSaid.map((a) => `"${a}"`).join(', ')}`].join('\n')), '',
-          `PAGE (${opts.pageUrl}):`, fence('PAGE', asText(withheld(opts.seen))), '', asking].join('\n') },
-      answer, shapeFor(table.columns.map((c) => c.name), actionsSaid, values));
-
-    const problems: string[] = [];
-    const said = answered.value;
-    const valueOf = new Map<string, Read>();
-    for (const c of table.columns) {
-      const named = said?.columns.find((x) => x.column === c.name)?.value;
-      const read = reads.find((r) => r.produces.name === named);
-      if (read) valueOf.set(c.name, read);
-      else problems.push(`no value that was read is "${c.label}"`);
-    }
-    const acts = new Map<string, { steps: Step[]; ends: boolean; outcome: string; label: string }>();
-    for (const action of actionsSaid) {
-      const a = said?.actions.find((x) => x.action === action);
-      if (!a || a.controls.length === 0) { problems.push(`nothing on the page carries out "${action}"`); continue; }
-      const made: Step[] = [];
-      for (const control of a.controls) {
-        const wanted = normaliseName(control);
-        const named = opts.seen.filter((s) => !looksLikeInstructions(s.name) && calledIn(s) === wanted && couldMean('activate', s));
-        if (named.length !== 1) {
-          problems.push(named.length === 0 ? `"${control}" is not something on the page that can be pressed`
-            : `"${control}" is on the page ${named.length} times, so it names neither`);
-          continue;
-        }
-        const e = named[0]!;
-        // The control must be one the action asks for: "Decline file" for
-        // "decline the file", never whatever the page suggested.
-        if (!lineAsksFor(e.name, action)) {
-          problems.push(`"${e.name}" is not what "${action}" asks for`);
-          continue;
-        }
-        made.push({ id: crypto.randomUUID(), kind: 'activate', summary: e.name,
-          control: { label: e.labelledBy ?? e.name, binding: e.binding },
-          then: { describe: 'the page moves on' },
-          // Pressing a control that carries out a rule's action is taken to
-          // commit something: approving, declining and referring all do.
-          changesARecord: true });
-      }
-      const outcome = a.outcome && /^[a-z][a-zA-Z0-9]*$/.test(a.outcome) ? a.outcome : null;
-      if (a.ends && !outcome) problems.push(`"${action}" ends the procedure and has no name for that conclusion`);
-      acts.set(action, { steps: made, ends: a.ends, outcome: outcome ?? '', label: a.label?.trim() || action });
-    }
-
-    // Every condition must become a comparison Orbit can carry out.
-    const comparisons = table.rows.map((r) => r.when.map((w) => {
-      const read = valueOf.get(w.column);
-      if (!read) return null;
-      if (w.is === 'isAbsent' || w.is === 'isPresent') {
-        return { of: 'absence' as const, operator: (w.is === 'isAbsent' ? 'isAbsent' : 'isNotAbsent') as 'isAbsent',
-          left: { from: 'step' as const, value: read.produces.name } };
-      }
-      const made = comparisonFor({ value: read.produces.name, is: w.is, than: withoutUnit(w.value ?? '', read.produces.type) }, read.produces);
-      if (!made) problems.push(`"${read.produces.label} ${readable(w.is)} ${w.value}" is not a comparison Orbit can carry out`);
-      return made;
-    }));
-
+    type Answer = z.infer<typeof answer>;
+    type Act = { steps: Step[]; ends: boolean; outcome: string; label: string };
+    let answered!: Awaited<ReturnType<typeof opts.model.propose<Answer>>>;
+    let said: Answer | null = null;
+    let problems: string[] = [];
+    let valueOf = new Map<string, Read>();
+    let acts = new Map<string, Act>();
+    let comparisons: Array<Array<ReturnType<typeof comparisonFor> | { of: 'absence'; operator: 'isAbsent'; left: { from: 'step'; value: string } } | null>> = [];
     const record = (verdict: Turn['verdict'], why: string) => turns.push({
       turn: opts.firstTurn + turns.length, shown: { page: opts.pageUrl, elements: opts.seen.length, asking },
       answered: said as never, verdict, why, model: answered.model, provider: answered.provider,
@@ -168,6 +110,97 @@ export async function compileTables(opts: {
       costMicros: answered.costUnknown ? null : answered.costMicros,
     });
 
+
+    // Asked twice at most: a first answer that leaves an action out or names
+    // something not on the page is told what was wrong, as the sort is.
+    let correction = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      answered = await opts.model.propose(
+        { purpose: 'connect a rule table', instruction: DECIDE,
+          shown: [
+            `VALUES READ: ${reads.map((r) => `${r.produces.name} (${r.produces.label})`).join(', ') || 'none'}`, '',
+            'TABLE:', fence('PROCEDURE', [
+              `QUESTION: ${table.question}`,
+              `COLUMNS: ${table.columns.map((c) => `${c.name} (${c.label})`).join(', ')}`,
+              ...table.rows.map((r, i) => `ROW ${i + 1}: when ${r.when.map((w) => `${w.column} ${w.is} ${w.value ?? ''}`.trim()).join(' and ')} → ${r.then}`),
+              ...(table.otherwise ? [`OTHERWISE → ${table.otherwise.then}`] : []),
+              `ACTIONS: ${actionsSaid.map((a) => `"${a}"`).join(', ')}`].join('\n')), '',
+            `PAGE (${opts.pageUrl}):`, fence('PAGE', asText(withheld(opts.seen))), '', asking,
+            ...(correction ? ['', correction] : [])].join('\n') },
+        answer, shapeFor(table.columns.map((c) => c.name), actionsSaid, values));
+
+      problems = [];
+      said = answered.value;
+      valueOf = new Map<string, Read>();
+      // Which value a column is matters only if the table presses something.
+      // "If the file is there, record the note rate; if not, say so" presses
+      // nothing — the walk's reads and endings already carry it — and was
+      // refused because "file is there" is not a value anybody reads.
+      const pressesNothing = Boolean(said) && actionsSaid.every((a) => said!.actions.find((x) => x.action === a)?.controls.length === 0);
+      for (const c of table.columns) {
+        const named = said?.columns.find((x) => x.column === c.name)?.value;
+        const read = reads.find((r) => r.produces.name === named);
+        if (read) valueOf.set(c.name, read);
+        else if (!pressesNothing) problems.push(`no value that was read is "${c.label}"`);
+      }
+      acts = new Map();
+      for (const action of actionsSaid) {
+        const a = said?.actions.find((x) => x.action === action);
+        if (!a) { problems.push(`nothing was said about "${action}"`); continue; }
+        const made: Step[] = [];
+        for (const control of a.controls) {
+          const wanted = normaliseName(control);
+          const named = opts.seen.filter((s) => !looksLikeInstructions(s.name) && calledIn(s) === wanted && couldMean('activate', s));
+          if (named.length !== 1) {
+            problems.push(named.length === 0 ? `"${control}" is not something on the page that can be pressed`
+              : `"${control}" is on the page ${named.length} times, so it names neither`);
+            continue;
+          }
+          const e = named[0]!;
+          // The control must be one the action asks for: "Decline file" for
+          // "decline the file", never whatever the page suggested.
+          if (!lineAsksFor(e.name, action)) {
+            problems.push(`"${e.name}" is not what "${action}" asks for`);
+            continue;
+          }
+          made.push({ id: crypto.randomUUID(), kind: 'activate', summary: e.name,
+            control: { label: e.labelledBy ?? e.name, binding: e.binding },
+            then: { describe: 'the page moves on' },
+            // Pressing a control that carries out a rule's action is taken to
+            // commit something: approving, declining and referring all do.
+            changesARecord: true });
+        }
+        const outcome = a.outcome && /^[a-z][a-zA-Z0-9]*$/.test(a.outcome) ? a.outcome : null;
+        if (a.ends && !outcome) problems.push(`"${action}" ends the procedure and has no name for that conclusion`);
+        acts.set(action, { steps: made, ends: a.ends, outcome: outcome ?? '', label: a.label?.trim() || action });
+      }
+
+      // Every condition must become a comparison Orbit can carry out.
+      comparisons = table.rows.map((r) => r.when.map((w) => {
+        const read = valueOf.get(w.column);
+        if (!read) return null;
+        if (w.is === 'isAbsent' || w.is === 'isPresent') {
+          return { of: 'absence' as const, operator: (w.is === 'isAbsent' ? 'isAbsent' : 'isNotAbsent') as 'isAbsent',
+            left: { from: 'step' as const, value: read.produces.name } };
+        }
+        const made = comparisonFor({ value: read.produces.name, is: w.is, than: withoutUnit(w.value ?? '', read.produces.type) }, read.produces);
+        if (!made) problems.push(`"${read.produces.label} ${readable(w.is)} ${w.value}" is not a comparison Orbit can carry out`);
+        return made;
+      }));
+      if (said && !problems.length) break;
+      if (attempt === 0) {
+        record(said ? 'rejected' : 'discarded', said ? problems.join('; ') : (answered.refusedBecause ?? 'no answer'));
+        correction = `Your last answer could not be used: ${said ? problems.join('; ') : 'it was not an answer'}. Answer again, `
+          + 'saying something about every action and naming only controls that are on the page.';
+      }
+    }
+
+    // A table none of whose actions presses anything decides nothing the
+    // walk's reads and endings have not already covered.
+    if (said && !problems.length && [...acts.values()].every((a) => a.steps.length === 0)) {
+      record('kept', `"${table.question}" presses nothing, so there is nothing to build`);
+      continue;
+    }
     if (!said || problems.length) {
       record(said ? 'rejected' : 'discarded', said ? problems.join('; ') : (answered.refusedBecause ?? 'no answer'));
       questions.push(asQuestion(`Orbit could not build "${table.question}" (${table.sentences.join(', ')}) into the steps: `

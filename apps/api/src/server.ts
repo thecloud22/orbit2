@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { serveArtefact } from './artefacts.ts';
+import { serveArtefact, serveScreen } from './artefacts.ts';
 import { listApplications, readRecording, readSession } from './authoring.ts';
 import { listRuns, readRun, readRunSteps } from './runs.ts';
 import { listWorkflows, readWorkflow } from './workflows.ts';
@@ -120,6 +120,14 @@ createServer(async (req, res) => {
         const needs = await versionNeeds(db, version[1]!);
         return needs ? json(res, 200, needs) : json(res, 404, { kind: 'noSuchVersion' });
       } finally { db.release(); }
+    }
+
+    const screen = /^\/api\/screens\/(sha256:[0-9a-f]{64})$/.exec(url.pathname);
+    if (screen) {
+      const served = await serveScreen(screen[1]!);
+      if (!served.ok) return json(res, served.kind === 'notFound' ? 404 : 409, served);
+      res.writeHead(200, { 'content-type': served.mediaType, 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
+      return res.end(served.bytes);
     }
 
     const artefact = /^\/api\/artefacts\/([0-9a-f-]{36})$/.exec(url.pathname);

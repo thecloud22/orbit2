@@ -88,7 +88,7 @@ export async function readSession(id: string) {
   if (!session) return null;
 
   const { rows: turns } = await pool.query(
-    `SELECT turn, verdict, why, model, shown FROM model_call
+    `SELECT turn, verdict, why, model, shown, screenshot FROM model_call
       WHERE workflow_id = $1 ORDER BY turn`, [session.workflow_id]);
 
   // While the walk is running there is no draft yet, so no model calls to read

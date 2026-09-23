@@ -36,7 +36,9 @@ interface Session {
   // `shown` arrives with the stored model call. A turn appended while the
   // walk is still running carries what happened and nothing else.
   turns: Array<{ turn: number; verdict: string; why: string;
-                 shown?: { page?: string; elements?: number } }>;
+                 shown?: { page?: string; elements?: number };
+                 /** The page as the model saw it, or why there is no picture. */
+                 screenshot?: { digest?: string; withheld?: string } | null }>;
 }
 
 /** A URL as a person reads it: the part that says which screen. */
@@ -315,6 +317,8 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
  */
 export function Working({ id, go, onAbandon }: { id: string; go: (to: Route) => void; onAbandon: () => void }) {
   const [state, setState] = useState<Session | null>(null);
+  /** The turn whose picture is shown; the latest one that has one, until a turn is picked. */
+  const [picked, setPicked] = useState<number | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -356,12 +360,14 @@ export function Working({ id, go, onAbandon }: { id: string; go: (to: Route) => 
 
       <Section title="What it is doing"
         note={state && state.turns.length > 0
-          ? `${state.turns.length} turn${state.turns.length === 1 ? '' : 's'}`
+          ? `${state.turns.length} turn${state.turns.length === 1 ? '' : 's'} · pick one to see the page it was looking at`
           : 'starting'}>
-        <div style={{ borderTop: state && state.turns.length > 0 ? '1px solid var(--ink)' : 0 }}>
+        <div style={{ display: 'flex', gap: 28, alignItems: 'flex-start' }}>
+        <div style={{ flexGrow: 1, minWidth: 0, borderTop: state && state.turns.length > 0 ? '1px solid var(--ink)' : 0 }}>
           {(state?.turns ?? []).map((t) => (
-            <div key={t.turn} style={{ borderBottom: '1px solid var(--rule)', padding: '12px 0',
-              display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+            <div key={t.turn} onClick={() => setPicked(t.turn)} style={{ borderBottom: '1px solid var(--rule)', padding: '12px 8px',
+              display: 'flex', gap: 14, alignItems: 'flex-start', cursor: 'pointer',
+              background: shownTurn(state, picked)?.turn === t.turn ? 'var(--panel-2)' : 'transparent' }}>
               <span style={{ width: 18, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right', paddingTop: 2 }}>{t.turn}</span>
               <span style={{ width: 82, flexShrink: 0, fontSize: 12, fontFamily: 'var(--mono)',
                 color: t.verdict === 'kept' ? 'var(--ok-ink)' : 'var(--failed-ink)' }}>{t.verdict}</span>
@@ -409,6 +415,8 @@ export function Working({ id, go, onAbandon }: { id: string; go: (to: Route) => 
               </span>
             </div>
           )}
+        </div>
+        <Picture turn={shownTurn(state, picked)} />
         </div>
       </Section>
     </Page>
@@ -605,5 +613,34 @@ export function PdfPicker({ chosen, onChosen }: {
         {why ?? 'Its text is read as written. A scanned PDF has none, and is refused.'}
       </span>
     </span>
+  );
+}
+
+/** The turn whose picture is on screen: the one picked, or the latest with a picture. */
+function shownTurn(state: Session | null, picked: number | null) {
+  const turns = state?.turns ?? [];
+  return turns.find((t) => t.turn === picked) ?? [...turns].reverse().find((t) => t.screenshot?.digest) ?? null;
+}
+
+/**
+ * What the page looked like when the model was asked. Beside the turns, so
+ * what Orbit decided can be checked against what was actually on the screen.
+ */
+function Picture({ turn }: { turn: Session['turns'][number] | null }) {
+  const frame: React.CSSProperties = { width: 520, flexShrink: 0, position: 'sticky', top: 16,
+    border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel)', overflow: 'hidden' };
+  if (!turn) {
+    return <div style={{ ...frame, padding: '40px 20px', textAlign: 'center', fontSize: 13, color: 'var(--ink-2)' }}>
+      The page appears here as soon as Orbit is looking at one.</div>;
+  }
+  return (
+    <div style={frame}>
+      {turn.screenshot?.digest
+        ? <img src={`/api/screens/${turn.screenshot.digest}`} alt={`The page at turn ${turn.turn}`} style={{ display: 'block', width: '100%' }} />
+        : <div style={{ padding: '40px 20px', textAlign: 'center', fontSize: 13, color: 'var(--ink-2)' }}>
+            {turn.screenshot?.withheld ?? 'No picture for this turn: it did not look at a page.'}</div>}
+      <div style={{ padding: '9px 12px', borderTop: '1px solid var(--rule)', fontSize: 12, color: 'var(--ink-2)' }}>
+        Turn {turn.turn}{turn.shown?.page ? ` · ${turn.shown.page.replace(/^https?:\/\/[^/]+/, '')}` : ''}</div>
+    </div>
   );
 }

@@ -52,6 +52,17 @@ const SCENARIOS = {
       'ML-26-04471': { status: 'succeeded', pressed: ['Approve file'] },
     },
   },
+  // The plain case: read a value, or say there is no such file. It regressed
+  // unnoticed once, when rule sentences were kept from the walk.
+  4: {
+    name: 'Scenario 4: note rate enquiry',
+    procedure: readFileSync(join(DIR, '04-note-rate.txt'), 'utf8'),
+    example: 'ML-26-04471',
+    loans: {
+      'ML-26-04471': { status: 'succeeded', pressed: [], outputs: { noteRate: '6.375%' } },
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+    },
+  },
   2: {
     name: 'Scenario 2: underwriting risk review (PDF)',
     pdf: join(DIR, '02-risk-review.pdf'),
@@ -139,6 +150,10 @@ async function run(key) {
     if (r.run.status !== want.status) wrong.push(`status ${r.run.status}${r.run.error ? ` (${r.run.error.describe})` : ''}`);
     if (JSON.stringify(pressed) !== JSON.stringify(want.pressed)) wrong.push(`pressed [${pressed.join(', ')}], wanted [${want.pressed.join(', ')}]`);
     if (want.ending && !want.ending.test(r.run.outcome ?? '')) wrong.push(`ended ${r.run.outcome}`);
+    for (const [k, v] of Object.entries(want.outputs ?? {})) {
+      const got = Object.entries(r.run.outputs ?? {}).find(([name]) => name.toLowerCase().includes(k.toLowerCase()))?.[1];
+      if (got !== v) wrong.push(`${k} was ${got ?? 'not published'}, wanted ${v}`);
+    }
     console.log(`  ${wrong.length ? 'FAIL' : 'ok  '}  ${loan} ${refs[loan]} ${r.run.outcome ?? r.run.status}${wrong.length ? ' — ' + wrong.join('; ') : ''}`);
     if (wrong.length) failures.push(`${loan}: ${wrong.join('; ')}`);
   }

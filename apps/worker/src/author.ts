@@ -22,6 +22,7 @@ import type { ModelProvider } from '@orbit/model';
 import { chromium, type Page } from 'playwright';
 import { asAssumption, asQuestion, type Note } from './note.ts';
 import { asNumber } from './compare.ts';
+import { capture } from './evidence.ts';
 import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
 
 /**
@@ -98,6 +99,12 @@ export async function settleAfterActivating(page: Page, wasAt: string): Promise<
  *
  * Decision 12 is untouched: two buttons called "Sign in" remain a refusal.
  */
+/** A control that changes something, asked for by a RULE line and by no line of work. */
+export function onlyARuleAsksFor(s: Pick<Seen, 'what' | 'name'>, ruleLines: readonly string[], workLines: readonly string[]): boolean {
+  return Boolean(changingVerbOf(s.name)) && couldMean('activate', s)
+    && ruleLines.some((l) => lineAsksFor(s.name, l)) && !workLines.some((l) => lineAsksFor(s.name, l));
+}
+
 export function couldMean(act: 'enter' | 'activate' | 'read' | 'done' | 'wait', s: Pick<Seen, 'what'>): boolean {
   return act === 'enter' ? s.what === 'field'
     : act === 'activate' ? s.what === 'button' || s.what === 'link'
@@ -288,6 +295,9 @@ export interface Turn {
    *  that cost something unknown and a turn that cost nothing are different
    *  facts, and the spend record is read by whoever pays for it. */
   costMicros: number | null;
+  /** The page the model was looking at, as a picture in the evidence store, or
+   *  why there is none (Decision 4, items 12 and 13). */
+  screenshot?: { digest: string } | { withheld: string };
 }
 
 export interface AuthoredDraft {
@@ -386,6 +396,9 @@ export async function authorFromProcedure(opts: {
   /** Which of the sentences are work in the application: each must have a
    *  step before the walk may call the procedure finished. */
   taskSentences?: readonly string[];
+  /** Rule sentences whose presses come from the compiled tables: the walk may
+   *  read what they name, and may not press on their behalf. */
+  ruleSentences?: readonly string[];
 }): Promise<AuthoredDraft> {
   const { procedure, origin, startPath, inputs, model } = opts;
   // A ceiling, for the same reason `for each` has one: without it nobody can
@@ -399,10 +412,22 @@ export async function authorFromProcedure(opts: {
   // Numbered when there are numbers to give; the plain text otherwise, as 2.0
   // walks have always been shown.
   const shownProcedure = opts.sentences?.length
-    ? [...opts.sentences.map((x) => `${x.number} ${x.waits ? 'WAIT FOR A PERSON: ' : ''}${x.text.replace(/\s+/g, ' ')}`), '',
+    ? [...opts.sentences.map((x) => `${x.number} ${x.waits ? 'WAIT FOR A PERSON: '
+         : opts.ruleSentences?.includes(x.number) ? 'RULE (already handled: Orbit applies this itself, from its confirmed table, at this point in the procedure, so treat it as done and go on to the next line; only read what it names): '
+         : ''}${x.text.replace(/\s+/g, ' ')}`), '',
        'Each line above starts with its number. Set sentence to the number of the line the next step carries out,',
        'or null if it carries out none of them.'].join('\n')
     : procedure;
+
+  // Controls only a RULE line asks for — "Require private mortgage
+  // insurance", asked for by "attach the condition requiring private mortgage
+  // insurance" — are pressed by the compiled table, never by the walk. They
+  // are not offered to it: told not to press them, gpt-6-luna pressed for one
+  // four times in a walk, before and after approving the file, and the turns
+  // it spent cut the walk off. A control a line of work also asks for stays.
+  const ruleLines = (opts.sentences ?? []).filter((x) => opts.ruleSentences?.includes(x.number));
+  const workLines = (opts.sentences ?? []).filter((x) => !x.waits && (opts.taskSentences ?? []).includes(x.number));
+  const forRulesOnly = (s: Seen) => onlyARuleAsksFor(s, ruleLines.map((l) => l.text), workLines.map((l) => l.text));
 
   let decisionPage: { seen: Seen[]; url: string } | null = null;
   /** The page the last value was read on: where a decision's values and its
@@ -444,8 +469,19 @@ export async function authorFromProcedure(opts: {
 
     let finished = false;
     let lastRejection: string | null = null;
-    for (let turn = 1; turn <= maxTurns; turn++) {
+    /** Whether that rejection was a press for a RULE: by design, not a gap in the draft. */
+    let lastRejectionWasRule = false;
+    // A press for a rule is refused by design, so it does not spend the turns
+    // the procedure's own lines need; a few are given back, and no more.
+    let ruleRefusals = 0;
+    for (let turn = 1; turn <= maxTurns + Math.min(ruleRefusals, 4); turn++) {
       const seen = await snapshot(page);
+      // The picture of what the model is about to be asked about. Never of a
+      // sign-in page: nothing of signing in is captured (Decision 4, item 13).
+      const picture: Turn['screenshot'] = seen.some((x) => x.secret)
+        ? { withheld: 'A sign-in page: nothing of signing in is captured.' }
+        : await page.screenshot({ type: 'png' }).then(async (bytes) => ({ digest: (await capture(bytes, 'image/png')).digest }))
+          .catch(() => ({ withheld: 'The page could not be captured.' }));
       // Only an act that is *supposed* to move the page counts towards being
       // stuck. Typing into a field changes nothing visible, and holding that
       // against the session would end it halfway through a form.
@@ -513,7 +549,7 @@ export async function authorFromProcedure(opts: {
                   // an entry matching this becomes a reference to the
                   // registered account rather than a declared input.
                   `SIGNS IN AS: ${opts.signsInAs || 'nothing registered — do not invent an account'}`,
-                  '', `PAGE (${page.url()}):`, fence('PAGE', asText(withheld(seen))), '', asking].join('\n'),
+                  '', `PAGE (${page.url()}):`, fence('PAGE', asText(withheld(seen.filter((s) => !forRulesOnly(s))))), '', asking].join('\n'),
         },
         proposal, shapeWith(numbers),
       );
@@ -522,6 +558,7 @@ export async function authorFromProcedure(opts: {
       // turn cannot fall out of step with the rejection on the record.
       const record = (verdict: Turn['verdict'], why: string): Turn => {
         lastRejection = verdict === 'kept' ? null : why;
+        lastRejectionWasRule = false;
         return {
           turn, shown: { page: page.url(), elements: seen.length, asking },
           answered: answered.value, verdict, why,
@@ -529,7 +566,29 @@ export async function authorFromProcedure(opts: {
           tokensIn: answered.tokensIn, tokensOut: answered.tokensOut,
           tokensCached: answered.tokensCached, tokensCacheWritten: answered.tokensCacheWritten,
           costMicros: answered.costUnknown ? null : answered.costMicros,
+          screenshot: picture,
         };
+      };
+
+      /**
+       * A press for a RULE line. With every line of work already done, it is
+       * the model finding nothing left but the rules, so the walk is finished;
+       * otherwise it is refused, naming the line of work still to do.
+       */
+      const forARule = (line: string): boolean => {
+        const undone = workLines.filter((x) => !Object.values(provenance).includes(x.number));
+        if (!undone.length) {
+          finished = true;
+          noteTurn(record('kept', `every line of work has its step, and what it reached for next is ${line}, a RULE `
+            + 'Orbit builds from its confirmed table: the procedure is finished'));
+          return true;
+        }
+        noteTurn(record('rejected', `line ${line} is a RULE: Orbit builds what it presses from its confirmed table, `
+          + 'so the walk does nothing for it or for any other RULE line. '
+          + `The next line to carry out is ${undone[0]!.number}: "${undone[0]!.text.replace(/\s+/g, ' ')}"`));
+        lastRejectionWasRule = true;
+        ruleRefusals++;
+        return false;
       };
 
       if (!answered.value) {
@@ -554,7 +613,10 @@ export async function authorFromProcedure(opts: {
           .map((x) => x.number);
         if (undone.length) {
           for (const n of undone) toldUndone.add(n);
-          noteTurn(record('rejected', `it said the procedure is finished, and ${undone.join(', ')} ${undone.length === 1 ? 'has' : 'have'} no step yet`));
+          // Quoted, not numbered: told "1.19 has no step yet", the walk went
+          // looking for a way to attach a condition instead of approving.
+          const quoted = undone.map((n) => `${n} ("${opts.sentences!.find((x) => x.number === n)!.text.replace(/\s+/g, ' ')}")`);
+          noteTurn(record('rejected', `it said the procedure is finished, and ${quoted.join(', ')} ${undone.length === 1 ? 'has' : 'have'} no step yet`));
           continue;
         }
         const stillUndone = [...toldUndone].filter((n) => !Object.values(provenance).includes(n));
@@ -571,7 +633,7 @@ export async function authorFromProcedure(opts: {
         // clause and nothing at all to say so. A draft that quietly does less
         // than the procedure is the same failure as one that claims a
         // conclusion it never reached, arriving by a different door.
-        if (lastRejection) {
+        if (lastRejection && !lastRejectionWasRule) {
           questions.push(asQuestion(
             `The last thing Orbit tried here could not be used — ${lastRejection} — and the procedure was`
             + ' reported finished straight afterwards. Check the steps below against everything you wrote:'
@@ -614,6 +676,15 @@ export async function authorFromProcedure(opts: {
         continue;
       }
 
+      // A press citing a RULE line is answered before anything is looked up:
+      // looked up first, a press on the "Conditions" heading was refused as a
+      // heading, and the walk never heard that the line after the rules was
+      // "Then approve the file".
+      if (p.act === 'activate' && p.sentence && opts.ruleSentences?.includes(p.sentence)) {
+        if (forARule(p.sentence)) break;
+        continue;
+      }
+
       const wanted = normaliseName(p.element ?? '');
       if (!wanted) {
         // It answered with the kind — "heading", "button" — which
@@ -649,6 +720,12 @@ export async function authorFromProcedure(opts: {
         // as the mismatch it is rather than as "not on the page", which would
         // send an author looking for a control that is sitting right there.
         noteTurn(record('rejected', mismatchOf(p.act, carrying[0]!)));
+        continue;
+      }
+      // A control kept from the walk because only a rule asks for it.
+      if (named.length === 1 && forRulesOnly(named[0]!)) {
+        const asking = ruleLines.find((l) => lineAsksFor(named[0]!.name, l.text))!;
+        if (forARule(asking.number)) break;
         continue;
       }
       if (named.length === 0) {

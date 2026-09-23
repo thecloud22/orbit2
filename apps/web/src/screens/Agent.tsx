@@ -523,6 +523,8 @@ export function Agent({ id, go }: { id: string; go: (to: Route) => void }) {
         </Section>
       )}
 
+      {steps.length > 0 && <WillHold steps={steps} inputs={workflow.declared_inputs} />}
+
       <Section title="Steps" note={`${steps.length}`}
         right={<button type="button" onClick={() => setShowWhy((v) => !v)}
           style={{ font: 'inherit', fontSize: 13, fontWeight: 600, color: 'var(--failed-ink)',
@@ -763,4 +765,51 @@ function coverageLine(c: { total: number; byLabel: Record<string, number> }): st
   if (n('forAPerson')) parts.push(`${n('forAPerson')} left to a person`);
   if (n('wontDo')) parts.push(`${n('wontDo')} it won't do`);
   return `${c.total} sentences: ${parts.join(' · ')}`;
+}
+
+/**
+ * What every run of this draft will keep in its InMem (plan §11), worked out
+ * from the steps: the values it is given, reads, decides on, hands over and
+ * concludes with. Nothing else can be written there, so this is also what an
+ * auditor will find on every run.
+ */
+function WillHold({ steps, inputs }: {
+  steps: Draft['steps']; inputs: Array<{ name: string; label: string }>;
+}) {
+  const at = (s: Draft['steps'][number]) => `step ${s.position}${s.from_sentence ? `, from ${s.from_sentence}` : ''}`;
+  const rows: Array<[string, string, string]> = [];
+  for (const i of inputs) rows.push(['Given', i.label === i.name ? i.name : `${i.label} (${i.name})`, 'when a run starts']);
+  for (const s of steps) {
+    const d = s.declares as Record<string, unknown>;
+    if (s.kind === 'read') {
+      const p = d['produces'] as { name?: string; label?: string; type?: string; required?: boolean } | undefined;
+      if (p?.name) rows.push(['Found', `${p.label ?? p.name} (${p.name}, ${p.type ?? 'text'}${p.required === false ? ', may be absent' : ''})`, at(s)]);
+    }
+    if (s.kind === 'branch' || s.kind === 'check') rows.push(['Decided', String(d['summary'] ?? ''), at(s)]);
+    if (s.kind === 'handOff') {
+      rows.push(['Handed over', `${d['waits'] ? 'waits for a person: ' : 'to a person: '}${String(d['request'] ?? '')}`, at(s)]);
+      for (const v of (d['handsBack'] as Array<{ name: string; label: string }> | undefined) ?? []) {
+        rows.push(['Handed over', `${v.label} (${v.name}), handed back`, at(s)]);
+      }
+    }
+    if (s.kind === 'end') {
+      const pub = (d['publishes'] as string[] | undefined) ?? [];
+      rows.push(['Conclusion', `${String(d['summary'] ?? d['outcome'] ?? '')}${pub.length ? ` — publishes ${pub.join(', ')}` : ''}`, at(s)]);
+    }
+  }
+  return (
+    <Section title="What each run's InMem will hold"
+      note="every value a run is given, finds, decides and concludes with, and the step each comes from">
+      <div style={{ borderTop: '1px solid var(--ink)', maxWidth: 1100 }}>
+        {rows.map(([section, what, from], i) => (
+          <div key={i} style={{ display: 'flex', gap: 16, fontSize: 13, padding: '6px 0', borderBottom: '1px solid var(--rule)' }}>
+            <span style={{ width: 110, flexShrink: 0, color: 'var(--ink-2)', fontWeight: 600, fontSize: 12.5 }}>
+              {i === 0 || rows[i - 1]![0] !== section ? section : ''}</span>
+            <span style={{ flexGrow: 1 }}>{what}</span>
+            <span style={{ width: 170, flexShrink: 0, color: 'var(--ink-2)', fontSize: 12.5 }}>{from}</span>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
 }

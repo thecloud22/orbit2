@@ -57,6 +57,26 @@ export type Served =
   | { ok: true; bytes: Buffer; mediaType: string }
   | { ok: false; kind: 'notFound' | 'withheld' | 'integrityFailure'; describe: string };
 
+/**
+ * A walk turn's picture, by its digest — served only if some walk recorded
+ * it, and verified against the digest like any artefact.
+ */
+export async function serveScreen(digest: string, db: Queryable = pool): Promise<Served> {
+  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) return { ok: false, kind: 'notFound', describe: 'Not a picture reference.' };
+  const { rows: [known] } = await db.query<{ n: number }>(
+    `SELECT 1 AS n FROM model_call WHERE screenshot->>'digest' = $1
+      UNION SELECT 1 FROM authoring_session s, jsonb_array_elements(s.captured) c WHERE c->'screenshot'->>'digest' = $1
+      LIMIT 1`, [digest]);
+  if (!known) return { ok: false, kind: 'notFound', describe: 'No walk recorded that picture.' };
+  const hex = digest.slice(7);
+  let bytes: Buffer;
+  try { bytes = await readFile(join(root, hex.slice(0, 2), hex.slice(2))); }
+  catch { return { ok: false, kind: 'notFound', describe: 'The picture is recorded but its bytes are not in the store.' }; }
+  const actual = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+  if (actual !== digest) return { ok: false, kind: 'integrityFailure', describe: 'The picture does not match its record.' };
+  return { ok: true, bytes, mediaType: 'image/png' };
+}
+
 export async function serveArtefact(id: string, db: Queryable = pool): Promise<Served> {
   const { rows: [row] } = await db.query<{
     digest: string | null; media_type: string | null; withheld: boolean; withheld_why: string | null;

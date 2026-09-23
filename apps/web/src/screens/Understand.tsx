@@ -70,6 +70,8 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [walking, setWalking] = useState<string | null>(null);
+  /** Set once the author leaves a walk's screen, so a stale status does not reopen it. */
+  const [leftWalk, setLeftWalk] = useState(false);
   const [nextPart, setNextPart] = useState('');
   const [stillMore, setStillMore] = useState(false);
   const [nextPdf, setNextPdf] = useState<{ name: string; bytes: number; base64: string } | null>(null);
@@ -97,7 +99,13 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
     return () => { live = false; if (timer) clearInterval(timer); };
   }, [id, refresh, status, chatWaiting]);
 
-  if (walking) return <Working id={walking} go={go} onAbandon={() => setWalking(null)} />;
+  // The walk's screen is found from the record, not only from the press that
+  // started it: a reload while Orbit walked the application used to land on
+  // the sort, with no way back to the turns or their pictures.
+  const live = state.ok && state.value.confirmed_at && state.value.session_id && !leftWalk
+    && (state.value.walk === 'queued' || state.value.walk === 'running') ? state.value.session_id : null;
+  const watching = walking ?? live;
+  if (watching) return <Working id={watching} go={go} onAbandon={() => { setWalking(null); setLeftWalk(true); }} />;
 
   if (!state.ok) {
     return <Page title="What Orbit understood"><div style={{ marginTop: 18, border: '1px solid var(--rule)',
@@ -175,6 +183,11 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
             ? 'The walk over these sentences did not produce a draft. Open it to see why.'
             : 'Orbit is working through the sentences marked as its own against the application.']} />
       )}
+      {confirmed && u.walk && u.walk !== 'brought in' && u.session_id && (
+        <div style={{ paddingTop: 10 }}>
+          <Action kind="ghost" onClick={() => setWalking(u.session_id)}>See each turn, and the page it was looking at</Action>
+        </div>
+      )}
 
       <Section title="Placed" note={`${u.coverage.placed} of ${u.coverage.total} sentences`}>
         <Coverage coverage={u.coverage} />
@@ -189,9 +202,24 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
         </Section>
       )}
 
-      {!confirmed && (sorted || u.chat.length > 0) && (
-        <Section title="Ask for a change" note="drafting only: this changes this draft and nothing else">
-          <Chat messages={u.chat} busy={busy || !sorted}
+      {/* Always here, so nobody has to wonder where it went: open while the
+          sort can still change, and saying why when it cannot. */}
+      <Section title="Ask for a change" note="drafting only: this changes this draft and nothing else">
+        {confirmed ? (
+          <>
+            <p style={{ margin: '0 0 12px', fontSize: 13.5, color: 'var(--ink-2)', maxWidth: 760, lineHeight: 1.6 }}>
+              The chat closed when you confirmed the sort, because the draft was made from it. To change the
+              procedure now, bring it in again. The conversation stays on the record below.
+            </p>
+            {u.chat.length > 0 && <Chat messages={u.chat} busy closed onSend={async () => false} onTake={async () => {}} />}
+          </>
+        ) : !sorted ? (
+          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)' }}>
+            {u.status === 'refused' ? 'The chat opens once the procedure has been sorted.'
+              : 'Orbit is sorting. The chat opens as soon as it has finished.'}
+          </p>
+        ) : (
+          <Chat messages={u.chat} busy={busy}
             onSend={async (text) => {
               setBusy(true); setRefused(null);
               const result = await send(`/api/workflows/${id}/chat`, { text });
@@ -207,8 +235,8 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
               if (!result.ok) setRefused(result.why);
               setRefresh((n) => n + 1);
             }} />
-        </Section>
-      )}
+        )}
+      </Section>
 
       <Section title="The procedure, sentence by sentence"
         note={sorted && !confirmed ? 'change a label and it is kept alongside Orbit\'s, which stays on the record' : undefined}>
@@ -448,8 +476,8 @@ function Table({ table, n }: { table: RuleTable; n: number }) {
  * something or refused, and the model's only where it explained; each says
  * what happened to the draft, so nobody has to infer it from a changed label.
  */
-function Chat({ messages, busy, onSend, onTake }: {
-  messages: ChatMessage[]; busy: boolean;
+function Chat({ messages, busy, closed = false, onSend, onTake }: {
+  messages: ChatMessage[]; busy: boolean; closed?: boolean;
   onSend: (text: string) => Promise<boolean>; onTake: (messageId: string) => Promise<void>;
 }) {
   const [text, setText] = useState('');
@@ -483,6 +511,7 @@ function Chat({ messages, busy, onSend, onTake }: {
             <span className="orbit-dot">.</span><span className="orbit-dot">.</span><span className="orbit-dot">.</span></span>
         </div>
       )}
+      {!closed && <>
       <label htmlFor="ask" style={{ fontSize: 12.5, fontWeight: 600, marginTop: 4 }}>Ask for a change to this draft</label>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
         <textarea id="ask" rows={2} value={text} onChange={(e) => setText(e.target.value)}
@@ -492,6 +521,7 @@ function Chat({ messages, busy, onSend, onTake }: {
         <Action disabled={busy || waiting || !text.trim()} why={waiting ? 'Orbit is still answering' : 'Say what to change'}
           onClick={() => void onSend(text).then((ok) => { if (ok) setText(''); })}>Send</Action>
       </div>
+      </>}
     </div>
   );
 }
