@@ -284,3 +284,15 @@ test('a model with no cache rates is priced at its input rate, erring high', asy
   const usage = { tokensIn: 1000, tokensOut: 0, tokensCached: 600, tokensCacheWritten: 0 };
   assert.equal(costOf(nova, usage), Math.round(1000 * 0.06));
 });
+
+test('a request that fails on the way is sent again, and a bad request is not', async () => {
+  const { withRetry } = await import('./index.ts');
+  let calls = 0;
+  const flaky = await withRetry(async () => { calls++; if (calls < 3) throw new TypeError('fetch failed'); return new Response('{}', { status: 200 }); }, [1, 1]);
+  assert.equal(flaky.status, 200);
+  assert.equal(calls, 3);
+  calls = 0;
+  const bad = await withRetry(async () => { calls++; return new Response('no', { status: 400 }); }, [1, 1]);
+  assert.equal(bad.status, 400);
+  assert.equal(calls, 1, 'a bad request would only fail the same way');
+});

@@ -24,11 +24,12 @@ export async function answerAndStore(db: PoolClient, messageId: string, model: M
        JOIN LATERAL (SELECT addresses FROM application_revision WHERE application_id = a.id
                       ORDER BY revision DESC LIMIT 1) r ON true
       WHERE u.workflow_id = $1`, [workflowId]);
+  // The draft as it now reads (Decision 17), without what was taken out.
   const { rows: draft } = await db.query<{ number: string; text: string; label: string | null }>(
     `SELECT p.key || '.' || s.n AS number, s.text, l.label
-       FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
+       FROM sentence_now s JOIN procedure_part p ON p.id = s.part_id
        LEFT JOIN LATERAL (SELECT label FROM sentence_label WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
-      WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, s.n`, [workflowId]);
+      WHERE p.workflow_id = $1 AND NOT s.withdrawn ORDER BY p.added_at, p.key, s.n`, [workflowId]);
 
   const { decision, answered } = await decide(m.text, draft, { name: app!.name, hosts: app!.hosts ?? [] }, model);
 
@@ -50,16 +51,21 @@ export async function answerAndStore(db: PoolClient, messageId: string, model: M
       [workflowId, text, state, JSON.stringify(outcome), messageId]);
 
     // The draft may have moved on while the model answered.
-    const { rows: [u] } = await db.query<{ status: string; confirmed_at: string | null }>(
-      `SELECT status, confirmed_at FROM understanding WHERE workflow_id = $1 FOR UPDATE`, [workflowId]);
-    const open = u && !u.confirmed_at && u.status === 'sorted';
-    const resort = () => db.query(
-      `UPDATE understanding SET status = 'queued', sorted_at = NULL, lease_expires_at = NULL, claimed_by = NULL
-        WHERE workflow_id = $1`, [workflowId]);
+    const { rows: [u] } = await db.query<{ status: string; closed: boolean }>(
+      `SELECT u.status, (w.confirmed_at IS NOT NULL AND EXISTS (SELECT 1 FROM workflow_version v WHERE v.workflow_id = w.id)) AS closed
+         FROM understanding u JOIN workflow w ON w.id = u.workflow_id WHERE u.workflow_id = $1 FOR UPDATE OF u`, [workflowId]);
+    // Open until publication (R21); a change lapses a confirmation.
+    const open = u && !u.closed && u.status === 'sorted';
+    const resort = async () => {
+      await db.query(
+        `UPDATE understanding SET status = 'queued', sorted_at = NULL, lease_expires_at = NULL, claimed_by = NULL
+          WHERE workflow_id = $1`, [workflowId]);
+      await db.query(`UPDATE workflow SET confirmed_at = NULL, updated_at = now() WHERE id = $1`, [workflowId]);
+    };
 
     let outcome = decision.do as string;
-    if (!open && (decision.do === 'addSteps' || decision.do === 'relabel')) {
-      await say(u?.confirmed_at ? CHAT_REFUSALS.closed : CHAT_REFUSALS.busy, 'refused', { refused: 'notOpen' });
+    if (!open && (decision.do === 'addSteps' || decision.do === 'relabel' || decision.do === 'offerRevision')) {
+      await say(u?.closed ? CHAT_REFUSALS.closed : CHAT_REFUSALS.busy, 'refused', { refused: 'notOpen' });
       outcome = 'refused';
     } else if (decision.do === 'addSteps') {
       const part = await insertPart(db, workflowId, { source: 'author', body: m.text });
@@ -82,6 +88,10 @@ export async function answerAndStore(db: PoolClient, messageId: string, model: M
       await say(`Sentence ${decision.sentence} is now ${decision.label}.`, 'applied',
         { sentence: decision.sentence, label: decision.label });
       await resort();
+    } else if (decision.do === 'offerRevision') {
+      // Proposed, never applied: the author takes it up or does not.
+      await say(`${decision.sentence} would read: \u201c${decision.text}\u201d`, 'offered',
+        { offer: 'revise', sentence: decision.sentence, text: decision.text });
     } else if (decision.do === 'explain') {
       await say(decision.reply, 'explained', null);
     } else if (decision.do === 'offerForAPerson') {

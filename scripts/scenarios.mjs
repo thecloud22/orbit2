@@ -63,6 +63,74 @@ const SCENARIOS = {
       'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
     },
   },
+  // The demo set (docs/testing/scenarios/README.md, 5-9).
+  5: {
+    name: 'Scenario 5: first-time buyer review',
+    procedure: readFileSync(join(DIR, '05-first-time-buyer.txt'), 'utf8'),
+    example: 'ML-26-04488',
+    loans: {
+      'ML-26-04488': { status: 'succeeded', pressed: ['Require private mortgage insurance', 'Require additional reserves', 'Approve file'] },
+      'ML-26-04529': { status: 'succeeded', pressed: ['Refer to senior underwriter'] },
+      'ML-26-04547': { status: 'succeeded', pressed: ['Refer to senior underwriter'] },
+      'ML-26-04471': { status: 'succeeded', pressed: ['Approve file'] },
+      // The procedure calls a missing file withdrawn, so the ending may too.
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such|withdrawn/i },
+    },
+  },
+  6: {
+    name: 'Scenario 6: property risk review',
+    procedure: readFileSync(join(DIR, '06-property-risk.txt'), 'utf8'),
+    example: 'ML-26-04513',
+    loans: {
+      'ML-26-04513': { status: 'succeeded', pressed: ['Require flood insurance', 'Approve file'] },
+      'ML-26-04561': { status: 'succeeded', pressed: ['Require flood insurance', 'Require private mortgage insurance', 'Approve file'] },
+      'ML-26-04529': { status: 'succeeded', pressed: ['Require private mortgage insurance', 'Approve file'] },
+      'ML-26-04547': { status: 'succeeded', pressed: ['Refer to senior underwriter'] },
+      'ML-26-04471': { status: 'succeeded', pressed: ['Approve file'] },
+    },
+  },
+  7: {
+    name: 'Scenario 7: income and loan size review',
+    procedure: readFileSync(join(DIR, '07-income-and-loan-size.txt'), 'utf8'),
+    example: 'ML-26-04502',
+    loans: {
+      'ML-26-04534': { status: 'succeeded', pressed: ['Refer to senior underwriter'] },
+      'ML-26-04502': { status: 'succeeded', pressed: ['Require two years of tax returns', 'Approve file'] },
+      'ML-26-04529': { status: 'succeeded', pressed: ['Refer to senior underwriter'] },
+      'ML-26-04570': { status: 'succeeded', pressed: ['Approve file'] },
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+    },
+  },
+  8: {
+    name: 'Scenario 8: broker rate and terms enquiry',
+    procedure: readFileSync(join(DIR, '08-broker-enquiry.txt'), 'utf8'),
+    example: 'ML-26-04534',
+    objects: true,
+    loans: {
+      'ML-26-04534': { status: 'succeeded', pressed: [], outputs: { noteRate: '6.75%', amount: '$930,000' } },
+      'ML-26-04471': { status: 'succeeded', pressed: [], outputs: { noteRate: '6.375%' } },
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+    },
+  },
+  // Published, run, then changed on the page: the threshold is edited in
+  // place, Orbit maps only that sentence, and version 2 decides differently.
+  9: {
+    name: 'Scenario 9: a live edit, published as version 2',
+    procedure: readFileSync(join(DIR, '09-live-edit.txt'), 'utf8'),
+    example: 'ML-26-04561',
+    loans: {
+      'ML-26-04561': { status: 'succeeded', pressed: ['Require private mortgage insurance', 'Approve file'] },
+      'ML-26-04471': { status: 'succeeded', pressed: ['Approve file'] },
+    },
+    edit: {
+      find: /^5\. If the loan-to-value is over 80%/,
+      text: '5. If the loan-to-value is over 90%, attach the condition requiring private mortgage insurance.',
+      loans: {
+        'ML-26-04561': { status: 'succeeded', pressed: ['Approve file'] },
+        'ML-26-04488': { status: 'succeeded', pressed: ['Require private mortgage insurance', 'Approve file'] },
+      },
+    },
+  },
   2: {
     name: 'Scenario 2: underwriting risk review (PDF)',
     pdf: join(DIR, '02-risk-review.pdf'),
@@ -127,22 +195,68 @@ async function run(key) {
   if ((s.risks ?? 0) !== risks) failures.push(`${risks} risk${risks === 1 ? '' : 's'} raised, wanted ${s.risks ?? 0}`);
   if (s.risks) console.log(`  ${risks === s.risks ? 'ok  ' : 'FAIL'}  ${risks} injected line${risks === 1 ? '' : 's'} flagged as a risk`);
   for (const n of open) console.log(`  note  ${n.body.slice(0, 150)}`);
-  // Questions are answered only to let the loans run; the scenario still
-  // reports them, because each is something a person would have had to do.
+  const published = await confirmAndPublish(W, s.example);
+  if (!published.ok) return fail(published.why);
+  await runLoans(published.version, s.loans, failures, s.objects);
+
+  // A live edit (scenario 9): back to editing on the same page, the words
+  // changed in place, only that sentence mapped, and version 2 published.
+  if (s.edit) {
+    console.log('  editing: back to editing, then the threshold changed in place');
+    await call(`/api/workflows/${W}/back-to-draft`, {});
+    const doc = (await call(`/api/workflows/${W}`)).body.document;
+    const target = doc.find((x) => s.edit.find.test(x.text));
+    if (!target) return fail('the sentence to edit was not found');
+    const revised = await call(`/api/workflows/${W}/revise-sentence`, { sentence: target.number, text: s.edit.text });
+    if (revised.status !== 200) return fail(`the edit was refused: ${revised.body.why}`);
+    await until(() => call(`/api/workflows/${W}`).then((r) => r.body), (d) => d.understanding.status === 'sorted', 'the sort of the change');
+    const pending = (await call(`/api/workflows/${W}`)).body.pending;
+    console.log(`  ${pending.length === 1 && pending[0] === target.number ? 'ok  ' : 'FAIL'}  only ${target.number} waits to be mapped (${pending.join(', ')})`);
+    if (!(pending.length === 1 && pending[0] === target.number)) failures.push(`pending was ${pending.join(', ')}, wanted ${target.number}`);
+    const mapping = await call(`/api/workflows/${W}/map-changes`, {});
+    if (mapping.status !== 202) return fail(`map changes was refused: ${mapping.body.why}`);
+    const mapped = await until(() => call(`/api/authoring/${mapping.body.id}`).then((r) => r.body),
+      (a) => ['brought in', 'refused'].includes(a.session.status), 'the mapping');
+    if (mapped.session.status !== 'brought in') return fail(`the mapping was refused: ${mapped.session.refused?.describe}`);
+    const again = await confirmAndPublish(W, s.example);
+    if (!again.ok) return fail(again.why);
+    const versions = (await call(`/api/workflows/${W}`)).body.versions.map((v) => v.version);
+    console.log(`  ${versions.includes(2) ? 'ok  ' : 'FAIL'}  published as version ${Math.max(...versions)}`);
+    if (!versions.includes(2)) failures.push('no version 2');
+    await runLoans(again.version, s.edit.loans, failures, false);
+  }
+  if (open.length) console.log(`  (${open.length} question${open.length === 1 ? '' : 's'} a person would have had to answer)`);
+  return failures;
+}
+
+/**
+ * Confirm and publish, as a person does on the page. Questions are answered
+ * only to let the loans run; the scenario still reports them, because each is
+ * something a person would have had to do.
+ */
+async function confirmAndPublish(W, example) {
+  const draft = (await call(`/api/workflows/${W}`)).body;
+  const open = draft.notes.filter((n) => !n.resolved_at);
   const ends = draft.steps.filter((x) => x.kind === 'end');
-  await call(`/api/workflows/${W}/confirm`, {
-    endings: ends.map((e) => ({ stepId: e.id, outcome: e.declares.outcome, label: e.declares.summary,
-      example: { loanNumber: s.example } })),
+  const confirmed = await call(`/api/workflows/${W}/confirm`, {
+    // A person types the label into an empty box; the runner names it from the
+    // ending's summary, within the 120 characters the box takes.
+    endings: ends.map((e) => ({ stepId: e.id, outcome: e.declares.outcome, label: e.declares.summary.slice(0, 120).trim(),
+      example: { loanNumber: example } })),
     answers: open.map((n) => ({ noteId: n.id, answer: 'Answered by the scenario runner.', acknowledged: false })),
     attested: true,
   });
+  if (confirmed.status !== 200) return { ok: false, why: `confirm refused: ${confirmed.body.why ?? (confirmed.body.blockers ?? []).join('; ')}` };
   const published = await call(`/api/workflows/${W}/publish`, {});
-  if (published.status !== 201) return fail(`publish refused: ${(published.body.blockers ?? []).join('; ')}`);
-  const version = (await call(`/api/workflows/${W}`)).body.versions[0].id;
+  if (published.status !== 201) return { ok: false, why: `publish refused: ${(published.body.blockers ?? []).join('; ')}` };
+  return { ok: true, version: (await call(`/api/workflows/${W}`)).body.versions[0].id };
+}
 
+/** Every loan run on one version, and checked by what it did. */
+async function runLoans(version, loans, failures, objects) {
   const refs = {};
-  for (const loan of Object.keys(s.loans)) refs[loan] = (await call(`/api/versions/${version}/runs`, { inputs: { loanNumber: loan } })).body.reference;
-  for (const [loan, want] of Object.entries(s.loans)) {
+  for (const loan of Object.keys(loans)) refs[loan] = (await call(`/api/versions/${version}/runs`, { inputs: { loanNumber: loan } })).body.reference;
+  for (const [loan, want] of Object.entries(loans)) {
     const r = await until(() => call(`/api/runs/${refs[loan]}`).then((x) => x.body),
       (x) => !['queued', 'running'].includes(x.run.status), `run ${refs[loan]}`);
     const pressed = r.events.filter((e) => e.kind === 'activated' && DECISIONS.includes(e.detail.control)).map((e) => e.detail.control);
@@ -151,17 +265,24 @@ async function run(key) {
     if (JSON.stringify(pressed) !== JSON.stringify(want.pressed)) wrong.push(`pressed [${pressed.join(', ')}], wanted [${want.pressed.join(', ')}]`);
     if (want.ending && !want.ending.test(r.run.outcome ?? '')) wrong.push(`ended ${r.run.outcome}`);
     for (const [k, v] of Object.entries(want.outputs ?? {})) {
-      const got = Object.entries(r.run.outputs ?? {}).find(([name]) => name.toLowerCase().includes(k.toLowerCase()))?.[1];
+      // Outputs come back as objects (R26): { loan: { noteRate } } is checked as loan.noteRate.
+      const fields = Object.entries(r.run.outputs ?? {}).flatMap(([name, v]) => (v && typeof v === 'object'
+        ? Object.entries(v).map(([f, x]) => [`${name}.${f}`, x]) : [[name, v]]));
+      const got = fields.find(([name]) => name.toLowerCase().includes(k.toLowerCase()))?.[1];
       if (got !== v) wrong.push(`${k} was ${got ?? 'not published'}, wanted ${v}`);
+    }
+    // The outputs come back as objects (R26), not as loose values.
+    if (objects && want.outputs && !Object.values(r.run.outputs ?? {}).some((v) => v && typeof v === 'object')) {
+      wrong.push('its outputs were not handed back as objects');
     }
     console.log(`  ${wrong.length ? 'FAIL' : 'ok  '}  ${loan} ${refs[loan]} ${r.run.outcome ?? r.run.status}${wrong.length ? ' — ' + wrong.join('; ') : ''}`);
     if (wrong.length) failures.push(`${loan}: ${wrong.join('; ')}`);
   }
-  if (open.length) console.log(`  (${open.length} question${open.length === 1 ? '' : 's'} a person would have had to answer)`);
-  return failures;
 }
 
-const which = process.argv[2] ? [process.argv[2]] : Object.keys(SCENARIOS);
+// `node scripts/scenarios.mjs 5 6 7` runs those; `demo` runs the demo set, 5 to 9.
+const asked = process.argv.slice(2);
+const which = asked[0] === 'demo' ? ['5', '6', '7', '8', '9'] : asked.length ? asked : Object.keys(SCENARIOS);
 let failed = 0;
 for (const k of which) failed += (await run(k)).length;
 console.log(failed ? `\n${failed} FAILED` : '\nall passed');

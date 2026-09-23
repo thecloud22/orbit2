@@ -40,12 +40,17 @@ export async function readRun(reference: string) {
   // What this agent deliberately does not do, from the sort its version was
   // drafted from (2.1, criterion 6). Every run says it, so a reader never
   // mistakes work left to a person for work the agent forgot.
-  const { understanding, ...rest } = run as { understanding: { sentences: Array<{ number: string; text: string; label: string | null }> } | null };
+  const { understanding, ...rest } = run as { understanding: {
+    sentences: Array<{ number: string; text: string; label: string | null; waits?: boolean; withdrawn?: boolean }>;
+    steps?: Record<string, string> } | null };
   const leftToPeople = (understanding?.sentences ?? [])
     .filter((s) => s.label === 'forAPerson' || s.label === 'wontDo');
 
   return {
     run: rest, steps, attempts, events, leftToPeople,
+    // The procedure as the version carries it, and which sentence each step
+    // carries out: what the run page reads the run against (flow step 10).
+    procedure: understanding ? { sentences: understanding.sentences, steps: understanding.steps ?? {} } : null,
     stepArtefacts: artefacts.filter((a) => a.attempt_id !== null),
     runArtefacts: artefacts.filter((a) => a.attempt_id === null),
   };

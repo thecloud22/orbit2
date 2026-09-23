@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { isRetryable, type ArtefactView, type ErrorKind, type RunEventView, type RunView, type StepAttemptView } from '@orbit/contract';
 import { Dot, EmptyState, OutcomePair, Row, Verbatim, type Emptiness } from './ui.tsx';
-import { InMem } from './InMem.tsx';
+import { DataStore } from './DataStore.tsx';
+import { fieldsOf } from '@orbit/contract';
+import { RunProcedure } from './RunProcedure.tsx';
 import { useLinkProps, type Route } from './router.ts';
 
 type Loaded = { kind: 'loaded'; data: RunView } | { kind: 'empty'; of: Emptiness };
@@ -311,7 +313,7 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
           <Row label="Started by"><span style={{ color: 'var(--ink-2)' }}>Not recorded. Attribution starts when sign-in does.</span></Row>
         </div>
         <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 9 }}>
-          {Object.entries(run.outputs ?? {}).map(([key, value]) => (
+          {fieldsOf(run.outputs ?? {}).map(([key, value]) => (
             <Row key={key} label={key}><Verbatim>{String(value)}</Verbatim></Row>
           ))}
           <Row label="It changed"><span style={{ color: 'var(--ok-ink)', fontWeight: 600 }}>
@@ -320,7 +322,7 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
         </div>
       </section>
 
-      <InMem data={data} />
+      <DataStore data={data} />
 
       {/* What the agent deliberately does not do. Said on every run, so work
           left to a person is never mistaken for work the agent forgot (2.1). */}
@@ -343,6 +345,8 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
           </div>
         </section>
       )}
+
+      <RunProcedure data={data} onPick={setSelected} />
 
       <div style={{ display: 'flex', gap: 30, paddingTop: 20 }}>
         <div style={{ width: 486, flexShrink: 0 }}>

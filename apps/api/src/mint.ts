@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { asDraftStep, checkForPublication, type DraftStep } from './publish.ts';
+import { inDocumentOrder } from './procedure.ts';
 
 const unfinishedStep = (s: DraftStep): boolean => 'incomplete' in s;
 import { type Blocker, type Publication, step as stepSchema, type Step } from '@orbit/contract';
@@ -163,15 +164,22 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
 async function sortOf(db: PoolClient, workflowId: string) {
   const { rows: [u] } = await db.query(`SELECT 1 FROM understanding WHERE workflow_id = $1`, [workflowId]);
   if (!u) return null;
-  const { rows: raw } = await db.query<{ number: string; text: string; label: string | null; givenBy: string | null; waits: boolean }>(
-    `SELECT p.key || '.' || s.n AS number, s.text, l.label, l.given_by AS "givenBy", coalesce(l.waits, false) AS waits
-       FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
+  // The words as they stood when this was published (Decision 17), in the
+  // author's order; a sentence taken out is carried as taken out.
+  const { rows: raw } = await db.query<{ number: string; text: string; label: string | null; givenBy: string | null; waits: boolean;
+    withdrawn: boolean; part: string; after: string | null }>(
+    `SELECT p.key || '.' || s.n AS number, s.text, l.label, l.given_by AS "givenBy", coalesce(l.waits, false) AS waits,
+            s.withdrawn, p.key AS part,
+            (SELECT p2.key || '.' || s2.n FROM procedure_sentence s2 JOIN procedure_part p2 ON p2.id = s2.part_id
+              WHERE s2.id = p.after_sentence_id) AS after
+       FROM sentence_now s JOIN procedure_part p ON p.id = s.part_id
        LEFT JOIN LATERAL (SELECT label, given_by, waits FROM sentence_label
                            WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
       WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, s.n`, [workflowId]);
-  // `waits` only where it is true, so a version with no wait carries the same
-  // sentences — and the same digest — as before the Human in the Loop step.
-  const sentences = raw.map(({ waits, ...x }) => (waits ? { ...x, waits } : x));
+  // `waits` and `withdrawn` only where true, so a version with neither carries
+  // the same sentences — and the same digest — as before either existed.
+  const sentences = inDocumentOrder(raw).map(({ waits, withdrawn, part: _, after: __, ...x }) =>
+    ({ ...x, ...(waits ? { waits } : {}), ...(withdrawn ? { withdrawn } : {}) }));
   const byLabel: Record<string, number> = {};
   for (const x of sentences) if (x.label) byLabel[x.label] = (byLabel[x.label] ?? 0) + 1;
   // The chat that shaped the draft, in order: what was asked, and what Orbit

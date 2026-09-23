@@ -4,10 +4,9 @@ import './tokens.css';
 import { Nav } from './Nav.tsx';
 import { useRoute } from './router.ts';
 import { Home } from './screens/Home.tsx';
-import { Agent } from './screens/Agent.tsx';
+import { Editor } from './screens/Editor.tsx';
 import { Agents } from './screens/Agents.tsx';
 import { BringIn, Demonstrating } from './screens/BringIn.tsx';
-import { Understand } from './screens/Understand.tsx';
 import { Runs } from './screens/Runs.tsx';
 import { RunPage } from './RunPage.tsx';
 import { StartRun } from './screens/StartRun.tsx';
@@ -22,9 +21,10 @@ function App() {
       <Nav current={route.at} go={go} />
       {route.at === 'home' && <Home go={go} />}
       {route.at === 'agents' && <Agents go={go} />}
-      {route.at === 'agent' && <Agent id={route.id} go={go} />}
+      {route.at === 'agent' && <Editor id={route.id} go={go} />}
       {route.at === 'bringIn' && <BringIn go={go} />}
-      {route.at === 'understanding' && <Understand id={route.id} go={go} />}
+      {/* The sort is part of the one page now (R1); an old link to it opens the agent. */}
+      {route.at === 'understanding' && <Editor id={route.id} go={go} />}
       {route.at === 'recording' && (
         <Demonstrating id={route.id} go={go} onAbandon={() => go({ at: 'bringIn' })} />
       )}

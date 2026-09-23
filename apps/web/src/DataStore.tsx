@@ -1,8 +1,8 @@
-import type { RunEventView, RunView, StepAttemptView } from '@orbit/contract';
+import { fieldsOf, type RunEventView, type RunView, type StepAttemptView } from '@orbit/contract';
 import { Verbatim } from './ui.tsx';
 
 /**
- * A run's InMem (plan §11): everything the run touched, in one place, by
+ * A run's DataStore (plan §11): everything the run touched, in one place, by
  * section — what it was given, what it found, what it decided, what it handed
  * to a person and what it concluded.
  *
@@ -15,21 +15,29 @@ import { Verbatim } from './ui.tsx';
 type Entry = { section: string; name: string; value: string; from: string; at: string };
 
 export function entriesOf(run: RunView['run'], events: RunEventView[], attempts: StepAttemptView[],
-  steps: Array<{ summary?: string }>): Entry[] {
+  steps: Array<{ summary?: string; kind?: string; produces?: unknown }>): Entry[] {
   const stepOf = new Map(attempts.map((a) => [a.id, a.step_position]));
   const source = (e: RunEventView) => {
     const n = e.attempt_id ? stepOf.get(e.attempt_id) : undefined;
     return n ? `step ${n}${steps[n - 1]?.summary ? ` · ${steps[n - 1]!.summary}` : ''}` : 'the run';
   };
   const out: Entry[] = [];
+  // What each value is a field of (R26), so the DataStore reads as objects.
+  const of = new Map<string, string>();
+  for (const st of steps as Array<{ kind?: string; produces?: { name?: string; of?: { object: string; field: string } } }>) {
+    if (st.kind === 'read' && st.produces?.name && st.produces.of) of.set(st.produces.name, `${st.produces.of.object}.${st.produces.of.field}`);
+  }
+  for (const i of (run as { declared_inputs?: Array<{ name: string; of?: { object: string; field: string } }> }).declared_inputs ?? []) {
+    if (i.of) of.set(i.name, `${i.of.object}.${i.of.field}`);
+  }
   const started = events.find((e) => e.kind === 'run.started')?.at ?? '';
   for (const [k, v] of Object.entries(run.inputs ?? {})) {
-    out.push({ section: 'Given', name: k, value: String(v), from: 'started with', at: started });
+    out.push({ section: 'Given', name: of.get(k) ?? k, value: String(v), from: 'started with', at: started });
   }
   for (const e of events) {
     const d = e.detail as Record<string, unknown>;
-    if (e.kind === 'read') out.push({ section: 'Found', name: String(d['value']), value: String(d['read']), from: source(e), at: e.at });
-    if (e.kind === 'read.absent') out.push({ section: 'Found', name: String(d['value']), value: 'not there', from: source(e), at: e.at });
+    if (e.kind === 'read') out.push({ section: 'Found', name: of.get(String(d['value'])) ?? String(d['value']), value: String(d['read']), from: source(e), at: e.at });
+    if (e.kind === 'read.absent') out.push({ section: 'Found', name: of.get(String(d['value'])) ?? String(d['value']), value: 'not there', from: source(e), at: e.at });
     if (e.kind === 'branch.evaluated' || e.kind === 'checked') {
       const held = e.kind === 'checked' ? (d['held'] ? 'held' : 'did not hold') : `took ${String(d['tookPath'])}`;
       out.push({ section: 'Decided', name: `${String(d['left'] ?? 'not there')} ${readable(String(d['operator']))} ${String(d['right'] ?? '')}`.trim(),
@@ -46,7 +54,7 @@ export function entriesOf(run: RunView['run'], events: RunEventView[], attempts:
     }
     if (e.kind === 'ended') out.push({ section: 'Conclusion', name: 'reached', value: String(d['outcome']), from: source(e), at: e.at });
   }
-  for (const [k, v] of Object.entries(run.outputs ?? {})) {
+  for (const [k, v] of fieldsOf(run.outputs ?? {})) {
     out.push({ section: 'Conclusion', name: k, value: String(v), from: 'published by the ending', at: '' });
   }
   return out;
@@ -60,21 +68,21 @@ const readable = (op: string) => ({
 
 const SECTIONS = ['Given', 'Found', 'Decided', 'Handed over', 'Conclusion'];
 
-export function InMem({ data }: { data: RunView }) {
-  const entries = entriesOf(data.run, data.events, data.attempts, data.steps as Array<{ summary?: string }>);
+export function DataStore({ data }: { data: RunView }) {
+  const entries = entriesOf(data.run, data.events, data.attempts, data.steps as Array<{ summary?: string; kind?: string; produces?: unknown }>);
   const download = () => {
     const cell = (s: string) => `"${s.replace(/"/g, '""')}"`;
     const csv = [['Section', 'Name', 'Value', 'From', 'At'], ...entries.map((e) => [e.section, e.name, e.value, e.from, e.at])]
       .map((r) => r.map(cell).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const a = document.createElement('a');
-    a.href = url; a.download = `run-${data.run.reference}-inmem.csv`; a.click();
+    a.href = url; a.download = `run-${data.run.reference}-datastore.csv`; a.click();
     URL.revokeObjectURL(url);
   };
   return (
     <section style={{ padding: '16px 0 18px', borderBottom: '1px solid var(--rule)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 9 }}>
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>InMem</h2>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>DataStore</h2>
         <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>everything this run was given, found, decided and concluded, and where each came from</span>
         <span style={{ flexGrow: 1 }} />
         <button type="button" onClick={download} disabled={entries.length === 0}

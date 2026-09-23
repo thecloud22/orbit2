@@ -6,7 +6,7 @@ import { send as send2, useFetch } from '../fetching.ts';
 import { Configure } from './Configure.tsx';
 
 /** The kinds an author can add and finish today. The rest are named below. */
-const CONFIGURABLE = ['end', 'check', 'branch'] as const;
+export const CONFIGURABLE = ['end', 'check', 'branch'] as const;
 import type { Route } from '../router.ts';
 
 interface Draft {
@@ -145,7 +145,7 @@ function Detail({ step }: { step: Draft['steps'][number] }) {
  * the right shape for a procedure that is mostly a sequence, but it has to
  * stop lying at the point where the sequence forks.
  */
-function sidesOf(steps: Draft['steps']): Map<string, 'yes' | 'no'> {
+export function sidesOf(steps: Draft['steps']): Map<string, 'yes' | 'no'> {
   const side = new Map<string, 'yes' | 'no'>();
   for (const s of steps) {
     if (s.kind !== 'branch') continue;
@@ -192,7 +192,7 @@ const field: React.CSSProperties = {
  * activation a gate on evidence produced from made-up input. They are asked
  * for, per declared input, per ending.
  */
-function Confirm({ draft, onDone }: {
+export function Confirm({ draft, onDone }: {
   draft: Draft; onDone: (path: string, body: unknown) => Promise<void>;
 }) {
   const { workflow, steps, notes } = draft;
@@ -768,7 +768,7 @@ function coverageLine(c: { total: number; byLabel: Record<string, number> }): st
 }
 
 /**
- * What every run of this draft will keep in its InMem (plan §11), worked out
+ * What every run of this draft will keep in its DataStore (plan §11), worked out
  * from the steps: the values it is given, reads, decides on, hands over and
  * concludes with. Nothing else can be written there, so this is also what an
  * auditor will find on every run.
@@ -798,7 +798,7 @@ function WillHold({ steps, inputs }: {
     }
   }
   return (
-    <Section title="What each run's InMem will hold"
+    <Section title="What each run's DataStore will hold"
       note="every value a run is given, finds, decides and concludes with, and the step each comes from">
       <div style={{ borderTop: '1px solid var(--ink)', maxWidth: 1100 }}>
         {rows.map(([section, what, from], i) => (

@@ -176,3 +176,18 @@ test('each step keeps the sentence it carries out', async () => {
     `SELECT from_sentence FROM workflow_step WHERE workflow_id = $1`, [w!.id]);
   assert.deepEqual(rows, [{ from_sentence: '1.8' }]);
 });
+
+test('each step keeps the turn that made it, numbered after the calls already on the draft', async () => {
+  const { rows: [w] } = await db.query<{ id: string }>(`INSERT INTO workflow (name) VALUES ('Made at') RETURNING id`);
+  // One call already on the draft (the sort), so the walk's turn 1 is stored as 2.
+  await db.query(
+    `INSERT INTO model_call (workflow_id, turn, provider, model, shown, verdict) VALUES ($1, 1, 'openai', 'm', '{}', 'kept')`, [w!.id]);
+  const status = aStep('the status');
+  const handAdded = aStep('the queue');
+  const { opts, draft } = interpretation({ steps: [status, handAdded], madeAt: { [status.id]: 1 } });
+  const result = await storeDraft(db as never, { ...opts, into: w!.id }, draft);
+  assert.equal(result.stored, true);
+  const { rows } = await db.query<{ made_at_turn: number | null }>(
+    `SELECT made_at_turn FROM workflow_step WHERE workflow_id = $1 ORDER BY position`, [w!.id]);
+  assert.deepEqual(rows, [{ made_at_turn: 2 }, { made_at_turn: null }], 'a step no turn made says so');
+});

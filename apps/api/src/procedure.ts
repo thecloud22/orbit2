@@ -46,6 +46,8 @@ export async function addPart(db: ClientBase, workflowId: string, asked: unknown
 export async function insertPart(
   db: ClientBase, workflowId: string, asked: unknown,
   pages?: ReadonlyArray<{ page: number; start: number; end: number }>,
+  /** Where an author's own sentence sits: after this one (Decision 17). At the end when not given. */
+  after?: string | null,
 ): Promise<PartAdded> {
   const parsed = partAskedFor.safeParse(asked);
   if (!parsed.success) return { ok: false, because: parsed.error.issues.map((i) => i.message).join(' ') };
@@ -64,9 +66,18 @@ export async function insertPart(
     `SELECT key FROM procedure_part WHERE workflow_id = $1`, [workflowId]);
   const key = nextPartKey(taken.map((t) => t.key), source);
 
+  let anchor: string | null = null;
+  if (after) {
+    const [k, n] = after.split('.') as [string, string];
+    const { rows: [a] } = await db.query<{ id: string }>(
+      `SELECT s.id FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
+        WHERE p.workflow_id = $1 AND p.key = $2 AND s.n = $3`, [workflowId, k, Number(n)]);
+    if (!a) return { ok: false, because: `This procedure has no sentence ${after} to add after.` };
+    anchor = a.id;
+  }
   const { rows: [part] } = await db.query<{ id: string }>(
-    `INSERT INTO procedure_part (workflow_id, key, source, body) VALUES ($1, $2, $3, $4) RETURNING id`,
-    [workflowId, key, source, body]);
+    `INSERT INTO procedure_part (workflow_id, key, source, body, after_sentence_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [workflowId, key, source, body, anchor]);
   await db.query(
     `INSERT INTO procedure_sentence (part_id, n, text, kind, start_at, end_at, unterminated, page)
      SELECT $1, * FROM unnest($2::int[], $3::text[], $4::text[], $5::int[], $6::int[], $7::boolean[], $8::int[])`,
@@ -131,4 +142,30 @@ export async function readCoverage(db: ClientBase, workflowId: string): Promise<
       WHERE p.workflow_id = $1
       ORDER BY l.sentence_id, l.seq DESC`, [workflowId]);
   return coverage(sentences.map((s) => s.number), new Map(rows.map((r) => [r.number, r.label])));
+}
+
+/**
+ * Sentences in the order the author reads them (Decision 17). The document's
+ * parts come in the order they were added; a sentence the author added after
+ * another one sits straight after it — after any added there before it — and
+ * one added with nowhere given sits at the end. Given rows already in part
+ * order, as every query here returns them.
+ */
+export function inDocumentOrder<T extends { number: string; part: string; after?: string | null }>(rows: readonly T[]): T[] {
+  const placed: T[] = rows.filter((r) => !r.after);
+  const byPart = new Map<string, T[]>();
+  for (const r of rows.filter((x) => x.after)) byPart.set(r.part, [...(byPart.get(r.part) ?? []), r]);
+  // Parts placed in the order they were added; an anchor that is itself placed
+  // later is waited for, and anything whose anchor never appears goes last.
+  let waiting = [...byPart.values()];
+  for (let guard = 0; waiting.length && guard < 1000; guard++) {
+    const next = waiting.find((part) => placed.some((x) => x.number === part[0]!.after));
+    if (!next) { placed.push(...waiting.flat()); break; }
+    let at = placed.findIndex((x) => x.number === next[0]!.after);
+    // After the anchor, and after whatever was added after it already.
+    while (at + 1 < placed.length && placed[at + 1]!.after === next[0]!.after) at++;
+    placed.splice(at + 1, 0, ...next);
+    waiting = waiting.filter((p) => p !== next);
+  }
+  return placed;
 }

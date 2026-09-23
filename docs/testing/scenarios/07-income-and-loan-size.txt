@@ -1,0 +1,17 @@
+Meridian Home Lending
+Income and Loan Size Review
+
+Purpose
+This review decides whether a file can be approved at the desk or needs a senior underwriter, based on the size of the loan and how the borrower is paid.
+
+Steps
+1. Sign in to Meridian Home Lending with any user ID and password.
+2. Open the loan file using the loan number from the processing queue.
+3. If there is no such file, say so. It is not an error.
+4. Read the loan amount, the employment type and the debt-to-income ratio from the file.
+5. If the loan amount is over $806,500, refer the file to a senior underwriter and stop. Above the conforming limit only a senior underwriter may decide.
+6. If the debt-to-income ratio is over 45%, refer the file to a senior underwriter and stop.
+7. If the borrower is self-employed, attach the condition requiring two years of tax returns.
+8. Then approve the file.
+
+Never change the loan amount, and never decline a file under this procedure.

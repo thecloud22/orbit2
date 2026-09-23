@@ -150,9 +150,13 @@ describe('confirming the sort', () => {
     ]);
     assert.ok(notes.every((n) => n.resolved_at), 'what the author confirmed blocks nothing');
 
-    assert.equal((await relabel(db, id, { sentence: '1.2', label: 'background' })).ok, false,
-      'once drafted from, the sort cannot change underneath the steps');
     assert.equal((await confirmUnderstanding(db as never, id)).ok, false, 'confirmed once');
+    // After drafting a relabel is a change like any other (Decision 17): kept,
+    // and the sentence waits to be mapped again rather than being refused.
+    assert.equal((await relabel(db, id, { sentence: '1.2', label: 'background' })).ok, true);
+    const { rows: [u] } = await db.query(`SELECT status, confirmed_at FROM understanding WHERE workflow_id = $1`, [id]);
+    assert.equal(u!.status, 'queued', 'the tables are made again');
+    assert.ok(u!.confirmed_at, 'the draft stays drafted');
   });
 });
 

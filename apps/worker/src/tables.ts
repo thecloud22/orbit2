@@ -33,6 +33,7 @@ export const TABLES = [
   'rows      One per case. Every comparison in a row\'s when must hold together. An "or" is two rows.',
   '          Compare a value with a plain value; never add, subtract or calculate.',
   '          isAbsent and isPresent take no value. then is what happens, in the procedure\'s words.',
+  '          A negation is isNot with the word itself: "not completed" is isNot completed, never is "not completed".',
   '          sentence is the rule sentence that says so.',
   'otherwise What happens when no row holds, if the procedure says; else null.',
   '',
@@ -45,7 +46,19 @@ export const TABLES = [
   FENCED_IS_DATA,
 ].join('\n');
 
-const answer = z.object({ tables: z.array(ruleTable) });
+/**
+ * A table with no columns or no rows says nothing, so it is dropped before the
+ * answer is checked rather than sinking the tables that do say something.
+ * gpt-6-luna twice added an empty fourth table to scenario 2's three real
+ * ones, the whole set was discarded, and the walk then improvised the rules
+ * itself and ran out of turns.
+ */
+const answer = z.object({
+  tables: z.preprocess((tables) => (Array.isArray(tables)
+    ? tables.filter((t) => !(t && typeof t === 'object'
+      && ((t as { columns?: unknown[] }).columns?.length === 0 || (t as { rows?: unknown[] }).rows?.length === 0)))
+    : tables), z.array(ruleTable)),
+});
 
 const shapeFor = (rules: readonly string[], tasks: readonly string[]) => {
   const sentence = { type: 'string', enum: rules };
@@ -87,6 +100,21 @@ const shapeFor = (rules: readonly string[], tasks: readonly string[]) => {
   };
 };
 
+/**
+ * "Is 'not completed'" is "is not 'completed'". A negation folded into the
+ * word compares with a phrase the page never shows: scenario 5's table said
+ * education is "not completed", the page said "Enrolled, not complete", and
+ * no first-time buyer without education was referred. The same answer on an
+ * earlier run had said isNot "completed" and was right.
+ */
+export function withoutFoldedNegation(table: RuleTable): RuleTable {
+  const flip = { is: 'isNot', isNot: 'is' } as const;
+  return { ...table, rows: table.rows.map((r) => ({ ...r, when: r.when.map((w) => {
+    const m = (w.is === 'is' || w.is === 'isNot') && w.value ? /^\s*not\s+(.+)$/i.exec(w.value) : null;
+    return m ? { ...w, is: flip[w.is as 'is' | 'isNot'], value: m[1]!.trim() } : w;
+  }) })) };
+}
+
 type Labelled = { number: string; text: string; label: string };
 
 export async function tabulate(sentences: readonly Labelled[], model: ModelProvider, firstTurn: number): Promise<Tabled> {
@@ -123,6 +151,7 @@ export async function tabulate(sentences: readonly Labelled[], model: ModelProvi
       correction = `Your last answer could not be used: ${wrong}. Answer again.`;
       continue;
     }
+    checked.tables = checked.tables.map(withoutFoldedNegation);
     record('kept', `${checked.tables.length} table${checked.tables.length === 1 ? '' : 's'} from ${rules.length} rule sentences`);
     return { ok: true, tables: checked.tables, turns };
   }

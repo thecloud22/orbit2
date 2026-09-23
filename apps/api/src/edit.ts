@@ -24,14 +24,14 @@ import { asDraftStep, checkForPublication, type DraftStep } from './publish.ts';
 export type EditResult = { ok: true } | { ok: false; because: string };
 
 /** Reads a draft as it is, half-written steps included. */
-async function stepsOf(db: PoolClient, workflowId: string): Promise<DraftStep[]> {
+export async function stepsOf(db: PoolClient, workflowId: string): Promise<DraftStep[]> {
   const { rows } = await db.query<{ id: string; kind: string; declares: Record<string, unknown> }>(
     `SELECT id, kind, declares FROM workflow_step WHERE workflow_id = $1 ORDER BY position`, [workflowId]);
   return rows.map(asDraftStep);
 }
 
 /** Confirmation refers to a particular set of steps. Change them and it lapses. */
-async function returnToDraft(db: PoolClient, workflowId: string, what: string): Promise<void> {
+export async function returnToDraft(db: PoolClient, workflowId: string, what: string): Promise<void> {
   const { rows: [w] } = await db.query<{ confirmed_at: string | null }>(
     `UPDATE workflow SET updated_at = now(),
             confirmed_at = NULL
@@ -54,7 +54,7 @@ type Breakage = Extract<Blocker, { kind: 'valueNotProduced' | 'pathReachesNoEndi
 /** Every consequence, not the first — the same reason publication reports
  *  every blocker. The wording comes from the contract so the editor and the
  *  publish panel cannot drift into describing one problem two ways. */
-function why(action: string, broken: Breakage[]): string {
+export function why(action: string, broken: Breakage[]): string {
   return `${action} would break this workflow. ${broken.map(describeBlocker).join(' ')}`;
 }
 
@@ -72,12 +72,12 @@ function why(action: string, broken: Breakage[]): string {
  * as it found it, and may improve it, but may not add to the damage.
  * Publication is the gate that insists on none, and it is unmoved by this.
  */
-function madeWorse(before: Breakage[], after: Breakage[]): Breakage[] | null {
+export function madeWorse(before: Breakage[], after: Breakage[]): Breakage[] | null {
   return after.length > before.length ? after : null;
 }
 
-function wouldBreak(steps: DraftStep[], outcomes: string[]): Breakage[] {
-  return checkForPublication(steps, { inputs: [], outcomes, examples: {} })
+export function wouldBreak(steps: DraftStep[], outcomes: string[], inputs: string[] = []): Breakage[] {
+  return checkForPublication(steps, { inputs, outcomes, examples: {} })
     // Incompleteness and missing examples are expected mid-edit. What is not
     // acceptable is a reference that can no longer resolve, or a path that
     // now leads nowhere.

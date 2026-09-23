@@ -16,7 +16,7 @@ import { looksLikeInstructions, object, sentenceLabel, sentenceNumber, unreadAdv
 import type { ClientBase, PoolClient } from 'pg';
 import { askedFor, type Queued } from './authoring.ts';
 import { readPdf } from '@orbit/procedure';
-import { insertPart, PART_LIMIT, readCoverage } from './procedure.ts';
+import { inDocumentOrder, insertPart, PART_LIMIT, readCoverage } from './procedure.ts';
 import { chatOf } from './chat.ts';
 import { pool } from './db.ts';
 
@@ -51,6 +51,8 @@ export const understandingAskedFor = askedFor.extend({
   pdf: pdfBase64.optional(),
   /** The author says this is not all of it, and will add the rest as parts (§13). */
   moreToCome: z.boolean().default(false),
+  /** Start from a blank page and write it in the editor (R22). */
+  blank: z.boolean().default(false),
 });
 
 export async function bringInToUnderstand(db: PoolClient, body: unknown): Promise<Queued> {
@@ -59,11 +61,11 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
     return { ok: false, because: asked.error.issues
       .map((i) => i.message || `${i.path.join('.')} is not right`).join(' ') };
   }
-  const { name, applicationId, startPath, inputs, moreToCome } = asked.data;
-  if (Boolean(asked.data.procedure) === Boolean(asked.data.pdf)) {
+  const { name, applicationId, startPath, inputs, moreToCome, blank } = asked.data;
+  if (!blank && Boolean(asked.data.procedure) === Boolean(asked.data.pdf)) {
     return { ok: false, because: 'Paste the procedure or upload it as a PDF — one of the two.' };
   }
-  const read = await textOf(asked.data);
+  const read = blank ? { ok: true as const, source: 'pasted' as const, body: '' } : await textOf(asked.data);
   if (!read.ok) return read;
   const procedure = read.body;
 
@@ -82,11 +84,14 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
     const { rows: [workflow] } = await db.query<{ id: string }>(
       `INSERT INTO workflow (name, procedure) VALUES ($1, $2) RETURNING id`, [name, procedure]);
     const workflowId = workflow!.id;
+    // A blank page has nothing to sort yet: it is sorted as it stands, and
+    // each sentence the author writes is sorted as it arrives (R22).
     await db.query(
-      `INSERT INTO understanding (workflow_id, application_id, start_path, inputs, more_to_come)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [workflowId, applicationId, startPath, JSON.stringify(inputs), moreToCome]);
-    const part = await insertPart(db, workflowId, { source: read.source, body: procedure }, read.pages);
+      `INSERT INTO understanding (workflow_id, application_id, start_path, inputs, more_to_come, status, sorted_at)
+       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 = 'sorted' THEN now() END)`,
+      [workflowId, applicationId, startPath, JSON.stringify(inputs), moreToCome, blank ? 'sorted' : 'queued']);
+    const part = blank ? { ok: true as const, sentences: [] as string[] }
+      : await insertPart(db, workflowId, { source: read.source, body: procedure }, 'pages' in read ? read.pages : undefined);
     if (!part.ok) {
       await db.query('ROLLBACK');
       return { ok: false, because: part.because };
@@ -94,7 +99,7 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
     await db.query(
       `INSERT INTO audit_entry (act, object_kind, object_id, changed)
        VALUES ('procedure brought in to be understood', 'workflow', $1, $2)`,
-      [workflowId, JSON.stringify({ name, application: app.name, sentences: part.sentences.length })]);
+      [workflowId, JSON.stringify({ name, application: app.name, sentences: part.sentences.length, blank })]);
     await db.query('COMMIT');
     return { ok: true, id: workflowId };
   } catch (error) {
@@ -110,21 +115,34 @@ export type SentenceView = {
   waits: boolean;
   /** Why this sentence reads like instructions to a machine, if it does. */
   suspicious?: string | null;
+  /** What it arrived as, once the author has changed it (Decision 17). */
+  was?: string | null;
+  withdrawn?: boolean;
+  revisedAt?: string | null;
+  /** Whether the label was given to the words as they now stand. */
+  labelCurrent?: boolean;
 };
 
-async function sentencesWithLabels(db: ClientBase, workflowId: string): Promise<SentenceView[]> {
-  const { rows } = await db.query<SentenceView>(
+export async function sentencesWithLabels(db: ClientBase, workflowId: string): Promise<SentenceView[]> {
+  // As each sentence now reads (Decision 17): its latest revision, or as it
+  // arrived, with what it arrived as once it has changed.
+  const { rows } = await db.query<SentenceView & { after: string | null }>(
     `SELECT p.key || '.' || s.n AS number, p.key AS part, s.n, s.text, s.kind, s.unterminated, s.page,
-            l.label, l.reason, l.basis, l.given_by AS "givenBy", coalesce(l.waits, false) AS waits
-       FROM procedure_sentence s
+            l.label, l.reason, l.basis, l.given_by AS "givenBy", coalesce(l.waits, false) AS waits,
+            s.arrived_as AS was, s.withdrawn, s.revised_at AS "revisedAt",
+            (SELECT p2.key || '.' || s2.n FROM procedure_sentence s2 JOIN procedure_part p2 ON p2.id = s2.part_id
+              WHERE s2.id = p.after_sentence_id) AS after,
+            -- A label from before the sentence last changed describes words it no longer has.
+            (l.created_at IS NOT NULL AND (s.revised_at IS NULL OR l.created_at > s.revised_at)) AS "labelCurrent"
+       FROM sentence_now s
        JOIN procedure_part p ON p.id = s.part_id
        LEFT JOIN LATERAL (
-         SELECT label, reason, basis, given_by, waits FROM sentence_label
+         SELECT label, reason, basis, given_by, waits, created_at FROM sentence_label
           WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
       WHERE p.workflow_id = $1
       ORDER BY p.added_at, p.key, s.n`, [workflowId]);
   // Flagged, never altered: the words stay the author's, and a person decides.
-  return rows.map((r) => ({ ...r, suspicious: looksLikeInstructions(r.text) }));
+  return inDocumentOrder(rows).map(({ after: _, ...r }) => ({ ...r, suspicious: looksLikeInstructions(r.text) }));
 }
 
 /** Where a draft's understanding stands, every sentence with its label, and the count. */
@@ -186,11 +204,12 @@ export async function relabel(db: ClientBase, workflowId: string, body: unknown)
   const { rows: [u] } = await db.query<{ status: string; confirmed_at: string | null }>(
     `SELECT status, confirmed_at FROM understanding WHERE workflow_id = $1`, [workflowId]);
   if (!u) return { ok: false, because: 'This draft was not brought in to be understood.' };
-  if (u.confirmed_at) {
-    return { ok: false, because: 'The sort has been confirmed and drafted from. Relabelling now would change '
-      + 'what the steps were drafted from without changing the steps.' };
-  }
+  // After drafting a relabel is a change like any other (Decision 17): the
+  // sentence waits to be mapped again, and a confirmation lapses.
   if (u.status !== 'sorted') return { ok: false, because: 'Orbit has not finished sorting this yet.' };
+  if (u.confirmed_at) {
+    await db.query(`UPDATE workflow SET confirmed_at = NULL, updated_at = now() WHERE id = $1`, [workflowId]);
+  }
 
   const [part, n] = sentence.split('.') as [string, string];
   const { rows: [found] } = await db.query<{ id: string }>(
@@ -224,7 +243,7 @@ export function forTheWalk(sentences: readonly SentenceView[]): string {
 }
 // Never a sentence that reads like instructions to a machine, whatever it was
 // labelled: the walk could otherwise cite it as the line that asked for a press.
-const forOrbitOrAWait = (s: SentenceView) => !s.suspicious
+const forOrbitOrAWait = (s: SentenceView) => !s.suspicious && !s.withdrawn
   && (s.label === 'task' || s.label === 'rule' || (s.label === 'forAPerson' && s.waits));
 
 /**

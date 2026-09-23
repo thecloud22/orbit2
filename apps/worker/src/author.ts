@@ -19,11 +19,12 @@
 import { FENCED_IS_DATA, changingVerbOf, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
 import { compileTables } from './decide.ts';
 import type { ModelProvider } from '@orbit/model';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Locator, type Page } from 'playwright';
 import { asAssumption, asQuestion, type Note } from './note.ts';
 import { asNumber } from './compare.ts';
 import { capture } from './evidence.ts';
 import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
+import { describeRefusal, resolve as resolveBinding } from './binder.ts';
 
 /**
  * What the walk types into a field, taken from the step it just built.
@@ -65,6 +66,21 @@ function toType(
       : '';
   }
   return '';
+}
+
+/**
+ * An ending's summary, from a label a model wrote. An ending with no summary,
+ * or one past the 200 characters a step's summary takes, sank the whole draft:
+ * scenario 7 was refused outright ("The end at step 20: Orbit did not work out
+ * its summary"). The person names the conclusion when they confirm, so a
+ * missing label says so and a long one is cut at a word.
+ */
+export function endingSummary(label: string | null | undefined): string {
+  const said = (label ?? '').replace(/\s+/g, ' ').trim();
+  if (!said) return 'Finish — this conclusion has no name yet';
+  if (said.length <= 200) return said;
+  const cut = said.slice(0, 199);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 120)).trimEnd()}…`;
 }
 
 /**
@@ -179,6 +195,13 @@ const proposal = z.object({
    * sentences, or the step carries out none — signing in, often.
    */
   sentence: z.string().nullable(),
+  /**
+   * The business thing a value is a detail of, and what the detail is called
+   * within it (R26): a loan's `ltv`, a borrower's `creditScore`. Only a
+   * grouping: kept when both are names, dropped otherwise, never a reason to
+   * refuse a turn.
+   */
+  belongsTo: z.object({ object: z.string(), field: z.string() }).nullish(),
 });
 type Proposal = z.infer<typeof proposal>;
 
@@ -273,8 +296,13 @@ const shapeWith = (numbers: readonly string[]) => ({
       },
     },
     why: { type: 'string' },
+    belongsTo: {
+      type: ['object', 'null'],
+      properties: { object: { type: 'string' }, field: { type: 'string' } },
+      required: ['object', 'field'], additionalProperties: false,
+    },
   },
-  required: ['act', 'element', 'value', 'optional', 'changesARecord', 'onlyIf', 'why', 'sentence'],
+  required: ['act', 'element', 'value', 'optional', 'changesARecord', 'onlyIf', 'why', 'sentence', 'belongsTo'],
   additionalProperties: false,
 });
 
@@ -297,8 +325,16 @@ export interface Turn {
   costMicros: number | null;
   /** The page the model was looking at, as a picture in the evidence store, or
    *  why there is none (Decision 4, items 12 and 13). */
-  screenshot?: { digest: string } | { withheld: string };
+  screenshot?: { digest: string; box?: Box } | { withheld: string };
 }
+
+/**
+ * Where on a turn's picture the element Orbit acted on was, as fractions of
+ * the picture, so a screen can box it at any size. Measured when the step is
+ * made, on the page the picture shows; absent when the element could not be
+ * found again or was off the picture.
+ */
+export interface Box { x: number; y: number; w: number; h: number }
 
 export interface AuthoredDraft {
   steps: Step[];
@@ -315,9 +351,13 @@ export interface AuthoredDraft {
   questions: Note[];
   /** Derived from the steps rather than proposed: an input is a value an
    *  `enter` step takes from outside, and nothing else can be one. */
-  declaredInputs: Array<{ name: string; label: string; type: 'text'; required: true }>;
+  declaredInputs: Array<{ name: string; label: string; type: 'text'; required: true; of?: { object: string; field: string } }>;
   /** Which confirmed sentence each step carries out, by step id (Orbit 2.1). */
   provenance: Record<string, string>;
+  /** Which turn made each step, by step id, so a step reaches its picture. */
+  madeAt: Record<string, number>;
+  /** Steps carried over from the draft by replay (Decision 17), by id. */
+  replayed?: string[];
 }
 
 const INSTRUCTION = [
@@ -338,6 +378,9 @@ const INSTRUCTION = [
   '            Orbit binds a read to whatever labels the value, not to the value, so that the',
   '            step reads what the page says now rather than checking it still says what it said.',
   '            optional=true if the procedure says this may legitimately not be there.',
+  'belongsTo   for read, and for enter with an input: the business thing the value is a detail of, and the',
+  '            detail\'s name within it, both short camelCase, e.g. {object: "loan", field: "ltv"},',
+  '            {object: "borrower", field: "creditScore"}. null for anything else.',
   'act=done    the procedure is finished, or the page does not show what comes next.',
   'act=wait    the next line to carry out is marked WAIT FOR A PERSON: the run stops there until a person',
   '            has done it. element=null, and sentence is that line\'s number.',
@@ -393,6 +436,15 @@ export async function authorFromProcedure(opts: {
    *  what they compare (`decide.ts`), with every sentence number in order. */
   tables?: readonly RuleTable[];
   order?: readonly string[];
+  /**
+   * Mapping again (Decision 17 item 3): the draft's own steps before the first
+   * changed sentence, carried out as they are without asking the model, then
+   * the walk carries on from there. Never a step that changes data: the
+   * caller stops the prefix before one.
+   */
+  replay?: { steps: Step[]; provenance: Record<string, string> };
+  /** The author's answers to questions about these sentences: their word, handed to the walk (R19). */
+  hints?: ReadonlyArray<{ sentence: string; answer: string }>;
   /** Which of the sentences are work in the application: each must have a
    *  step before the walk may call the procedure finished. */
   taskSentences?: readonly string[];
@@ -409,14 +461,25 @@ export async function authorFromProcedure(opts: {
 
   const numbers = (opts.sentences ?? []).map((x) => x.number);
   const provenance: Record<string, string> = {};
+  const madeAt: Record<string, number> = {};
+  /** Steps carried over from the draft by replay, which keep the turn that first made them. */
+  const replayed: string[] = [];
+  /** The object each input belongs to, as the walk first mapped it (R26). */
+  const inputOf = new Map<string, { object: string; field: string }>();
+  /** Lines the walk looked for and could not find, by sentence: the last page it looked on (R19). */
+  const missed = new Map<string, { turn: number; wanted: string; act: string;
+    candidates: Array<{ name: string; what: string; label?: string }> }>();
   // Numbered when there are numbers to give; the plain text otherwise, as 2.0
   // walks have always been shown.
+  const said = (opts.hints ?? []).filter((h) => numbers.includes(h.sentence));
   const shownProcedure = opts.sentences?.length
     ? [...opts.sentences.map((x) => `${x.number} ${x.waits ? 'WAIT FOR A PERSON: '
          : opts.ruleSentences?.includes(x.number) ? 'RULE (already handled: Orbit applies this itself, from its confirmed table, at this point in the procedure, so treat it as done and go on to the next line; only read what it names): '
          : ''}${x.text.replace(/\s+/g, ' ')}`), '',
        'Each line above starts with its number. Set sentence to the number of the line the next step carries out,',
-       'or null if it carries out none of them.'].join('\n')
+       'or null if it carries out none of them.',
+       ...(said.length ? ['', 'THE AUTHOR ANSWERED THESE QUESTIONS ABOUT LINES ABOVE. Their answer is what the line means:',
+         ...said.map((h) => `line ${h.sentence}: ${h.answer}`)] : [])].join('\n')
     : procedure;
 
   // Controls only a RULE line asks for — "Require private mortgage
@@ -456,6 +519,28 @@ export async function authorFromProcedure(opts: {
   let unchanged = 0;
   let lastFingerprint = '';
   let lastActMoved = false;
+  /**
+   * What has been typed since the last press, so a press never goes ahead on
+   * a form that has lost it. A run types and presses back to back; the walk
+   * waits on a model between them, and a page left for minutes can reload.
+   * Scenario 6: the loan number was in the box on one turn and gone on the
+   * next, so "Open file" said no file matches and the walk never opened the
+   * loan; scenario 8's sign-in did nothing the same way.
+   */
+  const typed: Array<{ field: Locator; value: string }> = [];
+  /** Whether confirmed rule tables will be built into the steps: then they, not the walk, decide. */
+  const tablesDecide = (opts.tables ?? []).some((t) => t.rows.some((r) => r.when.some((w) => w.is !== 'isAbsent')));
+
+  /** A line of work left without a step, as a question under it (R19). */
+  const unmapped = (n: string) => {
+    const m = missed.get(n);
+    return m
+      ? { ...asQuestion(`Orbit could not find what ${n} asks for on this page: it looked for "${m.wanted}". `
+          + (m.candidates.length ? 'Is it one of these? Or say it is not on this page.' : 'Nothing on the page could be it.')),
+          sentence: n, atTurn: m.turn, candidates: m.candidates, action: 'pickElement' as const }
+      : { ...asQuestion(`Orbit finished without a step for ${n}. Say what on the page does it, or mark it for a person.`),
+          sentence: n, action: 'mapAgain' as const };
+  };
 
   const openId = crypto.randomUUID();
   steps.push({
@@ -466,6 +551,22 @@ export async function authorFromProcedure(opts: {
 
   try {
     await page.goto(`${origin}${startPath}`, { waitUntil: 'domcontentloaded' });
+
+    // Mapping again: the steps before the first change are done as they are,
+    // with no model, so the walk starts where the change is (Decision 17).
+    for (const r of opts.replay?.steps ?? []) {
+      const done = await replayStep(page, r, origin, opts);
+      if (!done.ok) {
+        questions.push(asQuestion(`Orbit could not replay step ${steps.length + 1} (${r.summary}) to reach what changed: ${done.why} `
+          + 'It mapped the procedure again from there.'));
+        break;
+      }
+      steps.push(r);
+      replayed.push(r.id);
+      const from = opts.replay!.provenance[r.id];
+      if (from) provenance[r.id] = from;
+      if (r.kind === 'read') readPage = { seen: await snapshot(page), url: page.url() };
+    }
 
     let finished = false;
     let lastRejection: string | null = null;
@@ -478,7 +579,7 @@ export async function authorFromProcedure(opts: {
       const seen = await snapshot(page);
       // The picture of what the model is about to be asked about. Never of a
       // sign-in page: nothing of signing in is captured (Decision 4, item 13).
-      const picture: Turn['screenshot'] = seen.some((x) => x.secret)
+      let picture: NonNullable<Turn['screenshot']> = seen.some((x) => x.secret)
         ? { withheld: 'A sign-in page: nothing of signing in is captured.' }
         : await page.screenshot({ type: 'png' }).then(async (bytes) => ({ digest: (await capture(bytes, 'image/png')).digest }))
           .catch(() => ({ withheld: 'The page could not be captured.' }));
@@ -494,6 +595,11 @@ export async function authorFromProcedure(opts: {
       const fingerprint = `${page.url()}|${seen.map((s) => s.name).join('|')}|${visible}`;
       if (lastActMoved) {
         unchanged = fingerprint === lastFingerprint ? unchanged + 1 : 0;
+        // Compared once, on the turn straight after the press. A turn that
+        // presses nothing — a refusal, an early "done" — is not a press that
+        // failed to move the page: counting them ended scenario 1's walk as
+        // "stuck" two turns after a sign-in that had worked.
+        lastActMoved = false;
       }
       lastFingerprint = fingerprint;
       if (unchanged >= 2) {
@@ -620,10 +726,7 @@ export async function authorFromProcedure(opts: {
           continue;
         }
         const stillUndone = [...toldUndone].filter((n) => !Object.values(provenance).includes(n));
-        if (stillUndone.length) {
-          questions.push(asQuestion(`Orbit finished without a step for ${stillUndone.join(', ')}. `
-            + 'Check whether those lines need doing in the application, and if so, what on the page does them.'));
-        }
+        for (const n of stillUndone) questions.push(unmapped(n));
         finished = true;
         // Finished, or gave up? The difference is whether the last thing it
         // tried worked. Test case 1 asked for three things: sign in, confirm
@@ -732,7 +835,15 @@ export async function authorFromProcedure(opts: {
         // It named something it was not shown. Rejected, not retried into
         // existence: the session's record is evidence either way.
         noteTurn(record('rejected', `named "${wanted}", which was not on the page`));
-        questions.push(asQuestion(`At turn ${turn} the page did not offer what the procedure asked for.`));
+        if (p.sentence && numbers.includes(p.sentence)) {
+          // Left for the end: asked only if the line never gets its step, with
+          // this page's picture and what on it could be what the line means.
+          missed.set(p.sentence, { turn, wanted, act: p.act, candidates: seen
+            .filter((x) => couldMean(p.act, x) && !forRulesOnly(x) && !looksLikeInstructions(x.name) && !x.secret)
+            .slice(0, 12).map((x) => ({ name: x.name, what: x.what, ...(x.labelledBy ? { label: x.labelledBy } : {}) })) });
+        } else {
+          questions.push(asQuestion(`At turn ${turn} the page did not offer what the procedure asked for.`));
+        }
         continue;
       }
       if (named.length > 1) {
@@ -805,18 +916,31 @@ export async function authorFromProcedure(opts: {
         // what cannot be done. It says what will happen and what to do instead,
         // and what to do instead is the thing that works: give the value as an
         // example on the way in, and the step becomes an input.
-        questions.push(asQuestion(
+        // Answerable now (R10): the editor turns the fixed value into an input,
+        // with this value as its example, in one click.
+        questions.push({ ...asQuestion(
           `The procedure names "${made.value.literal.type === 'text' ? made.value.literal.text : ''}" specifically, so every run of this agent will use that one record. `
-          + 'If it should be different each time, bring the procedure in again with that value filled in under '
-          + '"An example to work through" — Orbit declares an input for a value it is given an example of, '
-          + 'and cannot add one afterwards.'));
+          + 'If it should be different each time, make it an input: this value becomes its example.'),
+          sentence: p.sentence, atTurn: turn, stepId: made.id, action: 'useInput' });
       }
 
       // Conditions are checked against what has actually been read, before the
       // act is kept. A condition naming a value no step produces is not a
       // condition — and an act kept without the condition the procedure put on
       // it is worse than no act at all.
-      const conditions = p.onlyIf ?? [];
+      let conditions = p.onlyIf ?? [];
+      // Where the rules are confirmed as tables, the tables decide, and a
+      // condition the walk puts on an act decides the same thing twice. On
+      // scenario 7 the walk put "only if the loan amount is at most $806,500"
+      // on Approve file; a failed condition leaves for the second ending, which
+      // was "No such loan file", so the jumbo file concluded not found. It is
+      // said, not dropped silently.
+      if (conditions.length > 0 && tablesDecide) {
+        questions.push(asAssumption(
+          `Orbit did not put the walk's own condition on "${made.summary}" (${conditions.map((c) => `${c.value} ${readable(c.is)} ${c.than}`).join(' and ')}): the rules as confirmed decide it.`,
+          'Taken from the confirmed tables, which are built into the steps. Check each branch against the procedure.'));
+        conditions = [];
+      }
       const readSoFar = new Map(steps.flatMap((x) => (x.kind === 'read' ? [[x.produces.name, x.produces]] : [])));
       const unknown = conditions.filter((c) => !readSoFar.has(c.value));
       if (unknown.length > 0) {
@@ -840,27 +964,47 @@ export async function authorFromProcedure(opts: {
       // moment it happens, which is the step the rest of the walk hangs off.
       if (made.kind === 'enter' && made.value.from === 'input'
           && !(made.value.value in inputs)) {
-        questions.push(asQuestion(
+        questions.push({ ...asQuestion(
           `"${made.value.value}" is supplied when a run starts, and no example was given for it, so Orbit`
           + ' walked the rest of this procedure with that field left empty. The steps after it are whatever'
-          + ' the application did with nothing in that box — check they are the ones a real value would produce.'));
+          + ' the application did with nothing in that box. Give an example, then map it again.'),
+          sentence: p.sentence, atTurn: turn, stepId: made.id, action: 'giveExample',
+          candidates: [{ name: made.value.value, what: 'input' }] });
       }
 
+      // Where the element is on this turn's picture, so the step can be shown
+      // boxed on the page Orbit found it on. Before the act, which may move on.
+      if ('digest' in picture) {
+        const box = await boxOf(page, element);
+        if (box) picture = { ...picture, box };
+      }
       steps.push(made);
+      if (made.kind === 'enter' && made.value.from === 'input') {
+        const of = fieldOfProposal(p);
+        if (of && !inputOf.has(made.value.value)) inputOf.set(made.value.value, of);
+      }
       if (p.sentence && numbers.includes(p.sentence)) provenance[made.id] = p.sentence;
       if (made.kind === 'read') readPage = { seen, url: page.url() };
       if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)! })));
       noteTurn(record('kept', conditions.length > 0
         ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
         : `step ${steps.length}: ${made.summary}`));
+      madeAt[made.id] = turn;
 
       // Do it, so the next turn sees the page the next step would meet.
       lastActMoved = p.act === 'activate';
       if (p.act === 'enter' && made.kind === 'enter') {
-        await page.getByRole(element.role as 'textbox', { name: element.name, exact: true })
-          .or(page.locator(`[name="${element.binding.name ?? ''}"]`)).first()
-          .fill(toType(made.value, opts)).catch(() => undefined);
+        const field = page.getByRole(element.role as 'textbox', { name: element.name, exact: true })
+          .or(page.locator(`[name="${element.binding.name ?? ''}"]`)).first();
+        const value = toType(made.value, opts);
+        await field.fill(value).catch(() => undefined);
+        typed.push({ field, value });
       } else if (p.act === 'activate') {
+        for (const t of typed.splice(0)) {
+          if ((await t.field.inputValue({ timeout: 2000 }).catch(() => null)) !== t.value) {
+            await t.field.fill(t.value, { timeout: 5000 }).catch(() => undefined);
+          }
+        }
         const wasAt = page.url();
         await page.getByRole(element.role as 'button', { name: element.name, exact: true }).first()
           .click().catch(() => undefined);
@@ -878,6 +1022,9 @@ export async function authorFromProcedure(opts: {
     // stops early is recoverable; one that stops early and looks finished is
     // the thing this product exists not to produce.
     if (!finished) {
+      // Lines of work the walk never reached a step for, each left on the page.
+      for (const n of (opts.taskSentences ?? []).filter((x) => !Object.values(provenance).includes(x)
+        && !(opts.sentences ?? []).find((y) => y.number === x)?.waits)) questions.push(unmapped(n));
       questions.push(asQuestion(
         `Orbit worked through ${maxTurns} turns without reaching the end of this procedure, so what is below is`
         + ' only as far as it got. Check it against what you wrote, and say what should happen after the last step.'));
@@ -970,15 +1117,29 @@ export async function authorFromProcedure(opts: {
     // model named things; it did not get to decide whether they hold together.
     const found = said ? normaliseName(said.whenFound.outcome) : '';
     const absent = said?.whenAbsent ? normaliseName(said.whenAbsent.outcome) : null;
-    const separator = said?.missingValue ? produced.find((v) => v.name === said.missingValue) : undefined;
+    // Which value's absence separates the two endings, when the answer
+    // describes a second ending and leaves that out: the rules already marked
+    // the values that may not be there, and when only one is, it is the one.
+    // Scenario 5 was refused here with "First-time buyer may not be there:
+    // missing means the record was not found" on the same draft, and its
+    // missing file halted instead of concluding.
+    // The same when it names one the rules say is always there: scenario 8's
+    // answer named loanAmount, the rules had marked noteRate, and the missing
+    // file halted on the loan amount instead of concluding.
+    const mayBeAbsent = produced.filter((v) => !v.required);
+    const named = said?.missingValue ? produced.find((v) => v.name === said.missingValue) : undefined;
+    const missingValue = named && !named.required ? named.name
+      : said?.whenAbsent && mayBeAbsent.length === 1 ? mayBeAbsent[0]!.name
+      : said?.missingValue ?? null;
+    const separator = missingValue ? produced.find((v) => v.name === missingValue) : undefined;
 
     const refusal =
       !said ? (answered.refusedBecause ?? 'the model gave no answer')
       : !found ? 'it did not name the conclusion the procedure reaches when the work is done'
       : said.whenAbsent && !absent ? 'it described a second conclusion without naming it'
-      : said.whenAbsent && !said.missingValue ? 'it described a second conclusion without saying what distinguishes it'
-      : said.missingValue && !separator
-        ? `it named "${said.missingValue}" as the value that would be missing, and no step produces a value by that name`
+      : said.whenAbsent && !missingValue ? 'it described a second conclusion without saying what distinguishes it'
+      : missingValue && !separator
+        ? `it named "${missingValue}" as the value that would be missing, and no step produces a value by that name`
       : separator && separator.required ? `"${separator.name}" is always present, so its absence cannot separate two conclusions`
       : absent && absent === found ? 'it gave both conclusions the same name, which names neither'
       : null;
@@ -1047,7 +1208,7 @@ export async function authorFromProcedure(opts: {
       const guarded = steps.slice(guardedAt);
 
       const passEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
+        summary: endingSummary(said?.whenFound.label),
         outcome: found || 'unnamed', publishes: published };
       // The path that leaves before the guarded steps can only report what
       // was read before them.
@@ -1061,7 +1222,7 @@ export async function authorFromProcedure(opts: {
       // all, and the author was sent to fix something Orbit had built.
       const beforeGuard = new Set(prefix.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : [])));
       const failEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said?.whenAbsent?.label || 'Finish — this conclusion has no name yet',
+        summary: endingSummary(said?.whenAbsent?.label),
         outcome: absent || 'unnamedOtherwise',
         publishes: published.filter((v) => beforeGuard.has(v)) };
 
@@ -1118,7 +1279,7 @@ export async function authorFromProcedure(opts: {
       // second did not hold — and a rejected answer still leaves a workflow
       // that works, with a question against it.
       steps.push({ id: crypto.randomUUID(), kind: 'end',
-        summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
+        summary: endingSummary(said?.whenFound.label),
         outcome: found || 'unnamed', publishes: published });
       if (refusal) {
         noteTurn(record('rejected', refusal));
@@ -1134,9 +1295,9 @@ export async function authorFromProcedure(opts: {
       // was there. Orbit writes the branch and both endings; the model supplied
       // four words and pointed at a value.
       const foundEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said.whenFound.label, outcome: found, publishes: published };
+        summary: endingSummary(said.whenFound.label), outcome: found, publishes: published };
       const absentEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said.whenAbsent.label, outcome: absent,
+        summary: endingSummary(said.whenAbsent.label), outcome: absent,
         // Only what was read before the value that was not there: the rest was
         // never reached on this path, and publication refuses an ending that
         // claims a value its path never produced.
@@ -1172,9 +1333,49 @@ export async function authorFromProcedure(opts: {
 
   const declaredInputs = [...new Set(
     steps.flatMap((s) => (s.kind === 'enter' && s.value.from === 'input' ? [s.value.value] : [])),
-  )].map((name) => ({ name, label: name, type: 'text' as const, required: true as const }));
+  )].map((name) => ({ name, label: name, type: 'text' as const, required: true as const,
+    ...(inputOf.get(name) ? { of: inputOf.get(name)! } : {}) }));
 
-  return { steps, turns, questions, declaredInputs, provenance };
+  return { steps, turns, questions, declaredInputs, provenance, madeAt, replayed };
+}
+
+/** One step of the draft, carried out as it is, for a mapping that starts after it (Decision 17). */
+async function replayStep(page: Page, step: Step, origin: string,
+  typing: { inputs: Record<string, string>; signsInAs?: string | null; signsInWith?: string | null }): Promise<{ ok: true } | { ok: false; why: string }> {
+  if (step.kind === 'open') { await page.goto(`${origin}${step.path}`, { waitUntil: 'domcontentloaded' }); return { ok: true }; }
+  if (step.kind === 'handOff') { await page.context().clearCookies(); return { ok: true }; }
+  const target = step.kind === 'enter' ? step.into : step.kind === 'activate' ? step.control : step.kind === 'read' ? step.region : null;
+  if (!target) return { ok: false, why: `a ${step.kind} step is not replayed.` };
+  if (step.kind === 'activate' && step.changesARecord) return { ok: false, why: 'it changes a record, and replay never does.' };
+  const found = await resolveBinding(page, target.binding as never).catch(() => null);
+  if (!found || found.found !== 'one') {
+    if (step.kind === 'read' && !step.produces.required) return { ok: true };
+    return { ok: false, why: found ? describeRefusal(target.label, found) : `"${target.label}" could not be looked for.` };
+  }
+  if (step.kind === 'enter') await found.locator.fill(toType(step.value, typing));
+  if (step.kind === 'activate') {
+    const wasAt = page.url();
+    await found.locator.click();
+    await settleAfterActivating(page, wasAt);
+  }
+  return { ok: true };
+}
+
+/** Where an element is on the page's picture, as fractions of it (see `Box`). */
+async function boxOf(page: Page, element: Seen): Promise<Box | undefined> {
+  const viewport = page.viewportSize();
+  if (!viewport) return undefined;
+  const found = await resolveBinding(page, element.binding).catch(() => null);
+  const locator = found?.found === 'one' ? found.locator
+    : page.getByRole(element.role as 'button', { name: element.name, exact: true }).first();
+  const b = await locator.boundingBox({ timeout: 1000 }).catch(() => null);
+  if (!b) return undefined;
+  const x = Math.max(0, b.x), y = Math.max(0, b.y);
+  const right = Math.min(viewport.width, b.x + b.width), bottom = Math.min(viewport.height, b.y + b.height);
+  if (right <= x || bottom <= y) return undefined;   // off the picture
+  const round = (n: number) => Math.round(n * 10000) / 10000;
+  return { x: round(x / viewport.width), y: round(y / viewport.height),
+    w: round((right - x) / viewport.width), h: round((bottom - y) / viewport.height) };
 }
 
 /**
@@ -1300,6 +1501,15 @@ function comparisonFor(
     left, right: { from: 'literal', literal: { type: 'text', text: said } } };
 }
 
+/** The object a proposed value belongs to, when both parts are names (R26). */
+function fieldOfProposal(p: Proposal): { object: string; field: string } | null {
+  // A name the model already gave in camelCase is kept as it is; anything else is made one.
+  const named = (x: string) => (/^[a-z][a-zA-Z0-9]{0,63}$/.test(x.trim()) ? x.trim() : asValueName(x));
+  const object = p.belongsTo ? named(p.belongsTo.object) : null;
+  const field = p.belongsTo ? named(p.belongsTo.field) : null;
+  return object && field ? { object, field } : null;
+}
+
 /** A proposal becomes a step, with Orbit's binding rather than the model's. */
 function makeStep(p: Proposal, element: Seen, procedure: string,
   registry: { credentialName: string | null; signsInAs: string | null }): Step | null {
@@ -1360,9 +1570,10 @@ function makeStep(p: Proposal, element: Seen, procedure: string,
     // to the number one. Neither guess is needed: the value is on the page,
     // and whether it is a number is a fact about it.
     const showing = element.what === 'value' ? element.name : '';
+    const of = fieldOfProposal(p);
     return { id, kind: 'read', summary: `${region.label}, into ${p.value}`, region,
       produces: { name: p.value, label: region.label,
-        type: asNumber(showing) !== null ? 'number' : 'text', required: !p.optional } };
+        type: asNumber(showing) !== null ? 'number' : 'text', required: !p.optional, ...(of ? { of } : {}) } };
   }
   return null;
 }

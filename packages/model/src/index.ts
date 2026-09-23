@@ -194,7 +194,7 @@ class OpenAIProvider implements ModelProvider {
   }
 
   async propose<T>(asked: Asked, schema: z.ZodType<T>, shape: Record<string, unknown>): Promise<Answered<T>> {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await withRetry(() => fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#key}` },
       body: JSON.stringify({
@@ -209,7 +209,7 @@ class OpenAIProvider implements ModelProvider {
         // less strictly cannot weaken what gets kept.
         response_format: { type: 'json_schema', json_schema: { name: 'proposal', strict: true, schema: shape } },
       }),
-    });
+    }));
 
     if (!response.ok) {
       const body = await response.text();
@@ -325,6 +325,29 @@ function fillAbsentNullable(value: unknown, node: unknown): unknown {
   }
 
   return value;
+}
+
+/**
+ * A request that failed on the way — the network dropped, or the provider was
+ * briefly overloaded (429, 5xx) — is sent again, twice at most, a little later.
+ * Nothing came back from the failed one, so nothing is kept twice, and the
+ * answer is validated exactly as before. A refusal or a bad request is not
+ * retried: it would only fail the same way.
+ */
+export async function withRetry(send: () => Promise<Response>, waits: readonly number[] = [1500, 4000]): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await send();
+      if ((response.status === 429 || response.status >= 500) && attempt < waits.length) {
+        await new Promise((r) => setTimeout(r, waits[attempt]));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      if (attempt >= waits.length) throw error;
+      await new Promise((r) => setTimeout(r, waits[attempt]));
+    }
+  }
 }
 
 export class BedrockProvider implements ModelProvider {

@@ -19,6 +19,9 @@ import { backToDraft, discardDraft, deleteStep, editStep, insertStep, moveStep }
 import { editApplication, registerApplication } from './applications.ts';
 import { describeBlocker } from '@orbit/contract';
 import { sendMessage, takeOffer } from './chat.ts';
+import { answerQuestion } from './questions.ts';
+import { addSentence, mapChanges, pendingOf, reviseSentence, withdrawSentence } from './revise.ts';
+import { changeInput, declareInput, removeInput, renameValue, setPublishes, setStepValue, setValueObject } from './values.ts';
 import { addNextPart, bringInToUnderstand, confirmUnderstanding, relabel, setMoreToCome } from './understanding.ts';
 
 export async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -34,6 +37,33 @@ const inTransaction = async <T>(work: (db: never) => Promise<T>): Promise<T> => 
 };
 
 export const actions = {
+  /** The procedure edited in place (Decision 17). */
+  async revise(verb: string, workflowId: string, body: unknown) {
+    const edits = { 'revise-sentence': reviseSentence, 'add-sentence': addSentence, 'withdraw-sentence': withdrawSentence } as const;
+    const result = await inTransaction((db) => edits[verb as keyof typeof edits](db, workflowId, body));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async mapChanges(workflowId: string) {
+    const result = await inTransaction((db) => mapChanges(db, workflowId));
+    return result.ok ? { status: 202, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async answerQuestion(workflowId: string, body: unknown) {
+    const result = await inTransaction((db) => answerQuestion(db, workflowId, body));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  /** The editor's value edits (plan R8–R13, R26): each a refusal with its reason, or done. */
+  async valueEdit(verb: string, workflowId: string, body: unknown) {
+    const edits = { 'declare-input': declareInput, 'change-input': changeInput, 'remove-input': removeInput,
+      'set-step-value': setStepValue, 'rename-value': renameValue, 'set-value-object': setValueObject,
+      'set-publishes': setPublishes } as const;
+    const edit = edits[verb as keyof typeof edits];
+    const result = await inTransaction((db) => edit(db, workflowId, body));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
   async confirm(workflowId: string, body: unknown) {
     // Checked before it reaches the rule, so a malformed request is answered
     // rather than raised. A 400 is the honest code: nothing was wrong with the
@@ -42,6 +72,13 @@ export const actions = {
     if (!given.success) {
       return { status: 400, body: { why: 'This confirmation is not complete: '
         + given.error.issues.map((i) => `${i.path.join('.') || 'the body'} — ${i.message}`).join('; ') } };
+    }
+    // Nothing is attested to while a change waits to be mapped (R18): the
+    // steps would not be the ones the words now ask for.
+    const pending = await inTransaction((db) => pendingOf(db, workflowId));
+    if (pending.length) {
+      return { status: 409, body: { why: `${pending.join(', ')} changed since Orbit last mapped this procedure. Map the changes first.`,
+        blockers: [`${pending.join(', ')} changed since Orbit last mapped this procedure. Press Map changes first.`] } };
     }
     const result = await inTransaction((db) => confirm(db, workflowId, given.data));
     return result.outcome === 'confirmed'
