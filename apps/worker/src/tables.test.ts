@@ -57,3 +57,12 @@ test('a procedure with no rules asks the model nothing', async () => {
   assert.deepEqual(made, { ok: true, tables: [], turns: [] });
   assert.equal(model.asked.length, 0);
 });
+
+test('an empty table is dropped, not allowed to sink the tables that say something', async () => {
+  const withEmpty = table(['1.2']);
+  withEmpty.tables.push({ question: 'Anything else?', columns: [], rows: [], otherwise: null, sentences: [] });
+  const made = await tabulate(sentences, fake([withEmpty]), 1);
+  assert.equal(made.ok, true);
+  assert.equal(made.ok && made.tables.length, 1);
+  assert.deepEqual(made.turns.map((t) => t.verdict), ['kept']);
+});
