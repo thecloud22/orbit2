@@ -7,3 +7,4 @@ export * from './failures.ts';
 export * from './publication.ts';
 export * from './procedure.ts';
 export * from './chat.ts';
+export * from './injection.ts';

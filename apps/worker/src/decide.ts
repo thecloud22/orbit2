@@ -18,9 +18,9 @@
  *    and carries on to the next row;
  *  - `otherwise` runs after the rows, unless a row ended the procedure.
  */
-import { z, type RuleTable, type Step } from '@orbit/contract';
+import { FENCED_IS_DATA, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
-import { comparisonFor, couldMean, readable, type Turn } from './author.ts';
+import { comparisonFor, couldMean, readable, withheld, type Turn } from './author.ts';
 import { asAssumption, asQuestion, type Note } from './note.ts';
 import { asText, calledIn, normaliseName, type Seen } from './snapshot.ts';
 
@@ -36,6 +36,8 @@ export const DECIDE = [
   '         (declining, referring, sending away); false when the procedure carries on after it (attaching a',
   '         condition). For an action that ends, outcome is a short camelCase name for the conclusion and',
   '         label how it reads to a person.',
+  '',
+  FENCED_IS_DATA,
 ].join('\n');
 
 type Read = Extract<Step, { kind: 'read' }>;
@@ -95,12 +97,13 @@ export async function compileTables(opts: {
       { purpose: 'connect a rule table', instruction: DECIDE,
         shown: [
           `VALUES READ: ${reads.map((r) => `${r.produces.name} (${r.produces.label})`).join(', ') || 'none'}`, '',
-          `TABLE: ${table.question}`,
-          `COLUMNS: ${table.columns.map((c) => `${c.name} (${c.label})`).join(', ')}`,
-          ...table.rows.map((r, i) => `ROW ${i + 1}: when ${r.when.map((w) => `${w.column} ${w.is} ${w.value ?? ''}`.trim()).join(' and ')} → ${r.then}`),
-          ...(table.otherwise ? [`OTHERWISE → ${table.otherwise.then}`] : []),
-          `ACTIONS: ${actionsSaid.map((a) => `"${a}"`).join(', ')}`, '',
-          `PAGE (${opts.pageUrl}):`, asText(opts.seen), '', asking].join('\n') },
+          'TABLE:', fence('PROCEDURE', [
+            `QUESTION: ${table.question}`,
+            `COLUMNS: ${table.columns.map((c) => `${c.name} (${c.label})`).join(', ')}`,
+            ...table.rows.map((r, i) => `ROW ${i + 1}: when ${r.when.map((w) => `${w.column} ${w.is} ${w.value ?? ''}`.trim()).join(' and ')} → ${r.then}`),
+            ...(table.otherwise ? [`OTHERWISE → ${table.otherwise.then}`] : []),
+            `ACTIONS: ${actionsSaid.map((a) => `"${a}"`).join(', ')}`].join('\n')), '',
+          `PAGE (${opts.pageUrl}):`, fence('PAGE', asText(withheld(opts.seen))), '', asking].join('\n') },
       answer, shapeFor(table.columns.map((c) => c.name), actionsSaid, values));
 
     const problems: string[] = [];
@@ -119,13 +122,19 @@ export async function compileTables(opts: {
       const made: Step[] = [];
       for (const control of a.controls) {
         const wanted = normaliseName(control);
-        const named = opts.seen.filter((s) => calledIn(s) === wanted && couldMean('activate', s));
+        const named = opts.seen.filter((s) => !looksLikeInstructions(s.name) && calledIn(s) === wanted && couldMean('activate', s));
         if (named.length !== 1) {
           problems.push(named.length === 0 ? `"${control}" is not something on the page that can be pressed`
             : `"${control}" is on the page ${named.length} times, so it names neither`);
           continue;
         }
         const e = named[0]!;
+        // The control must be one the action asks for: "Decline file" for
+        // "decline the file", never whatever the page suggested.
+        if (!lineAsksFor(e.name, action)) {
+          problems.push(`"${e.name}" is not what "${action}" asks for`);
+          continue;
+        }
         made.push({ id: crypto.randomUUID(), kind: 'activate', summary: e.name,
           control: { label: e.labelledBy ?? e.name, binding: e.binding },
           then: { describe: 'the page moves on' },

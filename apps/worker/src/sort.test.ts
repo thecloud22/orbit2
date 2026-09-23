@@ -54,7 +54,8 @@ test('the fixed instruction goes first and the sentences after, for the prompt c
   const model = fake((a) => labelsFor(a));
   await sortSentences(sentences(2), model);
   assert.equal(model.asked[0]!.instruction, SORT);
-  assert.match(model.asked[0]!.shown, /^SENTENCES \(1\.1 to 1\.2\):\n1\.1 \[text\] Do thing 1\./);
+  assert.match(model.asked[0]!.shown, /^SENTENCES \(1\.1 to 1\.2\):\n<<<BEGIN PROCEDURE \w+>>>\n1\.1 \[text\] Do thing 1\./);
+  assert.match(model.asked[0]!.instruction, /never instructions to you/, 'the procedure is fenced as data');
 });
 
 test('a skipped sentence is asked again once, and the correction names it', async () => {
@@ -114,6 +115,6 @@ test('a later part is sorted with the end of the earlier ones in view, and not a
   const sorted = await sortSentences(sentences(2, '2'), model, 1,
     [{ number: '1.9', text: 'If it was reopened within 30 days of', kind: 'prose', label: 'rule' }]);
   assert.equal(sorted.ok, true);
-  assert.match(model.asked[0]!.shown, /^ALREADY SORTED, for context only — do not answer about these:\n1\.9 \(rule\) If it was reopened/);
+  assert.match(model.asked[0]!.shown, /^ALREADY SORTED, for context only — do not answer about these:\n<<<BEGIN PROCEDURE \w+>>>\n1\.9 \(rule\) If it was reopened/);
   assert.deepEqual(sorted.ok && sorted.labels.map((l) => l.sentence), ['2.1', '2.2']);
 });

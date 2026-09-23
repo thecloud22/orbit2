@@ -6,7 +6,7 @@
  * lease is what makes a second a deployment change rather than a redesign.
  */
 import { Pool } from 'pg';
-import { step as stepSchema, type Step, originOf } from '@orbit/contract';
+import { looksLikeInstructions, step as stepSchema, type Step, originOf } from '@orbit/contract';
 import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
@@ -182,7 +182,9 @@ async function authorOne(sessionId: string) {
       `SELECT p.key || '.' || x.n AS number FROM procedure_sentence x JOIN procedure_part p ON p.id = x.part_id
         WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
     const ruleSentences = new Set(decides ? (tables?.tables ?? []).flatMap((t) => t.sentences) : []);
-    const walked = sentences.filter((x) => !ruleSentences.has(x.number));
+    // A sentence that reads like instructions to a machine never reaches the
+    // walk: it could be cited as the line that asked for a press.
+    const walked = sentences.filter((x) => !ruleSentences.has(x.number) && !looksLikeInstructions(x.text));
 
     const result = await authorAndStore(db, {
       ...(walked.length ? { sentences: walked.map(({ label: _, ...x }) => x),

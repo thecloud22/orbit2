@@ -12,7 +12,7 @@
  * add, drop or reword one; the check that enforces that is in the contract,
  * and a sort that fails it is kept as a refusal, not as half an answer.
  */
-import { object, sentenceLabel, sentenceNumber, unreadAdvice, unreadColumns, z, type RuleTable, type SentenceLabel } from '@orbit/contract';
+import { looksLikeInstructions, object, sentenceLabel, sentenceNumber, unreadAdvice, unreadColumns, z, type RuleTable, type SentenceLabel } from '@orbit/contract';
 import type { ClientBase, PoolClient } from 'pg';
 import { askedFor, type Queued } from './authoring.ts';
 import { readPdf } from '@orbit/procedure';
@@ -108,6 +108,8 @@ export type SentenceView = {
   label: SentenceLabel | null; reason: string | null; basis: string | null; givenBy: string | null;
   /** Marked by the author: the run waits here for this person (Human in the Loop). */
   waits: boolean;
+  /** Why this sentence reads like instructions to a machine, if it does. */
+  suspicious?: string | null;
 };
 
 async function sentencesWithLabels(db: ClientBase, workflowId: string): Promise<SentenceView[]> {
@@ -121,7 +123,8 @@ async function sentencesWithLabels(db: ClientBase, workflowId: string): Promise<
           WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
       WHERE p.workflow_id = $1
       ORDER BY p.added_at, p.key, s.n`, [workflowId]);
-  return rows;
+  // Flagged, never altered: the words stay the author's, and a person decides.
+  return rows.map((r) => ({ ...r, suspicious: looksLikeInstructions(r.text) }));
 }
 
 /** Where a draft's understanding stands, every sentence with its label, and the count. */
@@ -219,7 +222,10 @@ export async function relabel(db: ClientBase, workflowId: string, body: unknown)
 export function forTheWalk(sentences: readonly SentenceView[]): string {
   return sentences.filter(forOrbitOrAWait).map((s) => s.text).join('\n');
 }
-const forOrbitOrAWait = (s: SentenceView) => s.label === 'task' || s.label === 'rule' || (s.label === 'forAPerson' && s.waits);
+// Never a sentence that reads like instructions to a machine, whatever it was
+// labelled: the walk could otherwise cite it as the line that asked for a press.
+const forOrbitOrAWait = (s: SentenceView) => !s.suspicious
+  && (s.label === 'task' || s.label === 'rule' || (s.label === 'forAPerson' && s.waits));
 
 /**
  * A person confirms the sort, and the walk is queued.
@@ -277,6 +283,16 @@ export async function confirmUnderstanding(db: PoolClient, workflowId: string): 
 
     // Settled when written: these are decisions the author just confirmed, not
     // questions left open, and they block nothing.
+    // A sentence that reads like instructions to a machine is a risk somebody
+    // acknowledges before this is published: it may be a document written to
+    // steer Orbit rather than a procedure for a person.
+    for (const s of sentences.filter((x) => x.suspicious)) {
+      await db.query(
+        `INSERT INTO workflow_note (workflow_id, kind, body) VALUES ($1, 'risk', $2)`,
+        [workflowId, `Sentence ${s.number} ("${s.text.slice(0, 300)}"): ${s.suspicious}. Orbit treated it as text and `
+          + 'did not follow it. Check the draft does only what the procedure asks.']);
+    }
+
     // A sentence the run waits at becomes a step, not a note.
     for (const s of sentences.filter((x) => (x.label === 'forAPerson' && !x.waits) || x.label === 'wontDo')) {
       await db.query(

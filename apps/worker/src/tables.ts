@@ -11,7 +11,7 @@
  * sentences as what reads a value; both are enums of the draft's own numbers.
  * `checkRuleTables` still checks every answer, and names every problem.
  */
-import { checkRuleTables, ruleTable, z, type RuleTable } from '@orbit/contract';
+import { FENCED_IS_DATA, checkRuleTables, fence, looksLikeInstructions, ruleTable, z, type RuleTable } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
 import type { SortTurn } from './sort.ts';
 
@@ -41,6 +41,8 @@ export const TABLES = [
   'decided ("a referred file", "once it is approved") is never a column: that is the order of the rows.',
   'A sentence that says so ("do not attach conditions to a referred file", "never approve a referred',
   'file") goes in the table\'s sentences and needs no column or row of its own.',
+  '',
+  FENCED_IS_DATA,
 ].join('\n');
 
 const answer = z.object({ tables: z.array(ruleTable) });
@@ -88,7 +90,8 @@ const shapeFor = (rules: readonly string[], tasks: readonly string[]) => {
 type Labelled = { number: string; text: string; label: string };
 
 export async function tabulate(sentences: readonly Labelled[], model: ModelProvider, firstTurn: number): Promise<Tabled> {
-  const rules = sentences.filter((s) => s.label === 'rule').map((s) => s.number);
+  // A rule sentence written to steer the model is not built into a table.
+  const rules = sentences.filter((s) => s.label === 'rule' && !looksLikeInstructions(s.text)).map((s) => s.number);
   const tasks = sentences.filter((s) => s.label === 'task').map((s) => s.number);
   if (rules.length === 0) return { ok: true, tables: [], turns: [] };
 
@@ -99,7 +102,7 @@ export async function tabulate(sentences: readonly Labelled[], model: ModelProvi
     const asking = `Lay out the rules (${rules.join(', ')}) as tables${attempt > 1 ? ', again' : ''}.`;
     const answered = await model.propose(
       { purpose: 'lay the rules out as tables', instruction: TABLES,
-        shown: ['SENTENCES:', ...listed, '', correction, asking].filter(Boolean).join('\n') },
+        shown: ['SENTENCES:', fence('PROCEDURE', listed.join('\n')), '', correction, asking].filter(Boolean).join('\n') },
       answer, shapeFor(rules, tasks));
     const record = (verdict: SortTurn['verdict'], why: string) => turns.push({
       turn: firstTurn + turns.length, shown: { asking, sentences: rules }, answered: answered.value, verdict, why,

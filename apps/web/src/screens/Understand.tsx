@@ -33,6 +33,7 @@ interface Understanding {
   sentences: Array<{
     number: string; part: string; text: string; kind: string; unterminated: boolean; page: number | null;
     label: Label | null; reason: string | null; basis: string | null; givenBy: string | null; waits: boolean;
+    suspicious?: string | null;
   }>;
   coverage: { total: number; placed: number; unplaced: string[]; byLabel: Record<Label, number> };
   rules: { tables: RuleTable[] | null; refused: string | null } | null;
@@ -244,6 +245,11 @@ export function Understand({ id, go }: { id: string; go: (to: Route) => void }) 
                 {s.text}
                 {/* Parts are kept exactly as pasted, so a sentence cut at a
                     page break is shown as a pair, never joined. */}
+                {s.suspicious && (
+                  <span style={{ display: 'block', fontSize: 12.5, color: 'var(--failed-ink)', marginTop: 4, fontWeight: 600 }}>
+                    Careful: {s.suspicious}. Orbit treats it as text and does not follow it.
+                  </span>
+                )}
                 {s.unterminated && (
                   <span style={{ display: 'block', fontSize: 12.5, color: 'var(--attention-ink)', marginTop: 4 }}>
                     Stops mid-sentence. The next part may carry on from here.
