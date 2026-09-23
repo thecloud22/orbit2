@@ -236,6 +236,11 @@ function LoanFile({ loan }: { loan: Loan }) {
               <Panel title="Borrower & employment" testId="borrower-panel">
                 <div className="grid grid-cols-2 gap-x-6 sm:grid-cols-3">
                   <Field
+                    label="Borrower"
+                    testId="borrower-value"
+                    value={loan.borrowerName}
+                  />
+                  <Field
                     label="Employment type"
                     testId="employment-type-value"
                     value={EMPLOYMENT_LABELS[loan.employmentType]}
