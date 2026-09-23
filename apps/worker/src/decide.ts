@@ -37,9 +37,9 @@ export const DECIDE = [
   '         (declining, referring, sending away); false when the procedure carries on after it (attaching a',
   '         condition). For an action that ends, outcome is a short camelCase name for the conclusion and',
   '         label how it reads to a person.',
-  'words    For each word a condition compares a value with, how this application writes it: copy it from',
-  '         the page where the page shows that value ("Yes" for "is a first-time buyer" when the page shows',
-  '         First-time buyer as Yes or No); otherwise the word as the procedure writes it, unchanged.',
+  'words    For each word a condition compares a value with: where the page shows that value as a yes/no',
+  '         answer, the answer the condition means ("Yes" for "is a first-time buyer" when the page shows',
+  '         First-time buyer as Yes or No); for every other value, the word as the procedure writes it, unchanged.',
   '',
   FENCED_IS_DATA,
 ].join('\n');
@@ -81,20 +81,24 @@ const shapeFor = (columns: string[], actions: string[], values: string[], writte
  * from the procedure's sentences before anything is read, so it holds the
  * procedure's words: scenario 5 compared First-time buyer with "first-time
  * buyer", a page that shows Yes or No never matched it, and every first-time
- * buyer without homebuyer education was approved instead of referred. The
- * model says how the page writes the word; Orbit takes that only where the
- * page bears it out — the value the example shows, or the other answer of a
- * yes/no field — and otherwise keeps the procedure's word and asks.
+ * buyer without homebuyer education was approved instead of referred.
+ *
+ * Only a yes/no field is reworded: the example shows an answer (Yes, No), the
+ * procedure's word is not one, and the model gave the answer it means. Every
+ * other value is compared as the procedure writes it. A first version also took
+ * any rewording equal to the value the example showed, and the model turned
+ * "anything other than X" into "anything other than AE" — the example's own
+ * flood zone, which the page always shows, so it proved nothing.
  */
 const ANSWERS = [['yes', 'no'], ['true', 'false'], ['y', 'n']];
 export function asThePageWritesIt(written: string, shown: string | undefined, example: string | undefined):
   { word: string; taken: boolean; unsure: boolean } {
   const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-  if (!shown || same(shown, written)) return { word: written, taken: false, unsure: false };
-  if (example && (same(shown, example)
-    || ANSWERS.some((pair) => pair.some((w) => same(w, example)) && pair.some((w) => same(w, shown))))) {
-    return { word: shown.trim(), taken: true, unsure: false };
+  const answers = example === undefined ? undefined : ANSWERS.find((pair) => pair.some((w) => same(w, example)));
+  if (!answers || !shown || same(shown, written) || answers.some((w) => same(w, written))) {
+    return { word: written, taken: false, unsure: false };
   }
+  if (answers.some((w) => same(w, shown))) return { word: shown.trim(), taken: true, unsure: false };
   return { word: written, taken: false, unsure: true };
 }
 
