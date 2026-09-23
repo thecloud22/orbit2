@@ -58,6 +58,10 @@ export async function authorAndStore(db: PoolClient, opts: {
   order?: readonly string[];
   taskSentences?: readonly string[];
   ruleSentences?: readonly string[];
+  /** Mapping again (Decision 17): the steps to replay, the author's answers, and what to replace. */
+  replay?: { steps: import('@orbit/contract').Step[]; provenance: Record<string, string> };
+  hints?: ReadonlyArray<{ sentence: string; answer: string }>;
+  replace?: { madeAt: Record<string, number | null> };
   model: ModelProvider;
   /** Each turn as it lands, for whoever is watching the screen. */
   onTurn?: (turn: Turn) => void;
@@ -139,7 +143,9 @@ function inWords(issue: { path: PropertyKey[]; message: string }): string {
 export async function storeDraft(
   db: PoolClient,
   /** A recording has no written procedure: the demonstration is the description. */
-  opts: { name: string; procedure: string | null; into?: string },
+  opts: { name: string; procedure: string | null; into?: string;
+    /** Mapping again (Decision 17): the draft's steps and the walk's own open notes are replaced. */
+    replace?: { madeAt: Record<string, number | null> } },
   draft: AuthoredDraft,
 ): Promise<Stored | NotStored> {
   // Validated before anything is written, and as a whole. Validating inside
@@ -166,10 +172,19 @@ export async function storeDraft(
     // procedure column already holds the whole text as written. The walk was
     // given only the sentences Orbit does, and that is not what the author
     // wrote, so it does not replace it.
+    // What the author has declared since stays theirs: a new walk adds only
+    // inputs nobody declared yet (R10).
+    const { rows: [had] } = opts.into
+      ? await db.query<{ inputs: Array<{ name: string }> }>(
+          `SELECT coalesce(declared_inputs, '[]'::jsonb) AS inputs FROM workflow WHERE id = $1`, [opts.into])
+      : { rows: [] };
+    const inputs = opts.replace && had
+      ? [...had.inputs, ...draft.declaredInputs.filter((i) => !had.inputs.some((x) => x.name === i.name))]
+      : draft.declaredInputs;
     const workflowId = opts.into
       ? (await db.query<{ id: string }>(
           `UPDATE workflow SET declared_inputs = $2, updated_at = now() WHERE id = $1 RETURNING id`,
-          [opts.into, JSON.stringify(draft.declaredInputs)])).rows[0]?.id
+          [opts.into, JSON.stringify(inputs)])).rows[0]?.id
       : (await db.query<{ id: string }>(
           `INSERT INTO workflow (name, procedure, declared_inputs) VALUES ($1, $2, $3) RETURNING id`,
           [opts.name, opts.procedure, JSON.stringify(draft.declaredInputs)])).rows[0]?.id;
@@ -179,6 +194,14 @@ export async function storeDraft(
       `SELECT coalesce(max(turn), 0)::int AS turn FROM model_call WHERE workflow_id = $1`, [workflowId]);
     const offset = before!.turn;
 
+    if (opts.replace) {
+      // The walk's own notes that nobody answered go, and its assumptions,
+      // which the new walk states again; a person's answers stay (R19).
+      await db.query(`DELETE FROM workflow_note WHERE workflow_id = $1 AND raised_by = 'walk'
+                        AND (resolved_at IS NULL OR kind = 'assumption')`, [workflowId]);
+      await db.query(`DELETE FROM workflow_step WHERE workflow_id = $1`, [workflowId]);
+    }
+
     // Steps carry stable ids so that references survive the reordering §6
     // permits; position is only what the editor shows.
     for (const [i, step] of draft.steps.entries()) {
@@ -187,7 +210,9 @@ export async function storeDraft(
         `INSERT INTO workflow_step (id, workflow_id, position, kind, declares, complete, from_sentence, made_at_turn)
          VALUES ($1, $2, $3, $4, $5, true, $6, $7)`,
         [id, workflowId, i + 1, kind, JSON.stringify(declares), draft.provenance?.[id] ?? null,
-         draft.madeAt?.[id] !== undefined ? offset + draft.madeAt[id]! : null]);
+         draft.madeAt?.[id] !== undefined ? offset + draft.madeAt[id]!
+           // A replayed step keeps the turn that first made it, and its picture.
+           : draft.replayed?.includes(id) ? opts.replace?.madeAt[id] ?? null : null]);
     }
     for (const [i, step] of draft.steps.entries()) {
       const next = draft.steps[i + 1];
@@ -206,8 +231,8 @@ export async function storeDraft(
       // Where it belongs: its sentence, the turn whose picture shows the page,
       // the step, what could be meant, and what answering it does (R19).
       await db.query(
-        `INSERT INTO workflow_note (workflow_id, kind, body, answer, resolved_at, sentence, at_turn, step_id, candidates, action)
-         VALUES ($1, $2, $3, $4, CASE WHEN $4::text IS NULL THEN NULL ELSE now() END, $5, $6, $7, $8, $9)`,
+        `INSERT INTO workflow_note (workflow_id, kind, body, answer, resolved_at, sentence, at_turn, step_id, candidates, action, raised_by)
+         VALUES ($1, $2, $3, $4, CASE WHEN $4::text IS NULL THEN NULL ELSE now() END, $5, $6, $7, $8, $9, 'walk')`,
         [workflowId, note.kind, note.body, note.answer ?? null, note.sentence ?? null,
          note.atTurn ? offset + note.atTurn : null, note.stepId && stepIds.has(note.stepId) ? note.stepId : null,
          note.candidates ? JSON.stringify(note.candidates) : null, note.action ?? null]);

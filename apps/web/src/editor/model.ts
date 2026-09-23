@@ -15,7 +15,7 @@ export interface Sentence {
   page: number | null; label: Label | null; reason: string | null; basis: string | null;
   givenBy: string | null; waits: boolean; suspicious?: string | null; startsBlock: boolean;
   /** Set once the author has changed it (Decision 17): what it said before. */
-  was?: string | null; withdrawn?: boolean; revisedAt?: string | null;
+  was?: string | null; withdrawn?: boolean; revisedAt?: string | null; labelCurrent?: boolean;
 }
 
 /** Which object a value is a field of (R26): a loan's `ltv`. */

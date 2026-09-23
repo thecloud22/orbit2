@@ -77,7 +77,7 @@ export const CHAT_REFUSALS = {
     + 'or explain the draft.',
   changesData: 'That would change data in the application, which a step added here cannot do. '
     + 'Orbit can add it as work for a person instead.',
-  closed: 'The sort has been confirmed and drafted from, so the chat is closed.',
+  closed: 'This agent is published, so the chat is closed. Take it back to editing to change it for the next version.',
   busy: 'Orbit is still working on the last change. Try again when it has finished.',
   limit: 'This draft has had its messages for today. Changing it by hand still works.',
 } as const;

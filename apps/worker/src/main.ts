@@ -6,6 +6,7 @@
  * lease is what makes a second a deployment change rather than a redesign.
  */
 import { Pool } from 'pg';
+import { inDocumentOrder } from '../../api/src/procedure.ts';
 import { asObjects, looksLikeInstructions, step as stepSchema, type Step, originOf } from '@orbit/contract';
 import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
@@ -92,7 +93,7 @@ async function sortOne(workflowId: string) {
     const result = await sortAndStore(db, workflowId, model);
     if (result.sorted) await tabulateAndStore(db, workflowId, model);
     if (result.sorted) {
-      await db.query(`UPDATE understanding SET status = 'sorted', sorted_at = now() WHERE workflow_id = $1`,
+      await db.query(`UPDATE understanding SET status = 'sorted', sorted_at = now(), tries = 0 WHERE workflow_id = $1`,
         [workflowId]);
       console.log(`  sorted: ${result.labelled} sentences labelled`);
     } else {
@@ -101,9 +102,15 @@ async function sortOne(workflowId: string) {
       console.log(`  not sorted: ${result.describe}`);
     }
   } catch (error) {
-    await db.query(`UPDATE understanding SET status = 'refused', refused = $2 WHERE workflow_id = $1`,
-      [workflowId, JSON.stringify({ describe: `Orbit could not sort this: ${String(error)}` })]).catch(() => undefined);
-    console.log(`  not sorted: ${String(error)}`);
+    // Something outside the procedure failed — the model could not be reached.
+    // Tried again, a little later, before it is refused with the reason.
+    const { rows: [again] } = await db.query<{ tries: number }>(
+      `UPDATE understanding SET tries = tries + 1, status = CASE WHEN tries < 2 THEN 'queued' ELSE 'refused' END,
+              refused = CASE WHEN tries < 2 THEN NULL ELSE $2::jsonb END,
+              claimed_by = NULL, lease_expires_at = now() + interval '20 seconds'
+        WHERE workflow_id = $1 RETURNING tries`,
+      [workflowId, JSON.stringify({ describe: `Orbit could not sort this: ${String(error)}` })]).catch(() => ({ rows: [] }));
+    console.log(`  not sorted (try ${again?.tries ?? '?'}): ${String(error)}`);
   } finally {
     db.release();
   }
@@ -137,13 +144,48 @@ async function chatOne(messageId: string) {
   }
 }
 
+/**
+ * The steps to replay before mapping what changed (Decision 17 item 3): the
+ * draft's own steps, in order, up to the first that carries out a changed
+ * sentence or a later one, or that a rule table built. Refused when reaching
+ * what changed would mean pressing something that changes data: replay never
+ * does, and a mapping that cannot get there without it says so.
+ */
+async function replayPrefix(db: import('pg').PoolClient, workflowId: string, scope: string[], order: string[], ruleSentences: string[]):
+  Promise<{ steps: Step[]; provenance: Record<string, string>; madeAt: Record<string, number | null> } | { refused: string }> {
+  const { rows } = await db.query<{ id: string; kind: string; declares: Record<string, unknown>; from_sentence: string | null; made_at_turn: number | null }>(
+    `SELECT id, kind, declares, from_sentence, made_at_turn FROM workflow_step WHERE workflow_id = $1 ORDER BY position`, [workflowId]);
+  const at = (n: string | null) => (n ? order.indexOf(n) : -1);
+  const first = Math.min(...scope.map((n) => (at(n) === -1 ? Infinity : at(n))));
+  const steps: Step[] = []; const provenance: Record<string, string> = {}; const madeAt: Record<string, number | null> = {};
+  for (const [i, r] of rows.entries()) {
+    if (i === 0 && r.kind === 'open') continue;    // the walk opens the application itself
+    const reachesChange = r.from_sentence && (scope.includes(r.from_sentence) || at(r.from_sentence) >= first);
+    const built = !['open', 'enter', 'activate', 'read', 'handOff'].includes(r.kind)
+      || (r.from_sentence && ruleSentences.includes(r.from_sentence));
+    if (reachesChange || built) break;
+    const parsed = stepSchema.safeParse({ id: r.id, kind: r.kind, ...r.declares });
+    if (!parsed.success) break;
+    const step = parsed.data;
+    if (step.kind === 'activate' && step.changesARecord) {
+      return { refused: `Reaching what changed would mean pressing "${step.control.label}" (step ${i + 1}), which changes a record, `
+        + 'and Orbit never presses one to replay. Change the example to a record already past that point, or leave this part to a person.' };
+    }
+    steps.push(step);
+    if (r.from_sentence) provenance[r.id] = r.from_sentence;
+    madeAt[r.id] = r.made_at_turn;
+  }
+  return { steps, provenance, madeAt };
+}
+
 async function authorOne(sessionId: string) {
   const db = await pool.connect();
   try {
     const { rows: [s] } = await db.query<{
       name: string; procedure: string; application_id: string; start_path: string;
       inputs: Record<string, string>; host: string; into_workflow_id: string | null;
-    }>(`SELECT s.name, s.procedure, s.application_id, s.start_path, s.inputs, s.into_workflow_id,
+      scope: string[] | null; hints: Array<{ sentence: string; answer: string }> | null;
+    }>(`SELECT s.name, s.procedure, s.application_id, s.start_path, s.inputs, s.into_workflow_id, s.scope, s.hints,
                (r.addresses->0->>'host') AS host, (r.addresses->0->>'scheme') AS scheme
           FROM authoring_session s
           JOIN application_revision r ON r.application_id = s.application_id
@@ -160,12 +202,18 @@ async function authorOne(sessionId: string) {
 
     // A walk after a sort is shown the sentences it was confirmed with,
     // numbered, so each step it drafts can say which one it carries out.
-    const { rows: sentences } = s.into_workflow_id ? await db.query<{ number: string; text: string; waits: boolean; label: string }>(
-      `SELECT p.key || '.' || x.n AS number, x.text, l.waits, l.label
-         FROM procedure_sentence x JOIN procedure_part p ON p.id = x.part_id
-         JOIN LATERAL (SELECT label, waits FROM sentence_label WHERE sentence_id = x.id ORDER BY seq DESC LIMIT 1) l ON true
-        WHERE p.workflow_id = $1 AND (l.label IN ('task', 'rule') OR l.waits)
+    // As they now read, in the author's order, without what was taken out (Decision 17).
+    const { rows: every } = s.into_workflow_id ? await db.query<{ number: string; text: string; waits: boolean; label: string; part: string; after: string | null }>(
+      `SELECT p.key || '.' || x.n AS number, x.text, coalesce(l.waits, false) AS waits, l.label, p.key AS part,
+              (SELECT p2.key || '.' || s2.n FROM procedure_sentence s2 JOIN procedure_part p2 ON p2.id = s2.part_id
+                WHERE s2.id = p.after_sentence_id) AS after
+         FROM sentence_now x JOIN procedure_part p ON p.id = x.part_id
+         LEFT JOIN LATERAL (SELECT label, waits FROM sentence_label WHERE sentence_id = x.id ORDER BY seq DESC LIMIT 1) l ON true
+        WHERE p.workflow_id = $1 AND NOT x.withdrawn
         ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
+    const inOrder = inDocumentOrder(every);
+    const sentences = inOrder.filter((x) => x.label === 'task' || x.label === 'rule' || x.waits)
+      .map(({ part: _, after: __, ...x }) => x);
 
     // Which task finds a record the rules say may not exist.
     const { rows: [tables] } = s.into_workflow_id ? await db.query<{ tables: Array<{ sentences: string[];
@@ -178,9 +226,7 @@ async function authorOne(sessionId: string) {
     // confirmed tables, so the walk is given the work and not the rules: it
     // reads what the rules compare, and Orbit builds the branches (decide.ts).
     const decides = (tables?.tables ?? []).some((t) => !t.rows.every((r) => r.when.length === 1 && r.when[0]!.is === 'isAbsent'));
-    const { rows: order } = s.into_workflow_id ? await db.query<{ number: string }>(
-      `SELECT p.key || '.' || x.n AS number FROM procedure_sentence x JOIN procedure_part p ON p.id = x.part_id
-        WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
+    const order = inOrder.map((x) => ({ number: x.number }));
     // The walk still reads what the rule sentences name — "if the file is
     // there, record the note rate" is where the reading is — but it may not
     // press anything on a rule's behalf: that comes from the compiled table.
@@ -189,9 +235,24 @@ async function authorOne(sessionId: string) {
     // walk: it could be cited as the line that asked for a press.
     const walked = sentences.filter((x) => !looksLikeInstructions(x.text));
 
+    // Mapping again (Decision 17 item 3): the steps before the first changed
+    // sentence are replayed as they are; never past one that changes data.
+    const remap = s.scope && s.into_workflow_id ? await replayPrefix(db, s.into_workflow_id, s.scope, order.map((o) => o.number), ruleSentences) : null;
+    if (remap && 'refused' in remap) {
+      await db.query(`UPDATE authoring_session SET status = 'refused', refused = $2, ended_at = now() WHERE id = $1`,
+        [sessionId, JSON.stringify({ describe: remap.refused })]);
+      console.log(`  not mapped: ${remap.refused}`);
+      return;
+    }
+    const covered = new Set(Object.values(remap?.provenance ?? {}));
+
     const result = await authorAndStore(db, {
       ...(walked.length ? { sentences: walked.map(({ label: _, ...x }) => x),
-        taskSentences: walked.filter((x) => x.label === 'task').map((x) => x.number) } : {}),
+        // What still needs a step: all of it on a first walk; after a replay,
+        // only what the replayed steps do not already carry out.
+        taskSentences: walked.filter((x) => x.label === 'task' && !covered.has(x.number)).map((x) => x.number) } : {}),
+      ...(remap ? { replay: { steps: remap.steps, provenance: remap.provenance }, replace: { madeAt: remap.madeAt } } : {}),
+      ...(s.hints?.length ? { hints: s.hints } : {}),
       ...(mayBeAbsentAfter.length ? { mayBeAbsentAfter } : {}),
       ...(decides ? { tables: (tables!.tables ?? []) as never, order: order.map((o) => o.number), ruleSentences } : {}),
       name: s.name,
@@ -226,6 +287,11 @@ async function authorOne(sessionId: string) {
     await db.query(
       `UPDATE authoring_session SET status = 'brought in', workflow_id = $2, ended_at = now() WHERE id = $1`,
       [sessionId, result.workflowId]);
+    // The draft is mapped as of now: what changes after this is what the next mapping maps (R18).
+    if (s.into_workflow_id) {
+      await db.query(`INSERT INTO mapping (workflow_id, session_id, sentences) VALUES ($1, $2, $3)`,
+        [s.into_workflow_id, sessionId, s.scope ? JSON.stringify(s.scope) : null]);
+    }
     console.log(`  brought in: ${result.draft.steps.length} steps, ${result.draft.turns.length} turns`);
   } catch (error) {
     // A walk that threw is a refusal with a reason, not a session left looking

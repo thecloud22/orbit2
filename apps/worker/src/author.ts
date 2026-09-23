@@ -24,7 +24,7 @@ import { asAssumption, asQuestion, type Note } from './note.ts';
 import { asNumber } from './compare.ts';
 import { capture } from './evidence.ts';
 import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
-import { resolve as resolveBinding } from './binder.ts';
+import { describeRefusal, resolve as resolveBinding } from './binder.ts';
 
 /**
  * What the walk types into a field, taken from the step it just built.
@@ -341,6 +341,8 @@ export interface AuthoredDraft {
   provenance: Record<string, string>;
   /** Which turn made each step, by step id, so a step reaches its picture. */
   madeAt: Record<string, number>;
+  /** Steps carried over from the draft by replay (Decision 17), by id. */
+  replayed?: string[];
 }
 
 const INSTRUCTION = [
@@ -419,6 +421,15 @@ export async function authorFromProcedure(opts: {
    *  what they compare (`decide.ts`), with every sentence number in order. */
   tables?: readonly RuleTable[];
   order?: readonly string[];
+  /**
+   * Mapping again (Decision 17 item 3): the draft's own steps before the first
+   * changed sentence, carried out as they are without asking the model, then
+   * the walk carries on from there. Never a step that changes data: the
+   * caller stops the prefix before one.
+   */
+  replay?: { steps: Step[]; provenance: Record<string, string> };
+  /** The author's answers to questions about these sentences: their word, handed to the walk (R19). */
+  hints?: ReadonlyArray<{ sentence: string; answer: string }>;
   /** Which of the sentences are work in the application: each must have a
    *  step before the walk may call the procedure finished. */
   taskSentences?: readonly string[];
@@ -436,6 +447,8 @@ export async function authorFromProcedure(opts: {
   const numbers = (opts.sentences ?? []).map((x) => x.number);
   const provenance: Record<string, string> = {};
   const madeAt: Record<string, number> = {};
+  /** Steps carried over from the draft by replay, which keep the turn that first made them. */
+  const replayed: string[] = [];
   /** The object each input belongs to, as the walk first mapped it (R26). */
   const inputOf = new Map<string, { object: string; field: string }>();
   /** Lines the walk looked for and could not find, by sentence: the last page it looked on (R19). */
@@ -443,12 +456,15 @@ export async function authorFromProcedure(opts: {
     candidates: Array<{ name: string; what: string; label?: string }> }>();
   // Numbered when there are numbers to give; the plain text otherwise, as 2.0
   // walks have always been shown.
+  const said = (opts.hints ?? []).filter((h) => numbers.includes(h.sentence));
   const shownProcedure = opts.sentences?.length
     ? [...opts.sentences.map((x) => `${x.number} ${x.waits ? 'WAIT FOR A PERSON: '
          : opts.ruleSentences?.includes(x.number) ? 'RULE (already handled: Orbit applies this itself, from its confirmed table, at this point in the procedure, so treat it as done and go on to the next line; only read what it names): '
          : ''}${x.text.replace(/\s+/g, ' ')}`), '',
        'Each line above starts with its number. Set sentence to the number of the line the next step carries out,',
-       'or null if it carries out none of them.'].join('\n')
+       'or null if it carries out none of them.',
+       ...(said.length ? ['', 'THE AUTHOR ANSWERED THESE QUESTIONS ABOUT LINES ABOVE. Their answer is what the line means:',
+         ...said.map((h) => `line ${h.sentence}: ${h.answer}`)] : [])].join('\n')
     : procedure;
 
   // Controls only a RULE line asks for — "Require private mortgage
@@ -509,6 +525,22 @@ export async function authorFromProcedure(opts: {
 
   try {
     await page.goto(`${origin}${startPath}`, { waitUntil: 'domcontentloaded' });
+
+    // Mapping again: the steps before the first change are done as they are,
+    // with no model, so the walk starts where the change is (Decision 17).
+    for (const r of opts.replay?.steps ?? []) {
+      const done = await replayStep(page, r, origin, opts);
+      if (!done.ok) {
+        questions.push(asQuestion(`Orbit could not replay step ${steps.length + 1} (${r.summary}) to reach what changed: ${done.why} `
+          + 'It mapped the procedure again from there.'));
+        break;
+      }
+      steps.push(r);
+      replayed.push(r.id);
+      const from = opts.replay!.provenance[r.id];
+      if (from) provenance[r.id] = from;
+      if (r.kind === 'read') readPage = { seen: await snapshot(page), url: page.url() };
+    }
 
     let finished = false;
     let lastRejection: string | null = null;
@@ -1240,7 +1272,29 @@ export async function authorFromProcedure(opts: {
   )].map((name) => ({ name, label: name, type: 'text' as const, required: true as const,
     ...(inputOf.get(name) ? { of: inputOf.get(name)! } : {}) }));
 
-  return { steps, turns, questions, declaredInputs, provenance, madeAt };
+  return { steps, turns, questions, declaredInputs, provenance, madeAt, replayed };
+}
+
+/** One step of the draft, carried out as it is, for a mapping that starts after it (Decision 17). */
+async function replayStep(page: Page, step: Step, origin: string,
+  typing: { inputs: Record<string, string>; signsInAs?: string | null; signsInWith?: string | null }): Promise<{ ok: true } | { ok: false; why: string }> {
+  if (step.kind === 'open') { await page.goto(`${origin}${step.path}`, { waitUntil: 'domcontentloaded' }); return { ok: true }; }
+  if (step.kind === 'handOff') { await page.context().clearCookies(); return { ok: true }; }
+  const target = step.kind === 'enter' ? step.into : step.kind === 'activate' ? step.control : step.kind === 'read' ? step.region : null;
+  if (!target) return { ok: false, why: `a ${step.kind} step is not replayed.` };
+  if (step.kind === 'activate' && step.changesARecord) return { ok: false, why: 'it changes a record, and replay never does.' };
+  const found = await resolveBinding(page, target.binding as never).catch(() => null);
+  if (!found || found.found !== 'one') {
+    if (step.kind === 'read' && !step.produces.required) return { ok: true };
+    return { ok: false, why: found ? describeRefusal(target.label, found) : `"${target.label}" could not be looked for.` };
+  }
+  if (step.kind === 'enter') await found.locator.fill(toType(step.value, typing));
+  if (step.kind === 'activate') {
+    const wasAt = page.url();
+    await found.locator.click();
+    await settleAfterActivating(page, wasAt);
+  }
+  return { ok: true };
 }
 
 /** Where an element is on the page's picture, as fractions of it (see `Box`). */

@@ -10,6 +10,7 @@
 import { CHAT_REFUSALS, looksLikeSecret, object, outsideAddresses, z, type ChatRefusal } from '@orbit/contract';
 import type { ClientBase, PoolClient } from 'pg';
 import { insertPart } from './procedure.ts';
+import { reviseSentence } from './revise.ts';
 
 /** Per draft, per day. A limit rather than a meter: the workspace's model budget is spent here. */
 export const DAILY_MESSAGES = 40;
@@ -30,15 +31,17 @@ export async function sendMessage(db: PoolClient, workflowId: string, body: unkn
   if (!asked.success) return { ok: false, because: asked.error.issues.map((i) => i.message).join(' ') };
   const { text } = asked.data;
 
-  const { rows: [u] } = await db.query<{ status: string; confirmed_at: string | null; hosts: string[] }>(
-    `SELECT u.status, u.confirmed_at,
+  const { rows: [u] } = await db.query<{ status: string; closed: boolean; hosts: string[] }>(
+    `SELECT u.status,
+            -- Open until publication (R21): closed only on a published agent nobody has taken back to editing.
+            (w.confirmed_at IS NOT NULL AND EXISTS (SELECT 1 FROM workflow_version v WHERE v.workflow_id = w.id)) AS closed,
             (SELECT array_agg(a->>'host') FROM jsonb_array_elements(r.addresses) a) AS hosts
-       FROM understanding u
+       FROM understanding u JOIN workflow w ON w.id = u.workflow_id
        JOIN LATERAL (SELECT addresses FROM application_revision
                       WHERE application_id = u.application_id ORDER BY revision DESC LIMIT 1) r ON true
       WHERE u.workflow_id = $1`, [workflowId]);
   if (!u) return { ok: false, because: 'This draft was not brought in to be understood, so it has no chat.' };
-  if (u.confirmed_at) return { ok: false, because: CHAT_REFUSALS.closed };
+  if (u.closed) return { ok: false, because: CHAT_REFUSALS.closed };
   if (u.status !== 'sorted') return { ok: false, because: CHAT_REFUSALS.busy };
 
   const { rows: [pending] } = await db.query(
@@ -91,17 +94,30 @@ export async function takeOffer(db: PoolClient, workflowId: string, body: unknow
   await db.query('BEGIN');
   try {
     const refuse = async (because: string): Promise<Sent> => { await db.query('ROLLBACK'); return { ok: false, because }; };
-    const { rows: [offer] } = await db.query<{ text: string; taken: boolean }>(
-      `SELECT a.text,
+    const { rows: [offer] } = await db.query<{ text: string; taken: boolean; outcome: { offer?: string; sentence?: string; text?: string } | null }>(
+      `SELECT a.text, o.outcome,
               EXISTS (SELECT 1 FROM chat_message t WHERE t.answers = o.id AND t.state = 'applied') AS taken
          FROM chat_message o JOIN chat_message a ON a.id = o.answers
         WHERE o.id = $1 AND o.workflow_id = $2 AND o.state = 'offered'`, [asked.data.messageId, workflowId]);
     if (!offer) return refuse('There is no such offer on this draft.');
     if (offer.taken) return refuse('That has already been added.');
-    const { rows: [u] } = await db.query<{ confirmed_at: string | null; status: string }>(
-      `SELECT confirmed_at, status FROM understanding WHERE workflow_id = $1 FOR UPDATE`, [workflowId]);
-    if (u!.confirmed_at) return refuse(CHAT_REFUSALS.closed);
+    const { rows: [u] } = await db.query<{ status: string }>(
+      `SELECT status FROM understanding WHERE workflow_id = $1 FOR UPDATE`, [workflowId]);
     if (u!.status !== 'sorted') return refuse(CHAT_REFUSALS.busy);
+
+    // A rewording the chat proposed, taken up by the author: their act, so
+    // the revision is theirs (Decision 17). Orbit never applies one unasked.
+    if (offer.outcome?.offer === 'revise' && offer.outcome.sentence && offer.outcome.text) {
+      await db.query('COMMIT');
+      const revised = await reviseSentence(db, workflowId, { sentence: offer.outcome.sentence, text: offer.outcome.text }, 'chat');
+      if (!revised.ok) return { ok: false, because: revised.because };
+      const { rows: [done] } = await db.query<{ id: string }>(
+        `INSERT INTO chat_message (workflow_id, said_by, text, state, outcome, answers)
+         VALUES ($1, 'orbit', $2, 'applied', $3, $4) RETURNING id`,
+        [workflowId, `${offer.outcome.sentence} now reads as you accepted. Press Map changes to map it.`,
+         JSON.stringify({ sentence: offer.outcome.sentence, revised: true }), asked.data.messageId]);
+      return { ok: true, id: done!.id, state: 'answered' };
+    }
 
     const part = await insertPart(db, workflowId, { source: 'author', body: offer.text });
     if (!part.ok) return refuse(part.because);
@@ -115,9 +131,11 @@ export async function takeOffer(db: PoolClient, workflowId: string, body: unknow
        VALUES ($1, 'orbit', $2, 'applied', $3, $4) RETURNING id`,
       [workflowId, `Added as part ${part.key}, for a person.`, JSON.stringify({ part: part.key, forAPerson: true }),
        asked.data.messageId]);
-    // The tables are made again from the labels as they now stand.
+    // The tables are made again from the labels as they now stand, and a
+    // confirmation no longer refers to this draft.
     await db.query(`UPDATE understanding SET status = 'queued', sorted_at = NULL, lease_expires_at = NULL,
                     claimed_by = NULL WHERE workflow_id = $1`, [workflowId]);
+    await db.query(`UPDATE workflow SET confirmed_at = NULL, updated_at = now() WHERE id = $1`, [workflowId]);
     await db.query('COMMIT');
     return { ok: true, id: done!.id, state: 'answered' };
   } catch (error) {

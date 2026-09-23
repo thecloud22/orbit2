@@ -7,17 +7,21 @@ import type { PoolClient } from 'pg';
 import type { ModelProvider } from '@orbit/model';
 import { sortSentences, type SortTurn } from './sort.ts';
 import { tabulate } from './tables.ts';
+import { inDocumentOrder } from '../../api/src/procedure.ts';
 
 export type SortStored = { sorted: true; labelled: number } | { sorted: false; describe: string };
 
 export async function sortAndStore(db: PoolClient, workflowId: string, model: ModelProvider): Promise<SortStored> {
-  // Only what has no label yet: a part added later is sorted on its own, and
-  // a sentence a person has already relabelled is not asked about again.
+  // Only what has no label for its words as they now stand: a part added
+  // later, or a sentence the author has revised since it was labelled
+  // (Decision 17). A sentence a person relabelled is not asked about again,
+  // and one taken out is not asked about at all.
   const { rows: sentences } = await db.query<{ id: string; number: string; text: string; kind: string }>(
     `SELECT s.id, p.key || '.' || s.n AS number, s.text, s.kind
-       FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
-      WHERE p.workflow_id = $1
-        AND NOT EXISTS (SELECT 1 FROM sentence_label l WHERE l.sentence_id = s.id)
+       FROM sentence_now s JOIN procedure_part p ON p.id = s.part_id
+      WHERE p.workflow_id = $1 AND NOT s.withdrawn
+        AND NOT EXISTS (SELECT 1 FROM sentence_label l WHERE l.sentence_id = s.id
+                         AND (s.revised_at IS NULL OR l.created_at > s.revised_at))
       ORDER BY p.added_at, p.key, s.n`, [workflowId]);
   if (sentences.length === 0) return { sorted: true, labelled: 0 };
 
@@ -28,9 +32,9 @@ export async function sortAndStore(db: PoolClient, workflowId: string, model: Mo
   const { rows: before } = await db.query<{ number: string; text: string; kind: string; label: string }>(
     `SELECT * FROM (
        SELECT p.key || '.' || s.n AS number, s.text, s.kind, l.label, p.added_at, p.key, s.n
-         FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
+         FROM sentence_now s JOIN procedure_part p ON p.id = s.part_id
          JOIN LATERAL (SELECT label FROM sentence_label WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
-        WHERE p.workflow_id = $1
+        WHERE p.workflow_id = $1 AND NOT s.withdrawn
         ORDER BY p.added_at DESC, p.key DESC, s.n DESC LIMIT 6) t
       ORDER BY added_at, key, n`, [workflowId]);
   const result = await sortSentences(sentences, model, last!.turn + 1, before);
@@ -80,11 +84,14 @@ export async function storeTurn(db: PoolClient, workflowId: string, turn: SortTu
  * review, and not having them does not stop anything but the check they carry.
  */
 export async function tabulateAndStore(db: PoolClient, workflowId: string, model: ModelProvider): Promise<void> {
-  const { rows: sentences } = await db.query<{ number: string; text: string; label: string }>(
-    `SELECT p.key || '.' || s.n AS number, s.text, l.label
-       FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
+  const { rows: placed } = await db.query<{ number: string; text: string; label: string; part: string; after: string | null }>(
+    `SELECT p.key || '.' || s.n AS number, s.text, l.label, p.key AS part,
+            (SELECT p2.key || '.' || s2.n FROM procedure_sentence s2 JOIN procedure_part p2 ON p2.id = s2.part_id
+              WHERE s2.id = p.after_sentence_id) AS after
+       FROM sentence_now s JOIN procedure_part p ON p.id = s.part_id
        JOIN LATERAL (SELECT label FROM sentence_label WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
-      WHERE p.workflow_id = $1 ORDER BY p.added_at, p.key, s.n`, [workflowId]);
+      WHERE p.workflow_id = $1 AND NOT s.withdrawn ORDER BY p.added_at, p.key, s.n`, [workflowId]);
+  const sentences = inDocumentOrder(placed).map(({ number, text, label }) => ({ number, text, label }));
   const { rows: [last] } = await db.query<{ turn: number }>(
     `SELECT coalesce(max(turn), 0)::int AS turn FROM model_call WHERE workflow_id = $1`, [workflowId]);
   const result = await tabulate(sentences, model, last!.turn + 1);

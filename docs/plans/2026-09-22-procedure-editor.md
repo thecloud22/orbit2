@@ -1,8 +1,7 @@
 # Orbit 2.1 — The procedure editor
 
-**Status:** Proposed, 2026-09-22. Nothing here is built except the DataStore rename (P0). Five of the
-rules (R16–R19, R21) change settled design and are gathered as a draft Decision 17 in §6; they
-wait for approval before they go into `docs/decisions.md`.
+**Status:** Approved 2026-09-22 (Decision 17 adopted), and being built on `2.1/editor`. §9 logs every
+decision taken while building it without asking.
 
 **Builds on:** `docs/plans/2026-09-22-orbit-2.1-procedure-model.md` (the sort, rule tables, the
 DataStore, the chat, parts, the Human in the Loop step), `docs/step-editing.md` (the look session
@@ -101,7 +100,7 @@ Each rule says whether it already holds, is new behaviour within the settled des
 | R17 | **Numbers never shift in a draft.** An edited sentence keeps its number. A new sentence takes an author number (A.1) and says where it sits. A removed sentence is struck through, not deleted. A version freezes the numbering. | **Changes** (follows from R16) |
 | R18 | **Orbit sorts and maps only what changed, when asked.** *Map changes* maps the pending sentences, replaying the draft's earlier steps to reach them. A draft with an unmapped change cannot be confirmed. | **Changes** (the walk runs once over the whole sort) |
 | R19 | **A question does not hold a browser open.** Orbit maps what it can, leaves the question on the page with its picture and the candidates numbered, and stops. The answer is an edit, and a short new mapping replays to where it was. | **Changes** (2.1 §17 assumed a session that pauses for a person) |
-| R20 | **Mapping never presses anything that changes data.** A sentence after one that changes data is not mapped until there is a practice copy; it is handed to a person. | Holds (Decision 16, 2.1 §3) |
+| R20 | **Replay never presses anything that changes data.** Mapping presses a data-changing control only when the line it maps asks for it (Decision 16). Replaying the draft's earlier steps to reach a change never does: a change that can only be reached past one is refused, naming the step, and the author changes the example or leaves that part to a person. *Corrected 2026-09-22: this read "mapping never presses", which the walk has never been; see §9.* | Holds (Decision 16, Decision 17 item 3) |
 | R21 | **The chat stays open until you publish.** The chat and direct editing make the same edits, and the chat's are marked as the author's words. | **Changes** (it closes when the sort is confirmed) |
 | R22 | **A blank page is a valid start.** Everything typed is the author's words, sorted and mapped like any other. | New |
 
@@ -250,3 +249,15 @@ amended to point at it.
   bound and the name found side by side. To check in P1; add it if missing.
 - Whether *Map changes* also runs by itself after a pause. Drawn as a button only.
 - How an author reorders sentences. Not drawn; moving a step is still possible in the panel.
+
+## 9. Decisions taken while building, without asking (logged as Karthik asked)
+
+| Date | Decision | Why |
+|---|---|---|
+| 2026-09-22 | **R20 corrected.** It said mapping never presses anything that changes data. The walk has always pressed a data-changing control when the line it cites asks for it (Decision 16), so the rule is now about replay: replaying earlier steps never presses one, and a change reachable only past one is refused, naming it. | The plan stated something the code never did. |
+| 2026-09-22 | **Mapping what changed replays everything before the first change, then maps from there to the end.** Endings and rule tables are rebuilt over the whole draft each time. | The walk builds endings and compiles the tables over the whole step list; splicing new steps into the middle of a graph with branches would be the riskier change. Replay needs no model, so it is cheap. |
+| 2026-09-22 | **A re-map keeps what the author did to inputs, and replayed steps keep their pictures.** Steps after the first change are made again, so an edit to one of those (a value made an input, a renamed read) is made again by the walk. | Recorded, not hidden: the Inputs and DataStore tabs show the result, and the author can edit again. |
+| 2026-09-22 | **The chat proposes a rewording and never applies one.** A "revise" answer is an offer; the author presses *Make this change*, and the revision is theirs. | Decision 17: Orbit never rewrites a sentence. Proposing is not applying. |
+| 2026-09-22 | **The chat is open unless the agent is published and nobody has taken it back to editing.** *Edit for a new version* reopens it. | R21 says until publication; a published agent's draft is its attestation. |
+| 2026-09-22 | **After publishing, the draft is changed by taking it back to editing**, and publishing again makes the next version. Runs of earlier versions are untouched. | Flow step 11; `back-to-draft` already allowed it. |
+| 2026-09-22 | **Values are objects (R26)** and **business rules carry BR identifiers (R27)**, at Karthik's request mid-build. | Recorded in §2 and as an amendment to Decision 14. |

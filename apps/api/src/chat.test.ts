@@ -57,13 +57,14 @@ test('an address outside the application is refused and never waits for a model'
   assert.match((await messages())[1]!.text ?? '', /not sent to Orbit's model/);
 });
 
-test('the chat is closed once the sort has been drafted from', async () => {
+test('the chat stays open after drafting (Decision 17, R21)', async () => {
   await db.query(`INSERT INTO authoring_session (id, name, procedure, application_id, start_path)
     SELECT gen_random_uuid(), 'x', 'y', application_id, '/' FROM understanding WHERE workflow_id = $1`, [workflowId]);
   await db.query(`UPDATE understanding SET confirmed_at = now(),
     session_id = (SELECT id FROM authoring_session ORDER BY queued_at DESC LIMIT 1) WHERE workflow_id = $1`, [workflowId]);
   const sent = await sendMessage(db as never, workflowId, { text: 'Sentence 2 is for a person' });
-  assert.match(sent.ok ? '' : sent.because, /chat is closed/);
+  assert.ok(sent.ok, 'open until the agent is published');
+  await db.query(`UPDATE chat_message SET state = 'answered' WHERE workflow_id = $1 AND state = 'waiting'`, [workflowId]);
 });
 
 test('taking the offer adds the author\'s words as work for a person', async () => {

@@ -4,6 +4,7 @@ import { pool } from './db.ts';
 import { asDraftStep } from './publish.ts';
 import { sentencesWithLabels, type SentenceView } from './understanding.ts';
 import { chatOf } from './chat.ts';
+import { pendingOf } from './revise.ts';
 
 /** A sentence as the editor lays it out: whether it starts a new block of the document. */
 export type DocumentSentence = SentenceView & { startsBlock: boolean };
@@ -20,8 +21,8 @@ export type DocumentSentence = SentenceView & { startsBlock: boolean };
 export async function documentOf(db: ClientBase, workflowId: string): Promise<DocumentSentence[] | null> {
   const sentences = await sentencesWithLabels(db, workflowId);
   if (!sentences.length) return null;
-  const { rows: spans } = await db.query<{ number: string; start_at: number; body: string }>(
-    `SELECT p.key || '.' || s.n AS number, s.start_at, p.body
+  const { rows: spans } = await db.query<{ number: string; start_at: number; body: string; arrived: string }>(
+    `SELECT p.key || '.' || s.n AS number, s.start_at, p.body, s.text AS arrived
        FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
       WHERE p.workflow_id = $1`, [workflowId]);
   const at = new Map(spans.map((r) => [r.number, r]));
@@ -31,7 +32,10 @@ export async function documentOf(db: ClientBase, workflowId: string): Promise<Do
     const here = at.get(s.number);
     const prev = at.get(before.number);
     // The whitespace between this sentence and the one before it.
-    const gap = here && prev ? here.body.slice(prev.start_at + before.text.length, here.start_at) : '';
+    // Measured in the words as they arrived: the part's text is never edited.
+    const gap = here && prev ? here.body.slice(prev.start_at + prev.arrived.length, here.start_at) : '';
+    // An author's own sentence placed after another starts a block of its own.
+    if (s.part !== before.part || (here && prev && here.body !== prev.body)) return { ...s, startsBlock: true };
     const startsBlock = s.kind === 'heading' || s.kind === 'item' || before.kind === 'heading'
       || /\n\s*\n/.test(gap) || (before.kind === 'leadIn');
     return { ...s, startsBlock };
@@ -106,9 +110,15 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
        FROM run r JOIN workflow_version v ON v.id = r.version_id
       WHERE v.workflow_id = $1 ORDER BY r.queued_at DESC LIMIT 1`, [id]);
 
+  // What changed since Orbit last mapped it, and the mapping in hand if there is one (R18).
+  const pending = understanding?.confirmed_at ? await pendingOf(db, id) : [];
+  const { rows: [mapping] } = await db.query(
+    `SELECT status, refused->>'describe' AS describe, id AS session_id, queued_at FROM authoring_session
+      WHERE into_workflow_id = $1 AND scope IS NOT NULL ORDER BY queued_at DESC LIMIT 1`, [id]);
+
   return {
     workflow, steps, notes, versions, understanding: understanding ?? null,
-    document, rules, chat, lastRun: lastRun ?? null,
+    document, rules, chat, lastRun: lastRun ?? null, pending, mapping: mapping ?? null,
     authoring: {
       turns,
       /** Kept apart on purpose: a count of turns that says nothing about how

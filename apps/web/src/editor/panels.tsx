@@ -191,7 +191,8 @@ export function ChatPanel({ messages, open, closedWhy, busy, onSend, onTake }: {
           {m.outcome?.departs && <div style={{ fontSize: 11.5, color: 'var(--attention-ink)', marginTop: 4, fontWeight: 600 }}>Not in the procedure</div>}
           {m.outcome?.refused && <div style={{ fontSize: 12, color: 'var(--failed-ink)', marginTop: 4 }}>{m.outcome.refused}</div>}
           {m.outcome?.offer && open && (
-            <div style={{ marginTop: 6 }}><button type="button" style={quiet} disabled={busy} onClick={() => onTake(m.id)}>{m.outcome.offer}</button></div>
+            <div style={{ marginTop: 6 }}><button type="button" style={quiet} disabled={busy} onClick={() => onTake(m.id)}>
+              {m.outcome.offer === 'revise' ? 'Make this change' : 'Add it as work for a person'}</button></div>
           )}
         </div>
       ))}

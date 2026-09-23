@@ -22,7 +22,10 @@ export const CHAT = [
   '          what the procedure says (a different threshold, a different outcome); otherwise false.',
   'relabel   The author says what one numbered sentence is for. sentence is its number; label is one of',
   '          task, rule, forAPerson, background, wontDo.',
-  'explain   A question about this draft. Answer it in reply, briefly, from the sentences shown.',
+  'revise    The author asks to change the wording of one numbered sentence (a different threshold, a different word).',
+'          sentence is its number; text is the whole sentence as it should now read, changed only as asked and',
+'          otherwise in the author\'s own words. The author sees it and decides; nothing changes until they do.',
+'explain   A question about this draft. Answer it in reply, briefly, from the sentences shown.',
   'refuse    Anything else. refusal is notAboutThisDraft for shopping, email, general questions, code or another',
   '          workflow; otherApplication for using any application or website other than this workflow\'s;',
   '          cannotDoThat for publishing, running, connecting, or anything not listed here.',
@@ -37,7 +40,8 @@ export const CHAT = [
 const REFUSALS = ['notAboutThisDraft', 'otherApplication', 'cannotDoThat'] as const;
 
 const answer = z.object({
-  kind: z.enum(['addSteps', 'relabel', 'explain', 'refuse']),
+  kind: z.enum(['addSteps', 'relabel', 'revise', 'explain', 'refuse']),
+  text: z.string().max(4000).nullish(),
   sentence: z.string().nullable(),
   label: z.enum(SENTENCE_LABELS).nullable(),
   departs: z.boolean(),
@@ -49,14 +53,15 @@ export type ChatAnswer = z.infer<typeof answer>;
 const shapeFor = (numbers: readonly string[]) => ({
   type: 'object',
   properties: {
-    kind: { type: 'string', enum: ['addSteps', 'relabel', 'explain', 'refuse'] },
+    kind: { type: 'string', enum: ['addSteps', 'relabel', 'revise', 'explain', 'refuse'] },
+    text: { type: ['string', 'null'] },
     sentence: numbers.length ? { type: ['string', 'null'], enum: [...numbers, null] } : { type: 'null' },
     label: { type: ['string', 'null'], enum: [...SENTENCE_LABELS, null] },
     departs: { type: 'boolean' },
     refusal: { type: ['string', 'null'], enum: [...REFUSALS, null] },
     reply: { type: 'string' },
   },
-  required: ['kind', 'sentence', 'label', 'departs', 'refusal', 'reply'],
+  required: ['kind', 'sentence', 'label', 'departs', 'refusal', 'reply', 'text'],
   additionalProperties: false,
 });
 
@@ -65,6 +70,7 @@ export type ChatDecision =
   | { do: 'addSteps'; departs: boolean }
   | { do: 'relabel'; sentence: string; label: (typeof SENTENCE_LABELS)[number] }
   | { do: 'explain'; reply: string }
+  | { do: 'offerRevision'; sentence: string; text: string }
   | { do: 'offerForAPerson' }
   | { do: 'refuse'; why: ChatRefusal };
 
@@ -100,6 +106,10 @@ export function check(
     case 'relabel':
       return a.sentence && numbers.includes(a.sentence) && a.label
         ? { do: 'relabel', sentence: a.sentence, label: a.label }
+        : { do: 'refuse', why: 'cannotDoThat' };
+    case 'revise':
+      return a.sentence && numbers.includes(a.sentence) && a.text?.trim()
+        ? { do: 'offerRevision', sentence: a.sentence, text: a.text.trim() }
         : { do: 'refuse', why: 'cannotDoThat' };
     case 'addSteps':
       return asksToChangeData(message) ? { do: 'offerForAPerson' } : { do: 'addSteps', departs: a.departs };

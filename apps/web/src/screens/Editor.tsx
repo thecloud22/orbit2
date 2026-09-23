@@ -99,6 +99,11 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
   const assumed = notes.filter((n) => n.resolved_at && n.kind === 'assumption');
   const sorted = !u || u.status === 'sorted';
   const drafting = Boolean(u?.confirmed_at && u.walk && !['brought in', 'refused'].includes(u.walk));
+  const mapping = Boolean(draft.mapping && ['queued', 'running'].includes(draft.mapping.status));
+  // The words can change until the agent is published and nobody has taken it
+  // back to editing (Decision 17, R21); never while Orbit is sorting or mapping.
+  const closed = confirmed && published;
+  const wordsOpen = Boolean(u) && sorted && !drafting && !mapping && !closed;
 
   const positionOf = (sid: unknown) => steps.find((s) => s.id === sid)?.position ?? null;
   const shotOf = (s: Step): Shot | null => (s.made_at_turn ? turnOf.get(s.made_at_turn)?.screenshot ?? null : null);
@@ -136,12 +141,14 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
   const covered = new Set(steps.map((s) => s.from_sentence).filter(Boolean));
   const unstepped = work.filter((s) => s.label !== 'rule' && !covered.has(s.number));
   const pending = draft.pending ?? [];
+  const mapBlocked = !u?.confirmed_at ? 'Nothing is drafted yet'
+    : !sorted ? 'Orbit is sorting what changed' : mapping ? 'Orbit is mapping' : !pending.length ? 'Nothing has changed since Orbit last mapped' : '';
   const ready: Array<[string, string, boolean]> = [
     ['Placed', document.length ? `${placed} of ${document.length} sentences` : 'written as one procedure', placed === document.length],
-    ['Mapped', drafting ? 'Orbit is drafting…' : !steps.length ? 'nothing yet'
+    ['Mapped', drafting ? 'Orbit is drafting\u2026' : mapping ? 'Orbit is mapping\u2026' : !sorted && u?.confirmed_at ? 'Orbit is sorting what changed\u2026' : !steps.length ? 'nothing yet'
       : pending.length ? `${pending.length} change${pending.length === 1 ? '' : 's'} not mapped`
       : unstepped.length ? `${unstepped.length} sentence${unstepped.length === 1 ? ' has' : 's have'} no step` : `${steps.length} steps`,
-      !drafting && steps.length > 0 && !pending.length && !unstepped.length],
+      !drafting && !mapping && sorted && steps.length > 0 && !pending.length && !unstepped.length],
     ['Questions', outstanding.length ? `${outstanding.length} to answer` : 'none', outstanding.length === 0],
     ['Orbit assumed', assumed.length ? `${assumed.length}, not blocking` : 'nothing', true],
   ];
@@ -161,14 +168,25 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
         {u && !u.confirmed_at && (
           <Action disabled={!sorted} why="Orbit is still sorting" onClick={() => go({ at: 'understanding', id })}>Check the sort</Action>
         )}
+        {u?.confirmed_at && !closed && (pending.length > 0 || mapping || !sorted) && (
+          <Action disabled={Boolean(mapBlocked) || busy} why={mapBlocked}
+            onClick={() => void act(`/api/workflows/${id}/map-changes`)}>
+            {mapping ? 'Mapping\u2026' : `Map changes (${pending.length})`}</Action>
+        )}
         {!confirmed && steps.length > 0 && !drafting && (
-          <Action kind={confirming ? 'ghost' : 'primary'} onClick={() => setConfirming((c) => !c)}>
-            {confirming ? 'Not yet' : 'Confirm…'}</Action>
+          <Action kind={confirming ? 'ghost' : pending.length || mapping ? 'ghost' : 'primary'}
+            disabled={!confirming && (pending.length > 0 || mapping || !sorted)}
+            why="Map the changes first: the steps must be the ones your words now ask for"
+            onClick={() => setConfirming((c) => !c)}>
+            {confirming ? 'Not yet' : 'Confirm\u2026'}</Action>
         )}
         {confirmed && !published && (
           <Action disabled={busy} onClick={() => void act(`/api/workflows/${id}/publish`)}>Publish a version</Action>
         )}
         {live && <Action onClick={() => go({ at: 'start', version: workflow.live_version_id! })}>Start a run</Action>}
+        {closed && (
+          <Action kind="ghost" disabled={busy} onClick={() => void act(`/api/workflows/${id}/back-to-draft`)}>Edit for a new version</Action>
+        )}
         {confirmed && !published && (
           <Action kind="ghost" disabled={busy} onClick={() => void act(`/api/workflows/${id}/back-to-draft`)}>Back to editing</Action>
         )}
@@ -198,6 +216,16 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
       {u?.walk === 'refused' && u.confirmed_at && (
         <Refusal tone="failed" title="The draft could not be made"
           blockers={['The walk over these sentences did not produce a draft. See each turn under "Why the workflow says this".']} />
+      )}
+
+      {draft.mapping?.status === 'refused' && pending.length > 0 && (
+        <Refusal tone="failed" title="Orbit could not map what changed" blockers={[draft.mapping.describe ?? 'No reason was recorded.']} />
+      )}
+      {closed && (
+        <div style={{ marginTop: 14, fontSize: 13, color: 'var(--ink-2)' }}>
+          Version {versions[0]?.version} is published and fixed. To change this agent, take it back to editing: the words, the chat and
+          the steps open again, and publishing makes version {(versions[0]?.version ?? 0) + 1}. Runs of version {versions[0]?.version} are untouched.
+        </div>
       )}
 
       {confirming && !confirmed && (
@@ -231,7 +259,8 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
             <DocumentBlock key={b.id} block={b} on={tab === 'steps' && !allSteps && block?.id === b.id} ruleOf={rules.ofSentence}
               selectedValues={selectedValues} onChoose={() => choose(b)} onValue={pickValue}
               notes={outstanding.filter((n) => n.sentence && b.sentences.some((s) => s.number === n.sentence))}
-              pending={pending} busy={busy} onAnswer={(body) => void edit('answer-question', body)} />
+              pending={pending} busy={busy} onAnswer={(body) => void edit('answer-question', body)}
+              wordsOpen={wordsOpen} onEdit={edit} />
           ))}
         </article>
 
@@ -274,9 +303,10 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
           )}
           {tab === 'chat' && (
             <ChatPanel messages={draft.chat} busy={busy}
-              open={Boolean(u) && sorted && !u?.confirmed_at}
+              open={wordsOpen}
               closedWhy={!u ? 'The chat is for a procedure brought in to be understood.'
-                : u.confirmed_at ? 'The chat closed when the sort was confirmed, because the draft was made from it. The conversation stays on the record.'
+                : closed ? 'This agent is published. Take it back to editing to change it for the next version; the conversation stays on the record.'
+                : mapping || drafting ? 'Orbit is mapping. The chat opens again as soon as it has finished.'
                 : 'Orbit is sorting. The chat opens as soon as it has finished.'}
               onSend={async (text) => edit('chat', { text })}
               onTake={(messageId) => void edit('take-offer', { messageId })} />
@@ -348,9 +378,10 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
 }
 
 /** One block of the author's document: the words, the margin, and what Orbit made of them (R2–R6). */
-function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending, busy, onAnswer }: {
+function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending, busy, onAnswer, wordsOpen, onEdit }: {
   block: Block; on: boolean; ruleOf: (n: string | null | undefined) => string | null;
-  busy: boolean; onAnswer: (body: Record<string, unknown>) => void; selectedValues: Set<string>; onChoose: () => void; onValue: (name: string) => void;
+  busy: boolean; onAnswer: (body: Record<string, unknown>) => void;
+  wordsOpen: boolean; onEdit: (verb: string, body: unknown) => Promise<boolean>; selectedValues: Set<string>; onChoose: () => void; onValue: (name: string) => void;
   notes: Draft['notes']; pending: string[];
 }) {
   const { sentences, lead, steps } = block;
@@ -366,7 +397,8 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
       </div>
     );
   }
-  const nums = sentences.length === 1 ? sentences[0]!.number : `${sentences[0]!.number}–${sentences.at(-1)!.number}`;
+  const [editing, setEditing] = useState(false);
+  const nums = sentences.length === 1 ? sentences[0]!.number : `${sentences[0]!.number}\u2013${sentences.at(-1)!.number}`;
   const heading = block.type === 'heading';
   const acting = lead && actsOn(lead);
   const values = valuesOf(steps);
@@ -393,6 +425,7 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
               </span>
             ))}
           </div>
+          {editing && <WordsEditor sentences={sentences} busy={busy} onEdit={onEdit} onDone={() => setEditing(false)} />}
           {sentences.filter((s) => s.was).map((s) => (
             <div key={s.number} style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 3, lineHeight: 1.45 }}>
               <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{s.number} changed.</span> Was {'“'}{s.was}{'”'}</div>
@@ -420,15 +453,76 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
               {lead.label === 'rule' && ruleOf(lead.number) && <span style={{ ...mono, color: 'var(--running-ink)' }}> {'\u00b7'} {ruleOf(lead.number)}</span>}</span>
           )}
           {changed && <Chip state="running">changed, not mapped</Chip>}
+          {sentences.some((s) => s.label && s.labelCurrent === false) && <Chip state="running">sorting</Chip>}
           {noStep && !changed && <Chip state="attention">no step yet</Chip>}
           {steps.some((s) => !s.complete) && <Chip state="attention">not finished</Chip>}
           {notes.length > 0 && <Chip state="attention">{notes.length === 1 ? '1 question' : `${notes.length} questions`}</Chip>}
+          {wordsOpen && !editing && block.type !== 'heading' && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+              style={{ font: 'inherit', fontSize: 12, color: 'var(--ink-2)', background: 'transparent', border: '1px solid var(--rule-2)', borderRadius: 3, cursor: 'pointer', padding: '1px 8px' }}>Edit</button>
+          )}
           {steps.length > 0 && (
             <button type="button" onClick={(e) => { e.stopPropagation(); onChoose(); }}
               style={{ font: 'inherit', fontSize: 12.5, fontWeight: 600, color: 'var(--failed-ink)', background: 'transparent', border: 0, cursor: 'pointer', padding: 0 }}>
               {steps.length} step{steps.length === 1 ? '' : 's'} {'›'}</button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Your words, changed in place (Decision 17): each sentence of the block as
+ * it now reads, what it is for, and a sentence to add after it. Nothing is
+ * overwritten: every change is kept as a revision, and what it said before
+ * stays on the record.
+ */
+function WordsEditor({ sentences, busy, onEdit, onDone }: {
+  sentences: Block['sentences']; busy: boolean; onEdit: (verb: string, body: unknown) => Promise<boolean>; onDone: () => void;
+}) {
+  const [texts, setTexts] = useState<Record<string, string>>(Object.fromEntries(sentences.map((s) => [s.number, s.text])));
+  const [adding, setAdding] = useState('');
+  const field: React.CSSProperties = { font: 'inherit', fontSize: 15, lineHeight: 1.5, padding: '7px 9px', width: '100%', boxSizing: 'border-box',
+    border: '1px solid var(--running-ink)', borderRadius: 4, background: 'var(--panel)', resize: 'vertical' };
+  const small: React.CSSProperties = { font: 'inherit', fontSize: 12.5, fontWeight: 600, borderRadius: 3, padding: '5px 11px', cursor: 'pointer',
+    color: 'var(--ink)', background: 'transparent', border: '1px solid var(--rule-2)' };
+  const save = async () => {
+    for (const s of sentences) {
+      const t = texts[s.number]?.trim() ?? '';
+      if (!s.withdrawn && t && t !== s.text && !(await onEdit('revise-sentence', { sentence: s.number, text: t }))) return;
+    }
+    if (adding.trim() && !(await onEdit('add-sentence', { after: sentences.at(-1)!.number, text: adding.trim() }))) return;
+    onDone();
+  };
+  return (
+    <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', gap: 9, margin: '8px 0 4px', cursor: 'default' }}>
+      {sentences.map((s) => (
+        <div key={s.number} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <label style={{ fontSize: 12, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>{s.number}
+            <textarea rows={2} style={{ ...field, marginTop: 3 }} value={texts[s.number] ?? ''} disabled={s.withdrawn}
+              onChange={(e) => setTexts({ ...texts, [s.number]: e.target.value })} /></label>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, color: 'var(--ink-2)' }}>
+            It is
+            <select aria-label={`What ${s.number} is`} value={s.label ?? ''} disabled={busy || s.withdrawn}
+              onChange={(e) => void onEdit('relabel', { sentence: s.number, label: e.target.value })}
+              style={{ font: 'inherit', fontSize: 12.5, padding: '3px 5px', border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
+              {!s.label && <option value="">not placed yet</option>}
+              {(['task', 'rule', 'forAPerson', 'background', 'wontDo'] as const).map((l) => <option key={l} value={l}>{LABEL_NAME[l]}</option>)}
+            </select>
+            <span style={{ flexGrow: 1 }} />
+            {!s.withdrawn && <button type="button" style={small} disabled={busy} onClick={() => void onEdit('withdraw-sentence', { sentence: s.number }).then((ok) => ok && onDone())}>Take it out</button>}
+          </div>
+        </div>
+      ))}
+      <label style={{ fontSize: 12, color: 'var(--ink-2)' }}>A sentence to add after this
+        <textarea rows={2} style={{ ...field, borderColor: 'var(--rule-2)', marginTop: 3 }} value={adding} onChange={(e) => setAdding(e.target.value)}
+          placeholder="Also refer the file to a senior underwriter if the DTI is over 45%." /></label>
+      <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+        <button type="button" disabled={busy} onClick={() => void save()}
+          style={{ ...small, color: 'var(--page)', background: 'var(--ink)', border: '1px solid var(--ink)' }}>Keep these changes</button>
+        <button type="button" style={small} onClick={onDone}>Cancel</button>
+        <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>Kept as revisions: what it said before stays on the record.</span>
       </div>
     </div>
   );
