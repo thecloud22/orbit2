@@ -240,7 +240,7 @@ procedure says and which loan should conclude how is in
 ## Working on it
 
 ```
-pnpm test        # 383 tests: contract, model, procedure, api, worker
+pnpm test        # 387 tests: contract, model, procedure, api, worker
 pnpm typecheck
 ```
 
