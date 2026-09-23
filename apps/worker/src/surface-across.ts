@@ -8,6 +8,7 @@
  * its path; a later one only moves focus back to it — moving between systems
  * is not a navigation, and the web page is still where the run left it.
  */
+import { applicationKey } from '@orbit/contract';
 import type { Binding } from './binder.ts';
 import type { OpenSurface, Sought, Surface } from './surface.ts';
 
@@ -34,7 +35,7 @@ class AcrossSurface implements Surface {
 
   /** `app` is what a single-application version has always named its one application. */
   #resolve(name?: string): Reachable {
-    return this.#apps.find((a) => a.name === name) ?? this.#apps[0]!;
+    return this.#apps.find((a) => a.name === name || applicationKey(a.name) === name) ?? this.#apps[0]!;
   }
 
   #current(): Surface {

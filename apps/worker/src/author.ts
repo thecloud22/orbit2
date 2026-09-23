@@ -16,7 +16,7 @@
  * because it is what a reviewer reads to answer "why does the workflow say
  * that?".
  */
-import { FENCED_IS_DATA, changingVerbOf, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
+import { FENCED_IS_DATA, applicationKey, changingVerbOf, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
 import { compileTables } from './decide.ts';
 import type { ModelProvider } from '@orbit/model';
 import { asAssumption, asQuestion, type Note } from './note.ts';
@@ -527,7 +527,7 @@ export async function authorFromProcedure(opts: {
   const firstPath = across ? appNamed(current).startPath : startPath;
   steps.push({
     id: openId, kind: 'open', summary: across ? `Open ${current}` : `Open ${startPath}`,
-    application: current, path: firstPath,
+    application: across ? applicationKey(current) : 'app', path: firstPath,
     arrives: { describe: 'the page is showing' }, changesARecord: false,
   });
 
@@ -546,8 +546,9 @@ export async function authorFromProcedure(opts: {
     // Mapping again: the steps before the first change are done as they are,
     // with no model, so the walk starts where the change is (Decision 17).
     for (const r of opts.replay?.steps ?? []) {
-      if (across && r.kind === 'open' && r.application !== current && apps.some((a) => a.name === r.application)) {
-        await goTo(r.application);
+      const replayedApp = across && r.kind === 'open' ? apps.find((a) => applicationKey(a.name) === r.application) : undefined;
+      if (replayedApp && replayedApp.name !== current) {
+        await goTo(replayedApp.name);
         steps.push(r);
         replayed.push(r.id);
         continue;
@@ -760,7 +761,7 @@ export async function authorFromProcedure(opts: {
         }
         await goTo(to);
         steps.push({ id: crypto.randomUUID(), kind: 'open', summary: `Go to ${to}`,
-          application: to, path: appNamed(to).startPath, arrives: { describe: 'the application is showing' }, changesARecord: false });
+          application: applicationKey(to), path: appNamed(to).startPath, arrives: { describe: 'the application is showing' }, changesARecord: false });
         lastActMoved = true;
         noteTurn(record('kept', `step ${steps.length}: goes to ${to}, for ${line!.number}`));
         continue;

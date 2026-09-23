@@ -41,3 +41,19 @@ export function originOf(given: { host: string; scheme?: string | null } | null 
   const s = given?.scheme;
   return `${s === 'https' || s === 'tn3270' || s === 'tn3270s' ? s : 'http'}://${host}`;
 }
+
+/**
+ * How a step names an application it opens, when an agent works across
+ * several (Orbit 2.2): the application's name as an identifier —
+ * "Meridian Home Lending — Loan Servicing" is `meridianHomeLendingLoanServicing`.
+ * A step's `application` is a name in the contract's sense, and a registered
+ * application's name is free text; this is the one bridge between them, used
+ * by the walk that writes it, publication that checks it, and the run that
+ * follows it. An agent on one application still names it `app`.
+ */
+export function applicationKey(name: string): string {
+  const words = name.replace(/[^a-zA-Z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  const camel = words.map((w, i) => (i === 0 ? w.toLowerCase() : w[0]!.toUpperCase() + w.slice(1).toLowerCase())).join('');
+  const key = /^[a-z]/.test(camel) ? camel : `app${camel}`;
+  return key.slice(0, 64) || 'app';
+}

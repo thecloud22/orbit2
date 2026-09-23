@@ -13,7 +13,7 @@ import { asDraftStep, checkForPublication, type DraftStep } from './publish.ts';
 import { inDocumentOrder } from './procedure.ts';
 
 const unfinishedStep = (s: DraftStep): boolean => 'incomplete' in s;
-import { type Blocker, type Publication, step as stepSchema, type Step } from '@orbit/contract';
+import { applicationKey, type Blocker, type Publication, step as stepSchema, type Step } from '@orbit/contract';
 
 /**
  * Key order changes a hash and must not change an identity, so the body is
@@ -117,7 +117,7 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
   steps.forEach((x, i) => {
     if (x.kind !== 'open') return;
     const named = (x as { application?: string }).application ?? 'app';
-    if (named === 'app' ? apps.length > 1 : !apps.some((a) => a.name === named)) {
+    if (named === 'app' ? apps.length > 1 : !apps.some((a) => a.name === named || applicationKey(a.name) === named)) {
       blockers.push({ kind: 'applicationNotCarried', step: i + 1, application: named === 'app' ? 'the application' : named });
     }
   });
