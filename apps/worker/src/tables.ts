@@ -117,20 +117,26 @@ export function withoutFoldedNegation(table: RuleTable): RuleTable {
 
 type Labelled = { number: string; text: string; label: string };
 
-export async function tabulate(sentences: readonly Labelled[], model: ModelProvider, firstTurn: number): Promise<Tabled> {
+export async function tabulate(sentences: readonly Labelled[], model: ModelProvider, firstTurn: number,
+  /** The values the author named in these sentences (Decision 20): a column for one is named exactly so. */
+  named: ReadonlyArray<{ sentence: string; phrase: string; value: string }> = []): Promise<Tabled> {
   // A rule sentence written to steer the model is not built into a table.
   const rules = sentences.filter((s) => s.label === 'rule' && !looksLikeInstructions(s.text)).map((s) => s.number);
   const tasks = sentences.filter((s) => s.label === 'task').map((s) => s.number);
   if (rules.length === 0) return { ok: true, tables: [], turns: [] };
 
   const listed = sentences.map((s) => `${s.number} (${s.label}) ${s.text.replace(/\s+/g, ' ')}`);
+  const naming = named.length
+    ? ['VALUES THE AUTHOR NAMED. A column for one of these is named exactly as the author named it:',
+       fence('NAMED', named.map((n) => `${n.sentence}: "${n.phrase}" is ${n.value}`).join('\n')), '']
+    : [];
   const turns: SortTurn[] = [];
   let correction = '';
   for (let attempt = 1; attempt <= 2; attempt++) {
     const asking = `Lay out the rules (${rules.join(', ')}) as tables${attempt > 1 ? ', again' : ''}.`;
     const answered = await model.propose(
       { purpose: 'lay the rules out as tables', instruction: TABLES,
-        shown: ['SENTENCES:', fence('PROCEDURE', listed.join('\n')), '', correction, asking].filter(Boolean).join('\n') },
+        shown: ['SENTENCES:', fence('PROCEDURE', listed.join('\n')), '', ...naming, correction, asking].filter(Boolean).join('\n') },
       answer, shapeFor(rules, tasks));
     const record = (verdict: SortTurn['verdict'], why: string) => turns.push({
       turn: firstTurn + turns.length, shown: { asking, sentences: rules }, answered: answered.value, verdict, why,
@@ -144,7 +150,7 @@ export async function tabulate(sentences: readonly Labelled[], model: ModelProvi
       correction = 'Your last answer could not be read. Answer again, as the schema.';
       continue;
     }
-    const checked = checkRuleTables(rules, tasks, answered.value.tables);
+    const checked = checkRuleTables(rules, tasks, answered.value.tables, named);
     if (!checked.ok) {
       const wrong = checked.problems.slice(0, 8).join('; ');
       record('rejected', wrong);

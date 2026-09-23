@@ -157,6 +157,8 @@ export type RuleTable = z.infer<typeof ruleTable>;
  */
 export function checkRuleTables(
   ruleSentences: readonly string[], taskSentences: readonly string[], answer: unknown,
+  /** The values the author named in rule sentences (Decision 20): each is a column of the table citing its sentence. */
+  named: ReadonlyArray<{ sentence: string; phrase: string; value: string }> = [],
 ): { ok: true; tables: RuleTable[] } | { ok: false; problems: string[] } {
   const parsed = z.array(ruleTable).safeParse(answer);
   if (!parsed.success) {
@@ -187,6 +189,9 @@ export function checkRuleTables(
     }
     if (t.otherwise?.sentence && !t.sentences.includes(t.otherwise.sentence)) {
       problems.push(`${which}'s otherwise cites ${t.otherwise.sentence}, which the table does not`);
+    }
+    for (const n of named.filter((x) => t.sentences.includes(x.sentence) && !columns.has(x.value))) {
+      problems.push(`${which}: ${n.sentence} says "${n.phrase}" is ${n.value}, and no column is named ${n.value}`);
     }
   });
   for (const n of ruleSentences) {

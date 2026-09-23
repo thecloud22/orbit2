@@ -5,10 +5,11 @@
  */
 import type { PoolClient } from 'pg';
 import type { ModelProvider } from '@orbit/model';
-import { numberTables, tableNumber, type RuleTable } from '@orbit/contract';
+import { linksOf, namedIn, numberTables, tableNumber, type RuleTable } from '@orbit/contract';
 import { sortSentences, type SortTurn } from './sort.ts';
 import { tabulate } from './tables.ts';
 import { inDocumentOrder } from '../../api/src/procedure.ts';
+import { authoredLinks } from '../../api/src/links.ts';
 
 export type SortStored = { sorted: true; labelled: number } | { sorted: false; describe: string };
 
@@ -95,7 +96,10 @@ export async function tabulateAndStore(db: PoolClient, workflowId: string, model
   const sentences = inDocumentOrder(placed).map(({ number, text, label }) => ({ number, text, label }));
   const { rows: [last] } = await db.query<{ turn: number }>(
     `SELECT coalesce(max(turn), 0)::int AS turn FROM model_call WHERE workflow_id = $1`, [workflowId]);
-  const result = await tabulate(sentences, model, last!.turn + 1);
+  // The values the author named in these words hold the tables to their names (Decision 20).
+  const named = namedIn(linksOf({ sentences, authored: await authoredLinks(db, workflowId), tables: [], reads: [] }),
+    sentences.map((s) => s.number));
+  const result = await tabulate(sentences, model, last!.turn + 1, named);
 
   await db.query('BEGIN');
   try {

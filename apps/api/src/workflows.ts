@@ -4,6 +4,7 @@ import { pool } from './db.ts';
 import { asDraftStep } from './publish.ts';
 import { sentencesWithLabels, type SentenceView } from './understanding.ts';
 import { chatOf } from './chat.ts';
+import { draftLinks } from './links.ts';
 import { pendingOf } from './revise.ts';
 
 /** A sentence as the editor lays it out: whether it starts a new block of the document. */
@@ -122,6 +123,8 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
   // A rule comparing something no task reads blocks drafting, said in the words the sort screen used.
   const unread = unreadColumns(rules ?? []);
   const chat = await chatOf(db, id);
+  // Which phrase means which value (Decision 20): the author's, then Orbit's guesses.
+  const links = laidOut ? await draftLinks(db, id, { sentences: laidOut, tables: rules ?? [], steps: stepRows }) : [];
 
   // The latest test of this agent, so the editor can put what a run actually
   // held beside what the draft says it will hold (the DataStore tab).
@@ -138,7 +141,7 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
 
   return {
     workflow, steps, notes, versions, understanding: understanding ?? null,
-    document, rules, chat, lastRun: lastRun ?? null, pending, mapping: mapping ?? null, applications,
+    document, rules, links, chat, lastRun: lastRun ?? null, pending, mapping: mapping ?? null, applications,
     unread: unread.length ? unreadAdvice(unread) : null,
     authoring: {
       turns,

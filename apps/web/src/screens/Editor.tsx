@@ -18,8 +18,9 @@ import { AppChip, Applications } from '../editor/Applications.tsx';
 import { CONFIGURABLE, Confirm } from './Agent.tsx';
 import {
   actsOn, blocksOf, ruleIdsOf, valuesOf, LABEL_INK, LABEL_NAME,
-  type Block, type Draft, type Shot, type Step,
+  type Block, type Draft, type Shot, type Step, type ValueLink,
 } from '../editor/model.ts';
+import { AtList, GuessesStrip, LinkPicker, LinkedWords, atQuery, choicesOf, wordsFor, type Choice } from '../editor/links.tsx';
 import {
   ChatPanel, DataStorePanel, InputsPanel, OutputsPanel, PanelNote, RulesPanel, StepsPanel, TABS, ValueChip, mono, quiet,
   type Tab,
@@ -105,6 +106,8 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
   // back to editing (Decision 17, R21); never while Orbit is sorting or mapping.
   const closed = confirmed && published;
   const wordsOpen = Boolean(u) && sorted && !drafting && !mapping && !closed;
+  const links = draft.links ?? [];
+  const choices = choicesOf(draft);
 
   const positionOf = (sid: unknown) => steps.find((s) => s.id === sid)?.position ?? null;
   const shotOf = (s: Step): Shot | null => (s.made_at_turn ? turnOf.get(s.made_at_turn)?.screenshot ?? null : null);
@@ -287,8 +290,13 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
           {document.length > 0 && wordsOpen && (
             <AddAtEnd after={document.at(-1)!.number} busy={busy} onWrite={(after, text) => edit('add-sentence', { after, text })} />
           )}
+          {document.length > 0 && (
+            <GuessesStrip links={links} open={wordsOpen} busy={busy} onConfirmAll={() => void edit('link-value', {
+              links: links.filter((l) => l.by === 'orbit' && l.value).map(({ sentence, phrase, value }) => ({ sentence, phrase, value })) })} />
+          )}
           {blocks.map((b) => (
             <DocumentBlock key={b.id} block={b} on={tab === 'steps' && !allSteps && block?.id === b.id} ruleOf={rules.ofSentence}
+              links={links.filter((l) => b.sentences.some((s) => s.number === l.sentence))} choices={choices}
               selectedValues={selectedValues} onChoose={() => choose(b)} onValue={pickValue}
               notes={outstanding.filter((n) => n.sentence && b.sentences.some((s) => s.number === n.sentence))}
               pending={pending} busy={busy} onAnswer={(body) => void edit('answer-question', body)}
@@ -410,8 +418,10 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
 }
 
 /** One block of the author's document: the words, the margin, and what Orbit made of them (R2–R6). */
-function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending, busy, onAnswer, wordsOpen, onEdit, apps }: {
+function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending, busy, onAnswer, wordsOpen, onEdit, apps, links, choices }: {
   block: Block; on: boolean; ruleOf: (n: string | null | undefined) => string | null;
+  /** Which phrases of these sentences mean which value (Decision 20), and what they can mean. */
+  links: ValueLink[]; choices: Choice[];
   /** The agent's applications: a sentence of work shows which it happens on when there are several (Orbit 2.2). */
   apps: NonNullable<Draft['applications']>;
   busy: boolean; onAnswer: (body: Record<string, unknown>) => void;
@@ -432,6 +442,7 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
     );
   }
   const [editing, setEditing] = useState(false);
+  const [picking, setPicking] = useState<ValueLink | null>(null);
   const nums = sentences.length === 1 ? sentences[0]!.number : `${sentences[0]!.number}\u2013${sentences.at(-1)!.number}`;
   const heading = block.type === 'heading';
   const acting = lead && actsOn(lead);
@@ -454,12 +465,18 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
                     style={{ ...mono, fontSize: 10.5, fontWeight: 600, color: 'var(--ink-2)', background: 'var(--panel-2)', borderRadius: 3, padding: '1px 5px', margin: '0 5px' }}>
                     part {s.part} {'›'}</span>
                 )}
-                <span style={{ color: s.withdrawn ? 'var(--ink-2)' : s.label === 'background' ? 'var(--ink-2)' : 'var(--ink)',
-                  textDecoration: s.withdrawn ? 'line-through' : 'none' }}>{s.text}</span>{' '}
+                {s.withdrawn
+                  ? <span style={{ color: 'var(--ink-2)', textDecoration: 'line-through' }}>{s.text}</span>
+                  : <LinkedWords text={s.text} links={links.filter((l) => l.sentence === s.number)} open={wordsOpen && !editing}
+                      onPick={setPicking} style={{ color: s.label === 'background' ? 'var(--ink-2)' : 'var(--ink)' }} />}{' '}
               </span>
             ))}
           </div>
-          {editing && <WordsEditor sentences={sentences} busy={busy} onEdit={onEdit} onDone={() => setEditing(false)} apps={apps} />}
+          {picking && wordsOpen && !editing && (
+            <LinkPicker link={picking} choices={choices} busy={busy} onClose={() => setPicking(null)}
+              onLink={(value) => onEdit('link-value', { sentence: picking.sentence, phrase: picking.phrase, value })} />
+          )}
+          {editing && <WordsEditor sentences={sentences} busy={busy} onEdit={onEdit} onDone={() => setEditing(false)} apps={apps} choices={choices} />}
           {sentences.filter((s) => s.was).map((s) => (
             <div key={s.number} style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 3, lineHeight: 1.45 }}>
               <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{s.number} changed.</span> Was {'“'}{s.was}{'”'}</div>
@@ -515,12 +532,35 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
  * overwritten: every change is kept as a revision, and what it said before
  * stays on the record.
  */
-function WordsEditor({ sentences, busy, onEdit, onDone, apps }: {
+function WordsEditor({ sentences, busy, onEdit, onDone, apps, choices }: {
   sentences: Block['sentences']; busy: boolean; onEdit: (verb: string, body: unknown) => Promise<boolean>; onDone: () => void;
   apps: NonNullable<Draft['applications']>;
+  /** What typing @ offers (Decision 20): the values read, and the inputs. */
+  choices: Choice[];
 }) {
   const [texts, setTexts] = useState<Record<string, string>>(Object.fromEntries(sentences.map((s) => [s.number, s.text])));
   const [adding, setAdding] = useState('');
+  // Values named with @, by the box they were typed in ('+' is the sentence to add). Kept with the words they name.
+  const [named, setNamed] = useState<Record<string, Array<{ phrase: string; value: string }>>>({});
+  const [at, setAt] = useState<{ box: string; start: number; caret: number; query: string } | null>(null);
+  const watch = (box: string, el: HTMLTextAreaElement) => {
+    const q = atQuery(el.value, el.selectionStart);
+    setAt(q ? { box, start: q.start, caret: el.selectionStart, query: q.query } : null);
+  };
+  const textOf = (box: string) => (box === '+' ? adding : texts[box] ?? '');
+  const setTextOf = (box: string, t: string) => (box === '+' ? setAdding(t) : setTexts({ ...texts, [box]: t }));
+  const choose = (c: Choice) => {
+    if (!at) return;
+    const words = wordsFor(c);
+    const t = textOf(at.box);
+    setTextOf(at.box, t.slice(0, at.start) + words + t.slice(at.caret));
+    setNamed({ ...named, [at.box]: [...(named[at.box] ?? []).filter((n) => n.phrase !== words), { phrase: words, value: c.name }] });
+    setAt(null);
+  };
+  const linksFor = (box: string, text: string) => (named[box] ?? []).filter((n) => text.includes(n.phrase));
+  const atList = (box: string) => at?.box === box && (
+    <AtList query={at.query} choices={choices} onChoose={(c) => choose(c)} />
+  );
   const field: React.CSSProperties = { font: 'inherit', fontSize: 15, lineHeight: 1.5, padding: '7px 9px', width: '100%', boxSizing: 'border-box',
     border: '1px solid var(--running-ink)', borderRadius: 4, background: 'var(--panel)', resize: 'vertical' };
   const small: React.CSSProperties = { font: 'inherit', fontSize: 12.5, fontWeight: 600, borderRadius: 3, padding: '5px 11px', cursor: 'pointer',
@@ -528,9 +568,12 @@ function WordsEditor({ sentences, busy, onEdit, onDone, apps }: {
   const save = async () => {
     for (const s of sentences) {
       const t = texts[s.number]?.trim() ?? '';
-      if (!s.withdrawn && t && t !== s.text && !(await onEdit('revise-sentence', { sentence: s.number, text: t }))) return;
+      const links = linksFor(s.number, t);
+      if (!s.withdrawn && t && t !== s.text
+        && !(await onEdit('revise-sentence', { sentence: s.number, text: t, ...(links.length ? { links } : {}) }))) return;
     }
-    if (adding.trim() && !(await onEdit('add-sentence', { after: sentences.at(-1)!.number, text: adding.trim() }))) return;
+    const more = linksFor('+', adding.trim());
+    if (adding.trim() && !(await onEdit('add-sentence', { after: sentences.at(-1)!.number, text: adding.trim(), ...(more.length ? { links: more } : {}) }))) return;
     onDone();
   };
   return (
@@ -539,7 +582,13 @@ function WordsEditor({ sentences, busy, onEdit, onDone, apps }: {
         <div key={s.number} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           <label style={{ fontSize: 12, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>{s.number}
             <textarea rows={2} style={{ ...field, marginTop: 3 }} value={texts[s.number] ?? ''} disabled={s.withdrawn}
-              onChange={(e) => setTexts({ ...texts, [s.number]: e.target.value })} /></label>
+              onChange={(e) => { setTexts({ ...texts, [s.number]: e.target.value }); watch(s.number, e.target); }}
+              onKeyUp={(e) => { if (e.key === 'Escape') setAt(null); else watch(s.number, e.currentTarget); }}
+              onClick={(e) => watch(s.number, e.currentTarget)} onBlur={() => setAt(null)} /></label>
+          {atList(s.number)}
+          {linksFor(s.number, texts[s.number] ?? '').length > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>Naming {linksFor(s.number, texts[s.number] ?? '').map((n) => `“${n.phrase}” as ${n.value}`).join(', ')}.</div>
+          )}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, color: 'var(--ink-2)' }}>
             It is
             <select aria-label={`What ${s.number} is`} value={s.label ?? ''} disabled={busy || s.withdrawn}
@@ -563,13 +612,17 @@ function WordsEditor({ sentences, busy, onEdit, onDone, apps }: {
         </div>
       ))}
       <label style={{ fontSize: 12, color: 'var(--ink-2)' }}>A sentence to add after this
-        <textarea rows={2} style={{ ...field, borderColor: 'var(--rule-2)', marginTop: 3 }} value={adding} onChange={(e) => setAdding(e.target.value)}
+        <textarea rows={2} style={{ ...field, borderColor: 'var(--rule-2)', marginTop: 3 }} value={adding}
+          onChange={(e) => { setAdding(e.target.value); watch('+', e.target); }}
+          onKeyUp={(e) => { if (e.key === 'Escape') setAt(null); else watch('+', e.currentTarget); }}
+          onClick={(e) => watch('+', e.currentTarget)} onBlur={() => setAt(null)}
           placeholder="Also refer the file to a senior underwriter if the DTI is over 45%." /></label>
+      {atList('+')}
       <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
         <button type="button" disabled={busy} onClick={() => void save()}
           style={{ ...small, color: 'var(--page)', background: 'var(--ink)', border: '1px solid var(--ink)' }}>Keep these changes</button>
         <button type="button" style={small} onClick={onDone}>Cancel</button>
-        <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>Kept as revisions: what it said before stays on the record.</span>
+        <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>Kept as revisions: what it said before stays on the record. Type @ to name a value.</span>
       </div>
     </div>
   );

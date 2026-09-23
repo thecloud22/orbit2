@@ -64,7 +64,7 @@ createServer(async (req, res) => {
         if (verb === 'delete-step') { const r = await actions.deleteStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'insert-step') { const r = await actions.insertStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'revise-sentence' || verb === 'add-sentence' || verb === 'withdraw-sentence'
-          || verb === 'attach-application' || verb === 'sentence-application') {
+          || verb === 'attach-application' || verb === 'sentence-application' || verb === 'link-value') {
           const r = await actions.revise(verb, id, body); return json(res, r.status, r.body);
         }
         if (verb === 'map-changes') { const r = await actions.mapChanges(id); return json(res, r.status, r.body); }

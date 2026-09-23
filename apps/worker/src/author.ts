@@ -408,6 +408,9 @@ export async function authorFromProcedure(opts: {
   replay?: { steps: Step[]; provenance: Record<string, string> };
   /** The author's answers to questions about these sentences: their word, handed to the walk (R19). */
   hints?: ReadonlyArray<{ sentence: string; answer: string }>;
+  /** The values the author named in these sentences' words (Decision 20): a read of one takes that name,
+   *  and a compiled table's column of that name is that read. */
+  named?: ReadonlyArray<{ sentence: string; phrase: string; value: string }>;
   /** Which of the sentences are work in the application: each must have a
    *  step before the walk may call the procedure finished. */
   taskSentences?: readonly string[];
@@ -452,6 +455,7 @@ export async function authorFromProcedure(opts: {
   // Numbered when there are numbers to give; the plain text otherwise, as 2.0
   // walks have always been shown.
   const said = (opts.hints ?? []).filter((h) => numbers.includes(h.sentence));
+  const namedHere = (opts.named ?? []).filter((v) => numbers.includes(v.sentence));
   const shownProcedure = opts.sentences?.length
     ? [...opts.sentences.map((x) => `${x.number} ${across && x.application ? `[on ${x.application}] ` : ''}${x.waits ? 'WAIT FOR A PERSON: '
          : opts.ruleSentences?.includes(x.number) ? 'RULE (already handled: Orbit applies this itself, from its confirmed table, at this point in the procedure, so treat it as done and go on to the next line; only read what it names): '
@@ -459,7 +463,9 @@ export async function authorFromProcedure(opts: {
        'Each line above starts with its number. Set sentence to the number of the line the next step carries out,',
        'or null if it carries out none of them.',
        ...(said.length ? ['', 'THE AUTHOR ANSWERED THESE QUESTIONS ABOUT LINES ABOVE. Their answer is what the line means:',
-         ...said.map((h) => `line ${h.sentence}: ${h.answer}`)] : [])].join('\n')
+         ...said.map((h) => `line ${h.sentence}: ${h.answer}`)] : []),
+       ...(namedHere.length ? ['', 'THE AUTHOR NAMED THESE VALUES IN LINES ABOVE. A read of one of them takes exactly that name as its value:',
+         ...namedHere.map((v) => `line ${v.sentence}: "${v.phrase}" is ${v.value}`)] : [])].join('\n')
     : procedure;
 
   // Controls only a RULE line asks for — "Require private mortgage
@@ -1468,10 +1474,19 @@ export async function authorFromProcedure(opts: {
     if (!g.tables.length || !g.page) continue;
     const compiled = await compileTables({ tables: g.tables, steps, provenance, order: opts.order ?? [],
       seen: g.page.seen, pageUrl: g.page.url, model, firstTurn: turns.length + 1,
+      ...(namedHere.length ? { named: new Set(namedHere.map((v) => v.value)) } : {}),
       ...(g.app ? { on: { application: applicationKey(g.app.name), path: g.app.startPath } } : {}) });
     steps.splice(0, steps.length, ...compiled.steps);
     for (const t of compiled.turns) noteTurn(t);
     questions.push(...compiled.questions);
+  }
+
+  // A value the author named in a line of work that no step reads by that
+  // name (Decision 20). Left as a question under the line, not held.
+  const readByName = new Set(steps.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : [])));
+  for (const v of namedHere.filter((x) => (opts.taskSentences ?? []).includes(x.sentence) && !readByName.has(x.value))) {
+    questions.push({ ...asQuestion(`${v.sentence} names "${v.phrase}" as ${v.value}, and no step reads a value by that name. `
+      + `Map it again, or say what "${v.phrase}" means.`), sentence: v.sentence, action: 'mapAgain' as const });
   }
 
   const declaredInputs = [...new Set(

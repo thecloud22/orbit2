@@ -2243,6 +2243,45 @@ application); undoing the first system's change when the second fails (a reversa
 record-changing act nobody asked for); a distributed transaction (neither a web portal nor a green
 screen offers one).
 
+## Decision 20 — A value is named in the author's words
+
+**Status:** built 2026-09-23 on `2.5/values-in-your-words`, **held for review, not merged**. Asked
+for by Karthik ("how can I reference variable names in Rules… insert {BR1} here?"), who chose the
+option closest to the author ("4 is the closest to the users") and asked for it to be built. Plan:
+`docs/plans/2026-09-23-values-in-your-words.md`.
+
+**Settles:** how a rule is tied to the value it compares. Before this, three names stood for one
+fact: the author's words ("the loan amount"), a table column a model named when the tables were
+made, and the value the walk read. A second model linked the column to a read value when the table
+was compiled, checked only to be *a* value read. None of this was shown to the author.
+
+1. **A link is a phrase of one sentence and the value it means.** It is kept beside the sentence
+   (`value_link`, 0032, append-only) and never written into it. The words stay the author's, and a
+   person handed a step reads them as written. A link is current only while its phrase is in the
+   sentence exactly once. A revision that drops the phrase drops the link, and nothing is
+   rewritten.
+2. **Orbit shows its guesses in the words, and they are only guesses.** They are worked out with no
+   model, from a table column's label and a read step's label found in the sentence. They are shown
+   dotted. The author confirms or changes one, or says the phrase is not a value, and only the
+   author's links bind anything.
+3. **An author's link binds three things.** The table's column for the phrase is named the value:
+   a set of tables that does not do this is refused and made again. The walk is told the name, and
+   a line of work whose named value was not read under that name leaves a question. The compiled
+   table takes the column to be the read value of that name, without asking the model. If nothing
+   reads it, the table is not built, and a question says so.
+4. **A link is a change**, like a label (Decision 17): the rules are tabled again, a confirmation
+   lapses, and the sentence waits to be mapped.
+5. **A phrase is linked exactly or not at all** (Decision 12). If it is not in the sentence, or is
+   there twice, the link is refused, and the refusal says which. A value is a camelCase name, and a
+   new one is allowed: the walk is told to read it.
+
+**Rejected:** tokens typed into the procedure (`{creditScore}`, `{BR1}`), because the words would no
+longer be the author's, and a person handed the step would read a template. Referencing a rule by
+its number, because a sentence already is its rule and numbers are shown, not typed. Editing the
+table cells as the primary surface, because the author works in sentences and R15 keeps the table
+from saying anything the sentences do not. Resolving a guess by a model at run time, because
+Decision 6 keeps models out of execution and a link is settled while authoring.
+
 ## What these decisions commit each other to
 
 The decisions are not independent, and it is worth stating the joins so that a later change to one

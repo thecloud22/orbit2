@@ -7,7 +7,8 @@
  */
 import { Pool } from 'pg';
 import { inDocumentOrder } from '../../api/src/procedure.ts';
-import { asObjects, looksLikeInstructions, step as stepSchema, type Step, originOf } from '@orbit/contract';
+import { authoredLinks } from '../../api/src/links.ts';
+import { asObjects, linksOf, looksLikeInstructions, namedIn, step as stepSchema, type Step, originOf } from '@orbit/contract';
 import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
@@ -237,6 +238,11 @@ async function authorOne(sessionId: string) {
         WHERE p.workflow_id = $1 AND NOT x.withdrawn
         ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
     const inOrder = inDocumentOrder(every);
+    // The values the author named in these words (Decision 20), as they hold for the words now.
+    const named = s.into_workflow_id
+      ? namedIn(linksOf({ sentences: inOrder, authored: await authoredLinks(db, s.into_workflow_id), tables: [], reads: [] }),
+        inOrder.map((x) => x.number))
+      : [];
     const sentences = inOrder.filter((x) => x.label === 'task' || x.label === 'rule' || x.waits)
       .map(({ part: _, after: __, application, ...x }) => ({ ...x, ...(application ? { application } : {}) }));
 
@@ -308,6 +314,7 @@ async function authorOne(sessionId: string) {
         taskSentences: walked.filter((x) => x.label === 'task' && !covered.has(x.number)).map((x) => x.number) } : {}),
       ...(remap ? { replay: { steps: remap.steps, provenance: remap.provenance }, replace: { madeAt: remap.madeAt } } : {}),
       ...(s.hints?.length ? { hints: s.hints } : {}),
+      ...(named.length ? { named } : {}),
       ...(mayBeAbsentAfter.length ? { mayBeAbsentAfter } : {}),
       ...(decides ? { tables: (tables!.tables ?? []) as never, order: order.map((o) => o.number), ruleSentences } : {}),
       name: s.name,
