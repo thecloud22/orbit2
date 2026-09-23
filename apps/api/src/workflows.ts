@@ -1,5 +1,5 @@
 import type { ClientBase } from 'pg';
-import type { RuleTable } from '@orbit/contract';
+import { unreadAdvice, unreadColumns, type RuleTable } from '@orbit/contract';
 import { pool } from './db.ts';
 import { asDraftStep } from './publish.ts';
 import { sentencesWithLabels, type SentenceView } from './understanding.ts';
@@ -91,7 +91,8 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
 
   // Orbit 2.1: where the sort stands, for a draft that was brought in to be understood.
   const { rows: [understanding] } = await db.query(
-    `SELECT u.status, u.confirmed_at, u.inputs AS examples, a.name AS application, s.status AS walk, u.session_id
+    `SELECT u.status, u.confirmed_at, u.inputs AS examples, a.name AS application, s.status AS walk, u.session_id,
+            u.more_to_come, u.refused->>'describe' AS refused, s.refused->>'describe' AS walk_refused
        FROM understanding u JOIN application a ON a.id = u.application_id
        LEFT JOIN authoring_session s ON s.id = u.session_id
       WHERE u.workflow_id = $1`, [id]);
@@ -101,6 +102,8 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
   const { rows: [tables] } = await db.query<{ tables: RuleTable[] | null }>(
     `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [id]);
   const rules = tables?.tables ?? null;
+  // A rule comparing something no task reads blocks drafting, said in the words the sort screen used.
+  const unread = unreadColumns(rules ?? []);
   const chat = await chatOf(db, id);
 
   // The latest test of this agent, so the editor can put what a run actually
@@ -119,6 +122,7 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
   return {
     workflow, steps, notes, versions, understanding: understanding ?? null,
     document, rules, chat, lastRun: lastRun ?? null, pending, mapping: mapping ?? null,
+    unread: unread.length ? unreadAdvice(unread) : null,
     authoring: {
       turns,
       /** Kept apart on purpose: a count of turns that says nothing about how

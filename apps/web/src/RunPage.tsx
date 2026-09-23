@@ -3,6 +3,7 @@ import { isRetryable, type ArtefactView, type ErrorKind, type RunEventView, type
 import { Dot, EmptyState, OutcomePair, Row, Verbatim, type Emptiness } from './ui.tsx';
 import { DataStore } from './DataStore.tsx';
 import { fieldsOf } from '@orbit/contract';
+import { RunProcedure } from './RunProcedure.tsx';
 import { useLinkProps, type Route } from './router.ts';
 
 type Loaded = { kind: 'loaded'; data: RunView } | { kind: 'empty'; of: Emptiness };
@@ -344,6 +345,8 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
           </div>
         </section>
       )}
+
+      <RunProcedure data={data} onPick={setSelected} />
 
       <div style={{ display: 'flex', gap: 30, paddingTop: 20 }}>
         <div style={{ width: 486, flexShrink: 0 }}>

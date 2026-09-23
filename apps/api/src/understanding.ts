@@ -51,6 +51,8 @@ export const understandingAskedFor = askedFor.extend({
   pdf: pdfBase64.optional(),
   /** The author says this is not all of it, and will add the rest as parts (§13). */
   moreToCome: z.boolean().default(false),
+  /** Start from a blank page and write it in the editor (R22). */
+  blank: z.boolean().default(false),
 });
 
 export async function bringInToUnderstand(db: PoolClient, body: unknown): Promise<Queued> {
@@ -59,11 +61,11 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
     return { ok: false, because: asked.error.issues
       .map((i) => i.message || `${i.path.join('.')} is not right`).join(' ') };
   }
-  const { name, applicationId, startPath, inputs, moreToCome } = asked.data;
-  if (Boolean(asked.data.procedure) === Boolean(asked.data.pdf)) {
+  const { name, applicationId, startPath, inputs, moreToCome, blank } = asked.data;
+  if (!blank && Boolean(asked.data.procedure) === Boolean(asked.data.pdf)) {
     return { ok: false, because: 'Paste the procedure or upload it as a PDF — one of the two.' };
   }
-  const read = await textOf(asked.data);
+  const read = blank ? { ok: true as const, source: 'pasted' as const, body: '' } : await textOf(asked.data);
   if (!read.ok) return read;
   const procedure = read.body;
 
@@ -82,11 +84,14 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
     const { rows: [workflow] } = await db.query<{ id: string }>(
       `INSERT INTO workflow (name, procedure) VALUES ($1, $2) RETURNING id`, [name, procedure]);
     const workflowId = workflow!.id;
+    // A blank page has nothing to sort yet: it is sorted as it stands, and
+    // each sentence the author writes is sorted as it arrives (R22).
     await db.query(
-      `INSERT INTO understanding (workflow_id, application_id, start_path, inputs, more_to_come)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [workflowId, applicationId, startPath, JSON.stringify(inputs), moreToCome]);
-    const part = await insertPart(db, workflowId, { source: read.source, body: procedure }, read.pages);
+      `INSERT INTO understanding (workflow_id, application_id, start_path, inputs, more_to_come, status, sorted_at)
+       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 = 'sorted' THEN now() END)`,
+      [workflowId, applicationId, startPath, JSON.stringify(inputs), moreToCome, blank ? 'sorted' : 'queued']);
+    const part = blank ? { ok: true as const, sentences: [] as string[] }
+      : await insertPart(db, workflowId, { source: read.source, body: procedure }, 'pages' in read ? read.pages : undefined);
     if (!part.ok) {
       await db.query('ROLLBACK');
       return { ok: false, because: part.because };
@@ -94,7 +99,7 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
     await db.query(
       `INSERT INTO audit_entry (act, object_kind, object_id, changed)
        VALUES ('procedure brought in to be understood', 'workflow', $1, $2)`,
-      [workflowId, JSON.stringify({ name, application: app.name, sentences: part.sentences.length })]);
+      [workflowId, JSON.stringify({ name, application: app.name, sentences: part.sentences.length, blank })]);
     await db.query('COMMIT');
     return { ok: true, id: workflowId };
   } catch (error) {

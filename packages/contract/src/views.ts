@@ -94,4 +94,7 @@ export interface RunView {
   /** Sentences of the procedure this version deliberately leaves to people or
    *  will not do (2.1). Empty for a version drafted any other way. */
   leftToPeople?: Array<{ number: string; text: string; label: string | null }>;
+  /** The procedure as the version carries it, and the sentence each step (by id) carries out. */
+  procedure?: { sentences: Array<{ number: string; text: string; label: string | null; waits?: boolean; withdrawn?: boolean }>;
+    steps: Record<string, string> } | null;
 }

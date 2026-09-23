@@ -141,6 +141,13 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
   const covered = new Set(steps.map((s) => s.from_sentence).filter(Boolean));
   const unstepped = work.filter((s) => s.label !== 'rule' && !covered.has(s.number));
   const pending = draft.pending ?? [];
+  // What stands between the sort and a draft, in the order a person meets it.
+  const forOrbit = document.filter((s) => !s.withdrawn && (s.label === 'task' || s.label === 'rule')).length;
+  const draftBlocked = !u ? '' : u.status === 'refused' ? 'Orbit could not sort this'
+    : !sorted ? 'Orbit is sorting' : !document.length ? 'Write the procedure first'
+    : placed < document.length ? `${document.length - placed} sentence${document.length - placed === 1 ? ' has' : 's have'} no label yet`
+    : u.more_to_come ? 'You said more is to come: add it, or say that is all'
+    : draft.unread ? draft.unread : forOrbit === 0 ? 'Nothing is marked for Orbit to do' : '';
   const mapBlocked = !u?.confirmed_at ? 'Nothing is drafted yet'
     : !sorted ? 'Orbit is sorting what changed' : mapping ? 'Orbit is mapping' : !pending.length ? 'Nothing has changed since Orbit last mapped' : '';
   const ready: Array<[string, string, boolean]> = [
@@ -166,7 +173,8 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
       title={workflow.name}
       actions={<>
         {u && !u.confirmed_at && (
-          <Action disabled={!sorted} why="Orbit is still sorting" onClick={() => go({ at: 'understanding', id })}>Check the sort</Action>
+          <Action disabled={Boolean(draftBlocked) || busy} why={draftBlocked}
+            onClick={() => void act(`/api/workflows/${id}/understood`)}>Confirm and draft it</Action>
         )}
         {u?.confirmed_at && !closed && (pending.length > 0 || mapping || !sorted) && (
           <Action disabled={Boolean(mapBlocked) || busy} why={mapBlocked}
@@ -218,6 +226,19 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
           blockers={['The walk over these sentences did not produce a draft. See each turn under "Why the workflow says this".']} />
       )}
 
+      {u?.status === 'refused' && (
+        <Refusal tone="failed" title="This was not sorted" blockers={[u.refused ?? 'No reason was recorded.']} />
+      )}
+      {u && !u.confirmed_at && sorted && draft.unread && (
+        <Refusal title="A rule compares something nothing reads" blockers={[draft.unread]} />
+      )}
+      {(drafting || mapping) && (
+        <WalkProgress session={(mapping ? draft.mapping?.session_id : u?.session_id) ?? null}
+          what={mapping ? `Orbit is mapping what changed: ${pending.join(', ') || 'the changes'}` : 'Orbit is drafting: working through the sentences marked as its own against the application'} />
+      )}
+      {u && !u.confirmed_at && (u.more_to_come || u.status === 'sorted') && sorted && (
+        <NextPart id={id} moreToCome={u.more_to_come} busy={busy} onDone={() => setRefresh((n) => n + 1)} />
+      )}
       {draft.mapping?.status === 'refused' && pending.length > 0 && (
         <Refusal tone="failed" title="Orbit could not map what changed" blockers={[draft.mapping.describe ?? 'No reason was recorded.']} />
       )}
@@ -254,6 +275,12 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
           </div>
           {document.length === 0 && workflow.procedure && (
             <p style={{ fontSize: 15.5, lineHeight: 1.7, maxWidth: 680, whiteSpace: 'pre-wrap' }}>{workflow.procedure}</p>
+          )}
+          {document.length === 0 && u && !workflow.procedure && (
+            <FirstWords busy={busy} onWrite={(text) => edit('add-sentence', { after: null, text })} />
+          )}
+          {document.length > 0 && wordsOpen && (
+            <AddAtEnd after={document.at(-1)!.number} busy={busy} onWrite={(after, text) => edit('add-sentence', { after, text })} />
           )}
           {blocks.map((b) => (
             <DocumentBlock key={b.id} block={b} on={tab === 'steps' && !allSteps && block?.id === b.id} ruleOf={rules.ofSentence}
@@ -523,6 +550,113 @@ function WordsEditor({ sentences, busy, onEdit, onDone }: {
           style={{ ...small, color: 'var(--page)', background: 'var(--ink)', border: '1px solid var(--ink)' }}>Keep these changes</button>
         <button type="button" style={small} onClick={onDone}>Cancel</button>
         <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>Kept as revisions: what it said before stays on the record.</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Orbit at work, shown as it goes: the latest turn and the page it was looking
+ * at, so nobody waits on a spinner with nothing to read (product rule 11).
+ */
+function WalkProgress({ session, what }: { session: string | null; what: string }) {
+  const [turns, setTurns] = useState<Array<{ turn: number; verdict: string; why: string; screenshot?: { digest?: string; withheld?: string } | null }>>([]);
+  useEffect(() => {
+    if (!session) return;
+    let live = true;
+    const read = () => fetch(`/api/authoring/${session}`).then((r) => r.json())
+      .then((b: { turns?: typeof turns }) => { if (live) setTurns(b.turns ?? []); }).catch(() => undefined);
+    void read();
+    const timer = setInterval(read, 2500);
+    return () => { live = false; clearInterval(timer); };
+  }, [session]);
+  const last = turns.at(-1);
+  const pictured = [...turns].reverse().find((t) => t.screenshot?.digest);
+  return (
+    <div style={{ marginTop: 16, display: 'flex', gap: 16, alignItems: 'flex-start', background: 'var(--running-wash)',
+      borderLeft: '3px solid var(--running)', borderRadius: 5, padding: '12px 16px' }}>
+      <div style={{ flexGrow: 1, minWidth: 0 }}>
+        <div className="orbit-working" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--running-ink)' }}>{what}
+          <span style={{ fontFamily: 'var(--mono)' }}><span className="orbit-dot">.</span><span className="orbit-dot">.</span><span className="orbit-dot">.</span></span></div>
+        <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 5, lineHeight: 1.5 }}>
+          {last ? `Turn ${last.turn}, ${last.verdict}: ${last.why}` : 'Waiting for a worker to pick this up.'}</div>
+      </div>
+      {pictured?.screenshot && (
+        <div style={{ width: 180, flexShrink: 0 }}>
+          <Picture shot={pictured.screenshot} size="large" alt={`The page at turn ${pictured.turn}`} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The next part of a procedure brought in a page or two at a time, or saying that is all of it (2.1 §13). */
+function NextPart({ id, moreToCome, busy, onDone }: { id: string; moreToCome: boolean; busy: boolean; onDone: () => void }) {
+  const [text, setText] = useState('');
+  const [open, setOpen] = useState(moreToCome);
+  const [refused, setRefused] = useState<string | null>(null);
+  const post = async (path: string, body: unknown) => {
+    setRefused(null);
+    const r = await send(path, body);
+    if (r.ok) { setText(''); onDone(); } else setRefused(r.why);
+  };
+  if (!open) {
+    return <div style={{ marginTop: 12 }}><button type="button" onClick={() => setOpen(true)} style={{ ...quiet, fontSize: 12.5 }}>Add another part of the procedure</button></div>;
+  }
+  return (
+    <div style={{ marginTop: 14, border: '1px solid var(--rule-2)', borderRadius: 5, padding: '12px 14px', background: 'var(--panel)', maxWidth: 820 }}>
+      <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6 }}>{moreToCome ? 'You said more is to come' : 'Another part'}</div>
+      <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} aria-label="The next part"
+        placeholder="Paste the next page or two, exactly as written."
+        style={{ width: '100%', boxSizing: 'border-box', font: 'inherit', fontSize: 14, lineHeight: 1.6, padding: '9px 11px',
+          border: '1px solid var(--rule-2)', borderRadius: 4, resize: 'vertical' }} />
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+        <button type="button" disabled={busy || !text.trim()} onClick={() => void post(`/api/workflows/${id}/parts`, { body: text, moreToCome: false })}
+          style={{ font: 'inherit', fontSize: 13, fontWeight: 600, borderRadius: 3, padding: '6px 12px', cursor: 'pointer', color: 'var(--page)', background: 'var(--ink)', border: '1px solid var(--ink)' }}>Sort this part</button>
+        {moreToCome && <button type="button" disabled={busy} onClick={() => void post(`/api/workflows/${id}/more-to-come`, { moreToCome: false })}
+          style={{ ...quiet, fontSize: 13 }}>That is all of it</button>}
+        {!moreToCome && <button type="button" onClick={() => setOpen(false)} style={{ ...quiet, fontSize: 13 }}>Cancel</button>}
+        {refused && <span style={{ fontSize: 12.5, color: 'var(--failed-ink)' }}>{refused}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** A blank page (R22): the first words of the procedure, kept as the author's. */
+function FirstWords({ busy, onWrite }: { busy: boolean; onWrite: (text: string) => Promise<boolean> }) {
+  const [text, setText] = useState('');
+  return (
+    <div style={{ padding: '18px 0', maxWidth: 720 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>A blank page</div>
+      <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 10, lineHeight: 1.55 }}>
+        Write the procedure the way you would to somebody starting Monday. Orbit sorts each sentence as it arrives, and drafts nothing until you confirm.</div>
+      <textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} aria-label="The procedure"
+        placeholder={'1. Sign in to the portal.\n2. Open the loan file using the loan number.\n3. Read the note rate.'}
+        style={{ width: '100%', boxSizing: 'border-box', font: 'inherit', fontSize: 15, lineHeight: 1.7, padding: '12px 14px',
+          border: '1px solid var(--rule-2)', borderRadius: 5, resize: 'vertical', background: 'var(--panel)' }} />
+      <button type="button" disabled={busy || text.trim().length < 5} onClick={() => void onWrite(text).then((ok) => ok && setText(''))}
+        style={{ marginTop: 9, font: 'inherit', fontSize: 13.5, fontWeight: 600, borderRadius: 3, padding: '8px 15px', cursor: 'pointer',
+          color: 'var(--ink)', background: 'var(--primary)', border: '1px solid var(--primary)' }}>Keep these words</button>
+    </div>
+  );
+}
+
+/** More words at the end of the procedure, in the author's own words (Decision 17). */
+function AddAtEnd({ after, busy, onWrite }: { after: string; busy: boolean; onWrite: (after: string, text: string) => Promise<boolean> }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  if (!open) {
+    return <div style={{ padding: '12px 0 0 72px' }}><button type="button" onClick={() => setOpen(true)} style={{ ...quiet, fontSize: 12.5 }}>Add a sentence at the end</button></div>;
+  }
+  return (
+    <div style={{ padding: '12px 0 0 72px', maxWidth: 700 }}>
+      <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} aria-label="A sentence to add at the end"
+        style={{ width: '100%', boxSizing: 'border-box', font: 'inherit', fontSize: 15, lineHeight: 1.5, padding: '7px 9px',
+          border: '1px solid var(--running-ink)', borderRadius: 4, resize: 'vertical' }} />
+      <div style={{ display: 'flex', gap: 7, marginTop: 6 }}>
+        <button type="button" disabled={busy || !text.trim()} onClick={() => void onWrite(after, text).then((ok) => { if (ok) { setText(''); setOpen(false); } })}
+          style={{ font: 'inherit', fontSize: 12.5, fontWeight: 600, borderRadius: 3, padding: '5px 11px', cursor: 'pointer', color: 'var(--page)', background: 'var(--ink)', border: '1px solid var(--ink)' }}>Add it</button>
+        <button type="button" onClick={() => setOpen(false)} style={{ ...quiet, fontSize: 12.5 }}>Cancel</button>
       </div>
     </div>
   );

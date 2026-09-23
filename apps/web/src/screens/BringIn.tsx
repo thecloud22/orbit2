@@ -61,6 +61,8 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const [refused, setRefused] = useState<string | null>(null);
   const [moreToCome, setMoreToCome] = useState(false);
   const [pdf, setPdf] = useState<{ name: string; bytes: number; base64: string } | null>(null);
+  /** Start from a blank page and write the procedure in the editor (R22). */
+  const [blank, setBlank] = useState(false);
 
   /**
    * Only what can actually be chosen.
@@ -75,7 +77,7 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   const inService = apps.state === 'loaded'
     ? apps.value.applications.filter((a) => !a.retired_at) : [];
 
-  const ready = Boolean(name.trim()) && (Boolean(pdf) || procedure.trim().length >= 20) && Boolean(chosen);
+  const ready = Boolean(name.trim()) && (blank || Boolean(pdf) || procedure.trim().length >= 20) && Boolean(chosen);
   const application = apps.state === 'loaded'
     ? apps.value.applications.find((a) => a.id === chosen) : undefined;
 
@@ -86,11 +88,12 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
   async function ask() {
     setRefused(null);
     const result = await send<{ id: string }>('/api/understanding', {
-      name, applicationId: chosen, startPath, moreToCome,
-      ...(pdf ? { pdf: pdf.base64 } : { procedure }),
+      name, applicationId: chosen, startPath, moreToCome: blank ? false : moreToCome,
+      ...(blank ? { blank: true } : pdf ? { pdf: pdf.base64 } : { procedure }),
       inputs: Object.fromEntries(inputs.filter((i) => i.name.trim()).map((i) => [i.name.trim(), i.value])),
     });
-    if (result.ok) go({ at: 'understanding', id: result.value.id });
+    // Straight to the one page (R1): the sort, the draft and the runs live there.
+    if (result.ok) go({ at: 'agent', id: result.value.id });
     else setRefused(result.why);
   }
 
@@ -182,10 +185,14 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
               <input style={{ ...field, maxWidth: 420 }} value={name} aria-label="Name for this agent"
                 placeholder="Underwriting decision" onChange={(e) => setName(e.target.value)} />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, paddingBottom: 10, minHeight: 32 }}>
+              <input type="checkbox" checked={blank} onChange={(e) => setBlank(e.target.checked)} />
+              Start from a blank page, and write it on the agent's page
+            </label>
+            {!blank && <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 10 }}>
               <PdfPicker chosen={pdf} onChosen={setPdf} />
-            </div>
-            {!pdf && <textarea value={procedure} onChange={(e) => setProcedure(e.target.value)} rows={6}
+            </div>}
+            {!pdf && !blank && <textarea value={procedure} onChange={(e) => setProcedure(e.target.value)} rows={6}
               aria-label="The procedure"
               placeholder="Describe it the way you would to somebody starting Monday."
               style={{ width: '100%', font: 'inherit', fontSize: 14.5, lineHeight: 1.75, color: 'var(--ink)',
@@ -286,9 +293,9 @@ export function BringIn({ go }: { go: (to: Route) => void }) {
         <div style={{ borderTop: '1px solid var(--ink)' }}>
           {[
             ['Orbit sorts every sentence', 'Each one becomes something Orbit does, a rule, something for a person, background, or something Orbit won\'t do. None is left out.'],
-            ['You check the sort', 'Change any sentence that is sorted wrongly, then confirm. Nothing is drafted before you do.'],
-            ['Orbit works through its part', 'It goes through the sentences marked as its own against the application, looking at each page.'],
-            ['You check every step, then publish', 'A version is fixed the moment it is made. Editing afterwards changes nothing until you publish again.'],
+            ['You check it on one page', 'Your words, as you wrote them, each with what Orbit will do with it. Change the words, a label, or ask in the chat, then confirm and Orbit drafts it.'],
+            ['Orbit maps it, and asks when unsure', 'It works through the application, keeps a picture of every page, and leaves any question under its sentence. Change anything and it maps only what changed.'],
+            ['You confirm, then publish', 'A version is fixed the moment it is made. Change the agent later on the same page, and publish the next version.'],
           ].map(([title, body], i, all) => (
             <div key={title} style={{ borderBottom: i === all.length - 1 ? 'none' : '1px solid var(--rule)',
               padding: '14px 0', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
