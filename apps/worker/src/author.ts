@@ -1108,9 +1108,14 @@ export async function authorFromProcedure(opts: {
     // Scenario 5 was refused here with "First-time buyer may not be there:
     // missing means the record was not found" on the same draft, and its
     // missing file halted instead of concluding.
+    // The same when it names one the rules say is always there: scenario 8's
+    // answer named loanAmount, the rules had marked noteRate, and the missing
+    // file halted on the loan amount instead of concluding.
     const mayBeAbsent = produced.filter((v) => !v.required);
-    const missingValue = said?.missingValue
-      ?? (said?.whenAbsent && mayBeAbsent.length === 1 ? mayBeAbsent[0]!.name : null);
+    const named = said?.missingValue ? produced.find((v) => v.name === said.missingValue) : undefined;
+    const missingValue = named && !named.required ? named.name
+      : said?.whenAbsent && mayBeAbsent.length === 1 ? mayBeAbsent[0]!.name
+      : said?.missingValue ?? null;
     const separator = missingValue ? produced.find((v) => v.name === missingValue) : undefined;
 
     const refusal =
