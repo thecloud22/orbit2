@@ -77,7 +77,12 @@ export interface Looking {
  */
 export function toType(value: Extract<Step, { kind: 'enter' }>['value'], opts: Typing): string {
   if (value.from === 'input') return opts.inputs[value.value] ?? '';
-  if (value.from === 'step') return opts.values?.[value.value] ?? '';
+  if (value.from === 'step') {
+    const read = opts.values?.[value.value] ?? '';
+    if (!('codes' in value)) return read;
+    const code = Object.entries(value.codes).find(([from]) => from.trim().toLowerCase() === read.trim().toLowerCase());
+    return code ? code[1] : read;
+  }
   if (value.from === 'account') return opts.signsInAs ?? '';
   if (value.from === 'secret') return opts.signsInWith ?? '';
   if (value.from === 'literal') {

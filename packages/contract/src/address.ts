@@ -15,7 +15,8 @@
  */
 import { object, z } from './zod.ts';
 
-export const scheme = z.enum(['http', 'https']);
+/** A web application's http or https; a green screen's tn3270, or tn3270s over TLS (Orbit 2.2). */
+export const scheme = z.enum(['http', 'https', 'tn3270', 'tn3270s']);
 export type Scheme = z.infer<typeof scheme>;
 
 export const address = object({
@@ -37,5 +38,6 @@ export type Address = z.infer<typeof address>;
  */
 export function originOf(given: { host: string; scheme?: string | null } | null | undefined): string {
   const host = given?.host ?? '';
-  return `${given?.scheme === 'https' ? 'https' : 'http'}://${host}`;
+  const s = given?.scheme;
+  return `${s === 'https' || s === 'tn3270' || s === 'tn3270s' ? s : 'http'}://${host}`;
 }

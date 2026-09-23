@@ -98,7 +98,24 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
       WHERE u.workflow_id = $1`, [id]);
 
   // What the editor lays out: the procedure, its rules as tables, and the conversation.
-  const document = await documentOf(db, id);
+  const laidOut = await documentOf(db, id);
+  // The applications the agent works on (Orbit 2.2, C11): the one it was
+  // brought in against first, then those the author added; and which one each
+  // sentence happens on, as last said.
+  const { rows: applications } = await db.query<{ id: string; name: string; surface: string; startPath: string; first: boolean }>(
+    `SELECT a.id, a.name, a.surface, coalesce(wa.start_path, u.start_path, '/') AS "startPath", (a.id = u.application_id) AS first
+       FROM application a
+       LEFT JOIN understanding u ON u.workflow_id = $1
+       LEFT JOIN workflow_application wa ON wa.workflow_id = $1 AND wa.application_id = a.id
+      WHERE a.id = u.application_id OR wa.workflow_id IS NOT NULL
+      ORDER BY (a.id = u.application_id) DESC, wa.added_at`, [id]).catch(() => ({ rows: [] }));
+  const { rows: placed } = await db.query<{ number: string; id: string; name: string; surface: string }>(
+    `SELECT DISTINCT ON (t.sentence_id) p.key || '.' || s.n AS number, a.id, a.name, a.surface
+       FROM sentence_application t JOIN procedure_sentence s ON s.id = t.sentence_id
+       JOIN procedure_part p ON p.id = s.part_id JOIN application a ON a.id = t.application_id
+      WHERE p.workflow_id = $1 ORDER BY t.sentence_id, t.seq DESC`, [id]).catch(() => ({ rows: [] }));
+  const on = new Map(placed.map((x) => [x.number, { id: x.id, name: x.name, surface: x.surface }]));
+  const document = laidOut && laidOut.map((x) => ({ ...x, application: on.get(x.number) ?? null }));
   const { rows: [tables] } = await db.query<{ tables: RuleTable[] | null }>(
     `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [id]);
   const rules = tables?.tables ?? null;
@@ -121,7 +138,7 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
 
   return {
     workflow, steps, notes, versions, understanding: understanding ?? null,
-    document, rules, chat, lastRun: lastRun ?? null, pending, mapping: mapping ?? null,
+    document, rules, chat, lastRun: lastRun ?? null, pending, mapping: mapping ?? null, applications,
     unread: unread.length ? unreadAdvice(unread) : null,
     authoring: {
       turns,

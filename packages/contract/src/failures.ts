@@ -67,8 +67,14 @@ export const errorKind = z.enum([
    *  reported, never served (§12). */
   'integrityFailure',
 
-  // ── Not reachable in slice 1, named so the set does not grow by accident ──
+  // ── A green screen (Orbit 2.2) ─────────────────────────────────────────────
+  /** The screen showing is not the one the step was mapped on. */
   'terminalScreenUnexpected',
+  /** The host left the keyboard locked: a field that takes no input was typed
+   *  into, or the host set an error. Never retried blindly. */
+  'terminalKeyboardLocked',
+
+  // ── Not reachable in slice 1, named so the set does not grow by accident ──
   'serviceResponseOffContract',
   'judgementUnavailable',
   'judgementBelowFloor',
@@ -84,6 +90,16 @@ export const runError = object({
   describe: z.string().min(1).max(500),
   /** What the screen actually said, where that is what makes it fixable. */
   saw: z.string().max(2000).optional(),
+  /**
+   * What each application now holds, when the run stopped part-way (Orbit 2.2,
+   * C14): the record-changing presses seen through, and one pressed and never
+   * answered. While `unknown` stands and nobody has checked, the run is not
+   * retried or run again (C15).
+   */
+  partial: object({
+    changed: z.array(object({ application: z.string().nullable(), step: z.number().int().positive(), control: z.string() })),
+    unknown: object({ application: z.string().nullable(), step: z.number().int().positive(), control: z.string() }).optional(),
+  }).optional(),
 });
 export type RunError = z.infer<typeof runError>;
 

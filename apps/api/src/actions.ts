@@ -14,13 +14,13 @@ import { confirm, confirmation } from './confirm.ts';
 import { configureStep } from './configure.ts';
 import { mintVersion } from './mint.ts';
 import { bringIn, finishRecording, startRecording } from './authoring.ts';
-import { cancelRun, continueRun, retryRun, rerun } from './control.ts';
+import { cancelRun, checkRun, continueRun, retryRun, rerun } from './control.ts';
 import { backToDraft, discardDraft, deleteStep, editStep, insertStep, moveStep } from './edit.ts';
 import { editApplication, registerApplication } from './applications.ts';
 import { describeBlocker } from '@orbit/contract';
 import { sendMessage, takeOffer } from './chat.ts';
 import { answerQuestion } from './questions.ts';
-import { addSentence, mapChanges, pendingOf, reviseSentence, withdrawSentence } from './revise.ts';
+import { addSentence, attachApplication, mapChanges, pendingOf, placeSentence, reviseSentence, withdrawSentence } from './revise.ts';
 import { changeInput, declareInput, removeInput, renameValue, setPublishes, setStepValue, setValueObject } from './values.ts';
 import { addNextPart, bringInToUnderstand, confirmUnderstanding, relabel, setMoreToCome } from './understanding.ts';
 
@@ -39,7 +39,8 @@ const inTransaction = async <T>(work: (db: never) => Promise<T>): Promise<T> => 
 export const actions = {
   /** The procedure edited in place (Decision 17). */
   async revise(verb: string, workflowId: string, body: unknown) {
-    const edits = { 'revise-sentence': reviseSentence, 'add-sentence': addSentence, 'withdraw-sentence': withdrawSentence } as const;
+    const edits = { 'revise-sentence': reviseSentence, 'add-sentence': addSentence, 'withdraw-sentence': withdrawSentence,
+      'attach-application': attachApplication, 'sentence-application': placeSentence } as const;
     const result = await inTransaction((db) => edits[verb as keyof typeof edits](db, workflowId, body));
     return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
   },
@@ -191,6 +192,11 @@ export const actions = {
   // succeeded, so there is nothing to stop" is an answer rather than a fault.
   async cancelRun(reference: string) {
     const result = await inTransaction((db) => cancelRun(db, reference));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
+  async checkRun(reference: string) {
+    const result = await inTransaction((db) => checkRun(db, reference));
     return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
   },
 

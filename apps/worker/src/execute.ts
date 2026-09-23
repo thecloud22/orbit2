@@ -210,7 +210,18 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       // everything else — a number, a date, a yes/no — fell through to an
       // empty string, silently. The contract declares four kinds of literal
       // and three of them typed nothing.
-      const value = resolveRef(ctx, ref) ?? '';
+      let value = resolveRef(ctx, ref) ?? '';
+      // Spelled the way this system spells it (C13): the agent's table, and
+      // nothing typed at all for a value the table does not have.
+      if ('codes' in ref) {
+        const coded = codeFor(ref.codes, value);
+        if (coded === null) {
+          const halt = { kind: 'valueNotOfDeclaredType' as ErrorKind, step: position,
+            describe: `Step ${position} types ${ref.value} as this application's code for it, and "${value}" has no code in the agent's table.` };
+          await end('halted', halt); return halt;
+        }
+        value = coded;
+      }
       const intoBox = await found.it.where();
       await found.it.fill(value);
       await event(ctx, attemptId, 'entered', { into: step.into.label, by: found.by });
@@ -349,6 +360,13 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       await end('halted', halt); return halt;
     }
   }
+}
+
+/** A value's code in an agent's table, matched without regard to case or surrounding space. */
+export function codeFor(codes: Record<string, string>, value: string): string | null {
+  const wanted = value.trim().toLowerCase();
+  for (const [from, to] of Object.entries(codes)) if (from.trim().toLowerCase() === wanted) return to;
+  return null;
 }
 
 /** A driver's own failure, as the halt it is. Named kinds are kept; the rest read from the message. */

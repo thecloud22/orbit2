@@ -990,6 +990,22 @@ export async function authorFromProcedure(opts: {
           candidates: [{ name: made.value.value, what: 'input' }] });
       }
 
+      // A value read on one system, typed into a green-screen field that shows
+      // the codes it takes (C13): "(CONV FHA VA JUMB)" beside PROGRAM, and the
+      // web said "Conventional". Orbit proposes the table and asks.
+      let codesTurn: Turn | null = null;
+      if (made.kind === 'enter' && made.value.from === 'step' && !('codes' in made.value)) {
+        const coded = await codesFor(made.value.value, readValues[made.value.value] ?? '', element, seen, model);
+        if (coded) {
+          made.value = { from: 'step', value: made.value.value, codes: coded.codes };
+          // Recorded after the step's own turn, which the step's picture is found by.
+          codesTurn = coded.turn(turn);
+          questions.push({ ...asQuestion(`${element.labelledBy ?? element.name} takes a code, and ${made.value.value} was read as "${readValues[made.value.value]}". `
+            + `Orbit will type it as ${Object.entries(coded.codes).map(([a, b]) => `${a} → ${b}`).join(', ')}. Is that right? Say which is wrong if not.`),
+            sentence: p.sentence, atTurn: turn, stepId: made.id });
+        }
+      }
+
       // Where the element is on this turn's picture, so the step can be shown
       // boxed on the page Orbit found it on. Before the act, which may move on.
       if ('digest' in picture) {
@@ -1011,6 +1027,7 @@ export async function authorFromProcedure(opts: {
         ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
         : `step ${steps.length}: ${made.summary}`));
       madeAt[made.id] = turn;
+      if (codesTurn) noteTurn(codesTurn);
 
       // Do it, so the next turn sees the page the next step would meet.
       lastActMoved = p.act === 'activate';
@@ -1561,6 +1578,48 @@ function makeStep(p: Proposal, element: Seen, procedure: string,
         type: asNumber(showing) !== null ? 'number' : 'text', required: !p.optional, ...(of ? { of } : {}) } };
   }
   return null;
+}
+
+/**
+ * The codes a green-screen field takes, when its row shows them and the value
+ * read elsewhere is not one of them (C13). The model proposes how the other
+ * system writes each code; it may name only the codes the screen shows, and the
+ * example value must be among what it proposes, or nothing is kept.
+ */
+async function codesFor(name: string, example: string, element: Seen, seen: Seen[], model: ModelProvider):
+  Promise<{ codes: Record<string, string>; turn: (n: number) => Turn } | null> {
+  const b = element.binding as unknown as { connector?: string; row?: number };
+  if (b.connector !== 'tn3270' || !example) return null;
+  const hint = seen.find((x) => x.what === 'value' && !x.labelledBy
+    && (x.binding as unknown as { row?: number }).row === b.row && /^\(\s*[A-Z0-9-]+(\s+[A-Z0-9-]+)+\s*\)$/.test(x.name.trim()));
+  if (!hint) return null;
+  const codes = hint.name.trim().slice(1, -1).trim().split(/\s+/);
+  if (codes.some((c) => c.toLowerCase() === example.trim().toLowerCase())) return null;
+  const label = element.labelledBy ?? element.name;
+  const answer = z.object({ codes: z.array(z.object({ from: z.string(), to: z.string() })), why: z.string() });
+  const asking = `How does the other application write each code ${label} takes? The example read was "${example}".`;
+  const answered = await model.propose(
+    { purpose: 'propose a table of codes', instruction: [
+      'A value read on one application is typed on a green screen that takes codes for it.',
+      'For each code the screen shows, give how the other application writes the same thing, in its own words.',
+      'The example read is one of them. Leave a code out if you cannot tell what it means.', FENCED_IS_DATA].join('\n'),
+      shown: [`FIELD: ${label}`, `CODES THE SCREEN TAKES: ${codes.join(', ')}`, `VALUE ${name} WAS READ AS: ${example}`, '', asking].join('\n') },
+    answer, {
+      type: 'object', additionalProperties: false, required: ['codes', 'why'],
+      properties: { why: { type: 'string' }, codes: { type: 'array', items: { type: 'object', additionalProperties: false,
+        required: ['from', 'to'], properties: { from: { type: 'string' }, to: { type: 'string', enum: codes } } } } },
+    });
+  const said = answered.value;
+  const table = Object.fromEntries((said?.codes ?? []).filter((c) => c.from.trim() && codes.includes(c.to)).map((c) => [c.from.trim(), c.to]));
+  const covers = Object.keys(table).some((k) => k.toLowerCase() === example.trim().toLowerCase());
+  const turn = (n: number): Turn => ({ turn: n, shown: { page: 'the codes a field takes', elements: codes.length, asking },
+    answered: said as never, verdict: covers ? 'kept' : said ? 'rejected' : 'discarded',
+    why: covers ? `${label}: ${Object.entries(table).map(([a, c]) => `${a} → ${c}`).join(', ')}`
+      : said ? `the table it proposed did not say what "${example}" is` : (answered.refusedBecause ?? 'no answer'),
+    model: answered.model, provider: answered.provider, tokensIn: answered.tokensIn, tokensOut: answered.tokensOut,
+    tokensCached: answered.tokensCached, tokensCacheWritten: answered.tokensCacheWritten,
+    costMicros: answered.costUnknown ? null : answered.costMicros });
+  return covers ? { codes: table, turn } : null;
 }
 
 /** Reached by tests only: the rules worth pinning without driving a browser. */

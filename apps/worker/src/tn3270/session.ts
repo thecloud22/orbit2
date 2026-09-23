@@ -9,12 +9,20 @@
 import { S3270, TerminalError, quoted } from './s3270.ts';
 import { commandFor, parseBuffer, type Screen } from './screen.ts';
 
-/** Where the application is, from its origin: `tn3270://host:port`, or `tn3270s://` for TLS. */
-export function hostOf(origin: string): { host: string; tls: boolean } {
-  const m = /^([a-z0-9]+):\/\/(.+?)\/?$/i.exec(origin.trim());
+/**
+ * Where the application is, from its origin: `tn3270://host:port`, or
+ * `tn3270s://` for TLS, with the registration's settings as a query —
+ * `?codePage=cp037&model=3278-2&luName=LU01` — so that nothing between the
+ * registry and the emulator has to know a green screen has settings.
+ */
+export function hostOf(origin: string): { host: string; tls: boolean; codePage?: string; model?: string; luName?: string } {
+  const [base, query = ''] = origin.trim().split('?');
+  const m = /^([a-z0-9]+):\/\/(.+?)\/?$/i.exec(base!);
   const scheme = (m?.[1] ?? '').toLowerCase();
-  const host = m ? m[2]! : origin.trim();
-  return { host, tls: scheme === 'tn3270s' || scheme === 'https' };
+  const host = m ? m[2]! : base!;
+  const q = new URLSearchParams(query);
+  const setting = (k: string) => (q.get(k) ? { [k]: q.get(k)! } : {});
+  return { host, tls: scheme === 'tn3270s' || scheme === 'https', ...setting('codePage'), ...setting('model'), ...setting('luName') };
 }
 
 /** How long a key may take to be answered, and a connection to be made. */
@@ -31,10 +39,10 @@ export class Tn3270Session {
   /** Connect, and wait for the host's first screen to take input. */
   async connect(): Promise<void> {
     if (this.#emulator) return;
-    const { host, tls } = hostOf(this.#origin);
-    const emulator = new S3270();
+    const { host, tls, codePage, model, luName } = hostOf(this.#origin);
+    const emulator = new S3270({ ...(codePage ? { codePage } : {}), ...(model ? { model } : {}) });
     this.#emulator = emulator;
-    const done = await emulator.run(`Connect(${tls ? 'L:' : ''}${host})`, ANSWER_MS);
+    const done = await emulator.run(`Connect(${tls ? 'L:' : ''}${luName ? `${luName}@` : ''}${host})`, ANSWER_MS);
     if (!done.ok || !done.status?.connected) {
       await this.close();
       throw new TerminalError('applicationUnavailable',
