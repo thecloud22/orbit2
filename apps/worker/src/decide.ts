@@ -246,7 +246,7 @@ export async function compileTables(opts: {
           const example = opts.seen.find((e) => e.what === 'value'
             && normaliseName(calledIn(e)).toLowerCase() === read.region.label.toLowerCase())?.name;
           const page = asThePageWritesIt(w.value, shown, example);
-          than = page.word;
+          than = withoutArticle(page.word, 'text');
           if (page.taken || page.unsure) reworded.push({ label: read.produces.label, written: w.value, shown: shown!, taken: page.taken, example });
         }
         const made = comparisonFor({ value: read.produces.name, is: w.is, than }, read.produces);
@@ -390,6 +390,20 @@ function withoutUnreachableEndings(steps: Step[]): Step[] {
     } else queue.push(i + 1);
   }
   return steps.filter((x, i) => x.kind !== 'end' || seen.has(i));
+}
+
+/**
+ * "a condominium", "an ARM": a kind of thing as a sentence names it. The page
+ * writes the kind — Condominium — so the article is dropped from a text value.
+ * Scenario 6's table compared Property type with "a condominium", the page
+ * said Condominium, and two condominiums over 80% were approved without PMI.
+ * Only "a" and "an", and only before a word: "The Villages" is a name, and a
+ * grade of A is a value.
+ */
+export function withoutArticle(value: string, type: string): string {
+  if (type !== 'text') return value;
+  const m = /^\s*an?\s+(\S.*)$/i.exec(value);
+  return m ? m[1]!.trim() : value;
 }
 
 /**
