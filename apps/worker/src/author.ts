@@ -19,7 +19,7 @@
 import { FENCED_IS_DATA, changingVerbOf, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
 import { compileTables } from './decide.ts';
 import type { ModelProvider } from '@orbit/model';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Locator, type Page } from 'playwright';
 import { asAssumption, asQuestion, type Note } from './note.ts';
 import { asNumber } from './compare.ts';
 import { capture } from './evidence.ts';
@@ -504,6 +504,15 @@ export async function authorFromProcedure(opts: {
   let unchanged = 0;
   let lastFingerprint = '';
   let lastActMoved = false;
+  /**
+   * What has been typed since the last press, so a press never goes ahead on
+   * a form that has lost it. A run types and presses back to back; the walk
+   * waits on a model between them, and a page left for minutes can reload.
+   * Scenario 6: the loan number was in the box on one turn and gone on the
+   * next, so "Open file" said no file matches and the walk never opened the
+   * loan; scenario 8's sign-in did nothing the same way.
+   */
+  const typed: Array<{ field: Locator; value: string }> = [];
 
   /** A line of work left without a step, as a question under it (R19). */
   const unmapped = (n: string) => {
@@ -549,20 +558,7 @@ export async function authorFromProcedure(opts: {
     // A press for a rule is refused by design, so it does not spend the turns
     // the procedure's own lines need; a few are given back, and no more.
     let ruleRefusals = 0;
-    /** The address and the visible text after the last turn, to tell a slow page from a still one. */
-    let lastLooked: string | null = null;
-    const looked = async () => `${page.url()}|${String(await page.evaluate('document.body ? document.body.innerText : ""').catch(() => ''))}`;
     for (let turn = 1; turn <= maxTurns + Math.min(ruleRefusals, 4); turn++) {
-      // A press whose page has not moved yet is given longer before it is
-      // held against the walk. `settleAfterActivating` waits two seconds for
-      // the address to change; on a loaded machine the portal's sign-in took
-      // longer, the next turn was shown /login "unchanged", and the model
-      // said the procedure was finished before the loan was ever searched for
-      // (scenario 8). A press that really changes nothing costs ten seconds.
-      if (lastActMoved && lastLooked !== null) {
-        for (let waited = 0; waited < 10_000 && (await looked()) === lastLooked; waited += 500) await page.waitForTimeout(500);
-        await page.waitForLoadState('domcontentloaded').catch(() => undefined);
-      }
       const seen = await snapshot(page);
       // The picture of what the model is about to be asked about. Never of a
       // sign-in page: nothing of signing in is captured (Decision 4, item 13).
@@ -589,7 +585,6 @@ export async function authorFromProcedure(opts: {
         lastActMoved = false;
       }
       lastFingerprint = fingerprint;
-      lastLooked = `${page.url()}|${visible}`;
       if (unchanged >= 2) {
         finished = true;   // said in its own words below; not the ceiling
         questions.push(asQuestion('The page stopped changing, so the rest of the procedure could not be worked out here.'));
@@ -970,10 +965,17 @@ export async function authorFromProcedure(opts: {
       // Do it, so the next turn sees the page the next step would meet.
       lastActMoved = p.act === 'activate';
       if (p.act === 'enter' && made.kind === 'enter') {
-        await page.getByRole(element.role as 'textbox', { name: element.name, exact: true })
-          .or(page.locator(`[name="${element.binding.name ?? ''}"]`)).first()
-          .fill(toType(made.value, opts)).catch(() => undefined);
+        const field = page.getByRole(element.role as 'textbox', { name: element.name, exact: true })
+          .or(page.locator(`[name="${element.binding.name ?? ''}"]`)).first();
+        const value = toType(made.value, opts);
+        await field.fill(value).catch(() => undefined);
+        typed.push({ field, value });
       } else if (p.act === 'activate') {
+        for (const t of typed.splice(0)) {
+          if ((await t.field.inputValue({ timeout: 2000 }).catch(() => null)) !== t.value) {
+            await t.field.fill(t.value, { timeout: 5000 }).catch(() => undefined);
+          }
+        }
         const wasAt = page.url();
         await page.getByRole(element.role as 'button', { name: element.name, exact: true }).first()
           .click().catch(() => undefined);

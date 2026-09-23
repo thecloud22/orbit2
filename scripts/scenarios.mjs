@@ -73,7 +73,8 @@ const SCENARIOS = {
       'ML-26-04529': { status: 'succeeded', pressed: ['Refer to senior underwriter'] },
       'ML-26-04547': { status: 'succeeded', pressed: ['Refer to senior underwriter'] },
       'ML-26-04471': { status: 'succeeded', pressed: ['Approve file'] },
-      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+      // The procedure calls a missing file withdrawn, so the ending may too.
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such|withdrawn/i },
     },
   },
   6: {
