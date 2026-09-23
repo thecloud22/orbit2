@@ -41,8 +41,9 @@ export interface Found {
   readonly by: Strategy;
   /** §14's `enter`. The value is put in; how is the surface's business. */
   fill(value: string): Promise<void>;
-  /** §14's `activate`. */
-  activate(): Promise<void>;
+  /** §14's `activate`. What the application answered, where the surface can
+   *  tell (Orbit 2.4); nothing where it cannot, as a browser cannot. */
+  activate(): Promise<Answered | void>;
   /** §14's `read`. Raw text, never coerced — the declared type is checked
    *  afterwards, and the raw text is what makes a mismatch fixable. */
   text(): Promise<string>;
@@ -61,6 +62,18 @@ export interface Found {
    */
   where(): Promise<{ x: number; y: number; width: number; height: number } | null>;
 }
+
+/**
+ * Whether the application did what a press asked (Orbit 2.4).
+ *
+ * `refused` is the application saying no, and `said` is how it said it;
+ * `unchanged` is a press it answered without doing anything. The surface
+ * reports; the executor decides what it means, and only for a press that
+ * changes a record — a lookup answered "not found" is a path, not a refusal.
+ */
+export type Answered =
+  | { accepted: true; said?: string }
+  | { accepted: false; why: 'refused' | 'unchanged'; said?: string };
 
 /**
  * Exactly one, or a refusal.

@@ -100,6 +100,15 @@ test('a run finds each field again by screen, label and address, and refuses ano
     const shot = await surface.capture();
     assert.equal(shot.mediaType, 'image/svg+xml');
     assert.match(String(shot.bytes), /AOIFE BRENNAN/);
+
+    // What the host answered each press (Orbit 2.4): approved, then refused
+    // in its own words, because this session approved it a moment ago.
+    const approve = at({ screen: 'LSV20', what: 'key', key: 'PF5', label: 'APPROVE' });
+    const first = await surface.find(approve);
+    assert.deepEqual(first.found === 'one' ? await first.it.activate() : null, { accepted: true, said: 'LSV205I LOAN APPROVED' });
+    const again = await surface.find(approve);
+    assert.deepEqual(again.found === 'one' ? await again.it.activate() : null,
+      { accepted: false, why: 'refused', said: 'LSV206E LOAN ALREADY APPROVED' });
   } finally {
     await surface.close();
   }

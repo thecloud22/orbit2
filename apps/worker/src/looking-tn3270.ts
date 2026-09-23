@@ -8,6 +8,7 @@
 import type { Step } from '@orbit/contract';
 import { toType, type Box, type Looking, type OpenLooking, type Typing } from './looking.ts';
 import type { Seen } from './snapshot.ts';
+import type { Answered } from './surface.ts';
 import { fractionOf, locate, pictureOf, seenOf, type TerminalBinding } from './tn3270/screen.ts';
 import { Tn3270Session, hostOf } from './tn3270/session.ts';
 
@@ -59,14 +60,14 @@ class Tn3270Looking implements Looking {
     this.#typed.push({ at, value });
   }
 
-  async press(element: Seen): Promise<void> {
+  async press(element: Seen): Promise<Answered | void> {
     for (const t of this.#typed.splice(0)) {
       if ((await this.#session.read(t.at).catch(() => '')) !== t.value.slice(0, t.at.length).trim()) {
         await this.#session.type(t.at, t.value).catch(() => undefined);
       }
     }
     const key = bindingOf(element).key;
-    if (key) await this.#session.press(key).catch(() => undefined);
+    if (key) return this.#session.press(key).catch(() => undefined);
   }
 
   async restart(path: string): Promise<void> {

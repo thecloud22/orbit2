@@ -47,7 +47,8 @@ The screens, keys, messages and checks are the twin's. The loans are the twin's
 own too: they are generated from `terminal-portal/src/servicing-data.ts`. There
 is one difference that matters. On this host **what a session changes stays
 changed**, because approvals and boardings are rewritten into VSAM. Scenario 13
-reloads the files before it runs (`loadFiles()` in `servicing.mjs`).
+reloads the files before it runs (`loadFiles()` in `servicing.mjs`), then runs its loans a second
+time without reloading, and expects the host to refuse what is already done.
 
 ## What it proves, and what it cannot
 
@@ -85,6 +86,12 @@ These were found by pointing the connector at this host (see
    TN3270 server tells VTAM when a client goes. Hercules doesn't, so
    `host.mjs` does it with three automatic-operator rules, and TSO is set to end
    a dropped session (`RECONLIM=0`).
+8. **A refused change looked like a done one.** Scenario 13's first run reported a loan approved
+   that the host had refused with `LSV206E`: a run counted a record-changing key as done once the
+   screen settled. Since 2.4 the connector reads the host's answer from its message IDs (an `E`
+   message is a refusal, an `I` one says it was done) or from a screen that did not change. A
+   refused change stops the run as `changeRefused`, in the host's words. Scenario 13 runs its loans
+   a second time without reloading to prove it: the host refuses what is already done.
 
 ## Defects of this host, worked around
 

@@ -7,7 +7,8 @@
  * host's answer on the screen. A keyboard left locked is said, not retried.
  */
 import { S3270, TerminalError, quoted } from './s3270.ts';
-import { PAUSE, commandFor, parseBuffer, seenOf, type Screen } from './screen.ts';
+import type { Answered } from '../surface.ts';
+import { PAUSE, answerOf, commandFor, parseBuffer, seenOf, type Screen } from './screen.ts';
 
 /**
  * Where the application is, from its origin: `tn3270://host:port`, or
@@ -112,12 +113,18 @@ export class Tn3270Session {
     return done.ok ? done.data.join('').trim() : '';
   }
 
-  /** Press a key and wait until the host has answered and the keyboard is unlocked. */
-  async press(key: string): Promise<void> {
+  /**
+   * Press a key and wait until the host has answered and the keyboard is
+   * unlocked; then say what the answer was, from the screen before the key
+   * and the screen after it (Orbit 2.4).
+   */
+  async press(key: string): Promise<Answered> {
     const e = this.#need();
+    const before = await this.screen();
     const sent = await e.run(commandFor(key), ANSWER_MS);
     if (!sent.ok) throw new TerminalError('terminalKeyboardLocked', `${key} could not be pressed: the keyboard was locked.`);
     await this.settle();
+    return answerOf(before, await this.screen());
   }
 
   async settle(): Promise<void> {

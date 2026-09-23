@@ -148,6 +148,15 @@ const SCENARIOS = {
       'ML-26-04488': { status: 'APPROVED', conditions: ['PMI'] },
       'ML-26-04471': { status: 'APPROVED', conditions: [] },
     },
+    // Orbit 2.4: the same loans again, without reloading. What the first runs
+    // did is still done, so the host refuses the first key that would change
+    // it (LSV206E LOAN ALREADY APPROVED) and each run stops there: none may
+    // say it approved anything, and the loan file is as the first runs left it.
+    again: {
+      'ML-26-04488': { status: 'failed', error: 'changeRefused', pressed: ['ATTACH PMI'] },
+      'ML-26-04471': { status: 'failed', error: 'changeRefused', pressed: ['APPROVE'] },
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+    },
   },
   // The swivel chair, part one: the web file, the borrower's existing loans on
   // the green screen, and the decision made back on the web.
@@ -311,15 +320,11 @@ async function run(key) {
   const published = await confirmAndPublish(W, s.example);
   if (!published.ok) return fail(published.why);
   await runLoans(published.version, s.loans, failures, s.objects);
-  if (s.host) {
-    const { readLoans } = await import('../demo/mvs/servicing.mjs');
-    const held = await readLoans();
-    for (const [loan, want] of Object.entries(s.host)) {
-      const got = held[loan];
-      const same = got && got.status === want.status && got.conditions.join(',') === want.conditions.join(',');
-      console.log(`  ${same ? 'ok  ' : 'FAIL'}  on the host ${loan} is ${got ? `${got.status}${got.conditions.length ? ` with ${got.conditions.join(', ')}` : ''}` : 'missing'}`);
-      if (!same) failures.push(`${loan} on the host: ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
-    }
+  if (s.host) await checkHost(s.host, failures);
+  if (s.again) {
+    console.log('  again, without reloading: what is done is refused by the host');
+    await runLoans(published.version, s.again, failures, false);
+    await checkHost(s.host, failures);
   }
 
   // A live edit (scenario 9): back to editing on the same page, the words
@@ -375,6 +380,18 @@ async function confirmAndPublish(W, example) {
   return { ok: true, version: (await call(`/api/workflows/${W}`)).body.versions[0].id };
 }
 
+/** What the host holds, read from the loan file on MVS (Orbit 2.3). */
+async function checkHost(host, failures) {
+  const { readLoans } = await import('../demo/mvs/servicing.mjs');
+  const held = await readLoans();
+  for (const [loan, want] of Object.entries(host)) {
+    const got = held[loan];
+    const same = got && got.status === want.status && got.conditions.join(',') === want.conditions.join(',');
+    console.log(`  ${same ? 'ok  ' : 'FAIL'}  on the host ${loan} is ${got ? `${got.status}${got.conditions.length ? ` with ${got.conditions.join(', ')}` : ''}` : 'missing'}`);
+    if (!same) failures.push(`${loan} on the host: ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
+  }
+}
+
 /** Every loan run on one version, and checked by what it did. */
 async function runLoans(version, loans, failures, objects) {
   const refs = {};
@@ -385,6 +402,7 @@ async function runLoans(version, loans, failures, objects) {
     const pressed = r.events.filter((e) => e.kind === 'activated' && DECISIONS.includes(e.detail.control)).map((e) => e.detail.control);
     const wrong = [];
     if (r.run.status !== want.status) wrong.push(`status ${r.run.status}${r.run.error ? ` (${r.run.error.describe})` : ''}`);
+    if (want.error && r.run.error?.kind !== want.error) wrong.push(`stopped ${r.run.error?.kind ?? 'on no error'}, wanted ${want.error}`);
     if (JSON.stringify(pressed) !== JSON.stringify(want.pressed)) wrong.push(`pressed [${pressed.join(', ')}], wanted [${want.pressed.join(', ')}]`);
     // A missing file is known by what the run did — the read that finds the
     // record came back absent — not by the name the model gave the ending
@@ -402,7 +420,8 @@ async function runLoans(version, loans, failures, objects) {
     if (objects && want.outputs && !Object.values(r.run.outputs ?? {}).some((v) => v && typeof v === 'object')) {
       wrong.push('its outputs were not handed back as objects');
     }
-    console.log(`  ${wrong.length ? 'FAIL' : 'ok  '}  ${loan} ${refs[loan]} ${r.run.outcome ?? r.run.status}${wrong.length ? ' — ' + wrong.join('; ') : ''}`);
+    const how = r.run.outcome ?? (r.run.error ? `${r.run.status}: ${r.run.error.describe}` : r.run.status);
+    console.log(`  ${wrong.length ? 'FAIL' : 'ok  '}  ${loan} ${refs[loan]} ${how}${wrong.length ? ' — ' + wrong.join('; ') : ''}`);
     if (wrong.length) failures.push(`${loan}: ${wrong.join('; ')}`);
   }
 }

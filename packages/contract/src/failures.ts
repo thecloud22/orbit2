@@ -74,6 +74,13 @@ export const errorKind = z.enum([
    *  into, or the host set an error. Never retried blindly. */
   'terminalKeyboardLocked',
 
+  // ── The application's answer (Orbit 2.4) ─────────────────────────────────
+  /** A record-changing press the application did not accept: it said no
+   *  (LSV206E LOAN ALREADY APPROVED) or answered without doing anything.
+   *  Nothing changed, so it is not unknown; and asking again asks the same
+   *  question, so it is never retried. */
+  'changeRefused',
+
   // ── Not reachable in slice 1, named so the set does not grow by accident ──
   'serviceResponseOffContract',
   'judgementUnavailable',
