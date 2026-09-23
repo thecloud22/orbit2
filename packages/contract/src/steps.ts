@@ -237,6 +237,16 @@ export function describeMissingAll(fields: string[]): string {
 }
 
 export function describeBinding(binding: unknown): string {
+  // A green screen's binding (Orbit 2.2, Decision 18), said the way a person
+  // reads the screen: by its label or key, and the screen it is on.
+  const g = (binding ?? {}) as { connector?: string; screen?: string; what?: string; label?: string; key?: string; row?: number; column?: number };
+  if (g.connector === 'tn3270') {
+    const on = g.screen ? ` on ${g.screen}` : '';
+    const at = typeof g.row === 'number' && typeof g.column === 'number' ? `, at row ${g.row + 1}, column ${g.column + 1}` : '';
+    return g.what === 'key' ? `the key ${g.key ?? '?'}${g.label ? ` (${g.label})` : ''}${on}`
+      : g.what === 'field' ? `the field after “${g.label ?? '?'}”${on}${at}`
+      : g.label ? `the value after “${g.label}”${on}${at}` : `the text${on}${at}`;
+  }
   const b = (binding ?? {}) as BindingShape;
   const named = b.name ? `“${b.name}”` : 'something unnamed';
 
