@@ -1,0 +1,16 @@
+Meridian Home Lending
+Loan Boarding (Procedure SV-3)
+
+Purpose
+When underwriting approves a file, the loan is boarded onto the servicing system the same day, so the first payment can be billed.
+
+Steps
+1. Sign in to Meridian Home Lending with any user ID and password.
+2. Open the approved loan file using the loan number from the boarding queue.
+3. Read the borrower's name, the loan amount, the note rate and the loan program.
+4. Sign in to Loan Servicing with the servicing user ID.
+5. Board the loan: on the boarding screen, enter the loan number, the borrower's name, the amount, the note rate and the program, and submit it.
+6. Read the servicing account number that Loan Servicing assigns.
+7. Back in Meridian Home Lending, save the servicing account number on the file.
+
+Never change the amount or the note rate.

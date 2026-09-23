@@ -27,7 +27,7 @@ const DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'testing
 const DECISIONS = ['Require private mortgage insurance', 'Require additional reserves', 'Require flood insurance',
   'Require two years of tax returns', 'Approve file', 'Refer to senior underwriter', 'Decline file',
   // The same decisions on the loan-servicing green screen (Orbit 2.2), and the swivel chair's two record-changing acts.
-  'APPROVE', 'REFER', 'ATTACH PMI', 'ATTACH RESERVES', 'ATTACH FLOOD INS', 'ATTACH TAX RETURNS', 'SUBMIT', 'Save'];
+  'APPROVE', 'REFER', 'ATTACH PMI', 'ATTACH RESERVES', 'ATTACH FLOOD INS', 'ATTACH TAX RETURNS', 'SUBMIT', 'Save servicing account'];
 
 const SCENARIOS = {
   1: {
@@ -125,6 +125,33 @@ const SCENARIOS = {
       'ML-26-04561': { status: 'succeeded', pressed: ['ATTACH PMI', 'APPROVE'] },
       'ML-26-04471': { status: 'succeeded', pressed: ['APPROVE'] },
       'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+    },
+  },
+  // The swivel chair, part one: the web file, the borrower's existing loans on
+  // the green screen, and the decision made back on the web.
+  11: {
+    name: 'Scenario 11: existing-loan check, web and green screen',
+    procedure: readFileSync(join(DIR, '11-existing-loans.txt'), 'utf8'),
+    example: 'ML-26-04561',
+    attach: 'servicing',
+    loans: {
+      'ML-26-04488': { status: 'succeeded', pressed: ['Refer to senior underwriter'] },
+      'ML-26-04561': { status: 'succeeded', pressed: ['Require private mortgage insurance', 'Approve file'] },
+      'ML-26-04471': { status: 'succeeded', pressed: ['Approve file'] },
+      'ML-26-04502': { status: 'succeeded', pressed: ['Approve file'] },
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+    },
+  },
+  // The swivel chair, part two: read the approved file on the web, board it
+  // on the green screen, and bring the servicing account back to the web file.
+  12: {
+    name: 'Scenario 12: board the approved loan, web to green screen and back',
+    procedure: readFileSync(join(DIR, '12-board-the-loan.txt'), 'utf8'),
+    example: 'ML-26-04471',
+    attach: 'servicing',
+    loans: {
+      'ML-26-04471': { status: 'succeeded', pressed: ['SUBMIT', 'Save servicing account'], outputs: { account: '7704471' } },
+      'ML-26-04561': { status: 'succeeded', pressed: ['SUBMIT', 'Save servicing account'], outputs: { account: '7704561' } },
     },
   },
   // Published, run, then changed on the page: the threshold is edited in

@@ -465,6 +465,8 @@ export async function authorFromProcedure(opts: {
   const forRulesOnly = (s: Seen) => onlyARuleAsksFor(s, ruleLines.map((l) => l.text), workLines.map((l) => l.text));
 
   let decisionPage: { seen: Seen[]; url: string } | null = null;
+  /** Across applications: each one's screen when the walk ended (Orbit 2.2). */
+  const finalPageOf = new Map<string, { seen: Seen[]; url: string }>();
   /** The page the last value was read on: where a decision's values and its
    *  controls are, wherever the walk happens to end. */
   let readPage: { seen: Seen[]; url: string } | null = null;
@@ -1060,6 +1062,11 @@ export async function authorFromProcedure(opts: {
     // after the endings are settled; the browser does not outlive the walk.
     if (opts.tables?.length) {
       decisionPage = { seen: await looking.look().catch(() => []), url: looking.place() };
+      // Across applications, each one's screen as the walk left it: a table is
+      // connected on the application its rule lines happen on (Orbit 2.2).
+      if (across) {
+        for (const [name, l] of lookings) finalPageOf.set(name, { seen: await l.look().catch(() => []), url: l.place() });
+      }
     }
     if (across) { for (const l of lookings.values()) await l.close().catch(() => undefined); }
     else await looking.close();
@@ -1349,9 +1356,20 @@ export async function authorFromProcedure(opts: {
   // the walk ended on — which is where a file's decision controls are,
   // whichever example it was walked with.
   const onPage = readPage ?? decisionPage;
-  if (opts.tables?.length && onPage) {
-    const compiled = await compileTables({ tables: opts.tables, steps, provenance, order: opts.order ?? [],
-      seen: onPage.seen, pageUrl: onPage.url, model, firstTurn: turns.length + 1 });
+  // Across applications, the tables whose rule lines happen on one application
+  // are connected on its screen; where the walk read last is not where the
+  // decision's controls are when the values came from another system.
+  const groups: Array<{ tables: readonly RuleTable[]; page: { seen: Seen[]; url: string } | null }> = across
+    ? [...new Set(apps.map((a) => a.name))].map((name) => ({
+        tables: (opts.tables ?? []).filter((t) => (opts.sentences ?? []).find((x) => t.sentences.includes(x.number) && x.application)?.application === name),
+        page: finalPageOf.get(name) ?? null }))
+      .concat([{ tables: (opts.tables ?? []).filter((t) => !(opts.sentences ?? []).some((x) => t.sentences.includes(x.number) && x.application)),
+        page: onPage }])
+    : [{ tables: opts.tables ?? [], page: onPage }];
+  for (const g of groups) {
+    if (!g.tables.length || !g.page) continue;
+    const compiled = await compileTables({ tables: g.tables, steps, provenance, order: opts.order ?? [],
+      seen: g.page.seen, pageUrl: g.page.url, model, firstTurn: turns.length + 1 });
     steps.splice(0, steps.length, ...compiled.steps);
     for (const t of compiled.turns) noteTurn(t);
     questions.push(...compiled.questions);
