@@ -2,7 +2,7 @@ Meridian Home Lending
 Loan Boarding (Procedure SV-3)
 
 Purpose
-When underwriting approves a file, the loan is boarded onto the servicing system the same day, so the first payment can be billed.
+Loans are boarded onto the servicing system on the day they are approved, so that the first payment can be billed.
 
 Steps
 1. Sign in to Meridian Home Lending with any user ID and password.

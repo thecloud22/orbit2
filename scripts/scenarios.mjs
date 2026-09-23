@@ -195,7 +195,7 @@ const SCENARIOS = {
 async function servicing(apps) {
   const known = apps.find((a) => !a.retired_at && a.surface === 'terminal' && a.addresses.some((x) => x.host === 'localhost:3271'));
   if (known) return known;
-  const made = await call('/api/applications', { name: 'Meridian Home Lending — Loan Servicing', surface: 'terminal',
+  const made = await call('/api/applications', { name: 'Loan Servicing', surface: 'terminal',
     addresses: [{ host: 'tn3270://localhost:3271' }], signInAs: 'ADMIN', credentialValue: 'practice',
     terminal: { codePage: 'cp037', model: '3278-2' } });
   if (!made.body.id) throw new Error(`the green screen could not be registered: ${made.body.why ?? made.status}`);

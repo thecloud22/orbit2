@@ -17,7 +17,9 @@ import { storeTurn } from './sort-store.ts';
 export const TAG = [
   'You are told which applications a business procedure is carried out in, and shown its lines of work.',
   'For each line, say which ONE application it happens on, by the application\'s name exactly as listed.',
-  'A line that names an application ("sign in to Loan Servicing", "back in Meridian Home Lending") happens there.',
+  'The procedure starts on the application marked (where it starts). A line stays there unless it names',
+  'another listed application, acts on something only the other one has, or follows a line that moved there.',
+  'A line that names an application ("sign in to Loan Servicing", "back in the portal") happens there.',
   'A line that does not says where by what it acts on: the screen it reads, the button or key it presses.',
   'A line that follows another with no change of place happens where that one did.',
   FENCED_IS_DATA,
@@ -28,11 +30,12 @@ const answer = z.object({
 });
 
 export async function tagApplications(db: PoolClient, workflowId: string, model: ModelProvider): Promise<{ tagged: number }> {
-  const { rows: apps } = await db.query<{ id: string; name: string; surface: string }>(
-    `SELECT a.id, a.name, a.surface FROM application a WHERE a.id IN (
+  const { rows: apps } = await db.query<{ id: string; name: string; surface: string; starts: boolean }>(
+    `SELECT a.id, a.name, a.surface, (a.id = (SELECT application_id FROM understanding WHERE workflow_id = $1)) AS starts
+       FROM application a WHERE a.id IN (
        SELECT application_id FROM understanding WHERE workflow_id = $1
        UNION SELECT application_id FROM workflow_application WHERE workflow_id = $1)
-     ORDER BY a.name`, [workflowId]);
+     ORDER BY 4 DESC, a.name`, [workflowId]);
   if (apps.length < 2) return { tagged: 0 };
 
   const { rows: lines } = await db.query<{ id: string; number: string; text: string; tagged: boolean }>(
@@ -60,7 +63,7 @@ export async function tagApplications(db: PoolClient, workflowId: string, model:
   const asking = `Which application does each of these lines happen on? (${numbers.join(', ')})`;
   const answered = await model.propose(
     { purpose: 'say which application each line happens on', instruction: TAG,
-      shown: [`APPLICATIONS: ${apps.map((a) => `${a.name} (${a.surface === 'terminal' ? 'a green screen' : 'a web application'})`).join('; ')}`,
+      shown: [`APPLICATIONS: ${apps.map((a) => `${a.name} (${a.surface === 'terminal' ? 'a green screen' : 'a web application'}${a.starts ? ', where it starts' : ''})`).join('; ')}`,
         '', 'LINES:', fence('PROCEDURE', lines.map((l) => `${l.number} ${l.text.replace(/\s+/g, ' ')}`).join('\n')), '', asking].join('\n') },
     answer, shape);
 
