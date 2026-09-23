@@ -293,3 +293,8 @@ if the walk is started live, so start the demo from a drafted agent.
 
 **`record.test.ts` hangs when the whole worker suite runs together.** It passes alone and with
 `--test-timeout`. Environmental — a browser left open between files — not yet chased.
+
+**A rule value that is itself a page value starting with "Not".** Orbit reads "is not completed"
+as "is not 'completed'", which is right for how procedures are written. A procedure that means the
+portal's literal status "Not enrolled" would be read as "is not 'enrolled'". Nothing in the scenarios
+does this; the tables screen shows the comparison, so a person can see it.

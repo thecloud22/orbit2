@@ -66,3 +66,16 @@ test('an empty table is dropped, not allowed to sink the tables that say somethi
   assert.equal(made.ok && made.tables.length, 1);
   assert.deepEqual(made.turns.map((t) => t.verdict), ['kept']);
 });
+
+test('a negation folded into the word is compared as the opposite, with the word itself', async () => {
+  const { withoutFoldedNegation } = await import('./tables.ts');
+  const t = table(['1.2']).tables[0]!;
+  const folded = { ...t, rows: [{ ...t.rows[0]!, when: [
+    { column: 'claimFound', is: 'is' as const, value: 'not completed' },
+    { column: 'claimFound', is: 'is' as const, value: 'nothing to do' },
+  ] }] };
+  assert.deepEqual(withoutFoldedNegation(folded as never).rows[0]!.when, [
+    { column: 'claimFound', is: 'isNot', value: 'completed' },
+    { column: 'claimFound', is: 'is', value: 'nothing to do' },
+  ]);
+});
