@@ -115,6 +115,13 @@ export async function compileTables(opts: {
   pageUrl: string;
   model: ModelProvider;
   firstTurn: number;
+  /**
+   * Across applications (Orbit 2.2): the application these tables' controls
+   * are on. Where the run has focus on another at the point a table goes in,
+   * the table opens its own first and, when the procedure carries on after
+   * it, goes back — the steps after were drafted on that one's screen.
+   */
+  on?: { application: string; path: string };
 }): Promise<{ steps: Step[]; turns: Turn[]; questions: Note[]; compiled: number }> {
   const turns: Turn[] = [];
   const questions: Note[] = [];
@@ -265,6 +272,14 @@ export async function compileTables(opts: {
     const before = steps.slice(0, insertAt);
     const after = steps.slice(insertAt);
     const readBefore = before.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : []));
+    type Open = Extract<Step, { kind: 'open' }>;
+    const focus = [...before].reverse().find((x): x is Open => x.kind === 'open');
+    const switching = opts.on && (focus?.application ?? 'app') !== opts.on.application ? opts.on : null;
+    const into: Open | null = switching ? { id: crypto.randomUUID(), kind: 'open', summary: `Go to ${switching.application} for "${table.question}"`,
+      application: switching.application, path: switching.path, arrives: { describe: 'the application is showing' }, changesARecord: false } : null;
+    const back: Open | null = switching && focus && after.some((x) => x.kind !== 'end')
+      ? { id: crypto.randomUUID(), kind: 'open', summary: `Back to ${focus.application}`, application: focus.application, path: focus.path,
+          arrives: { describe: 'the application is showing' }, changesARecord: false } : null;
 
     const block: Step[] = [];
     const rowEntry: string[] = table.rows.map(() => crypto.randomUUID());
@@ -292,6 +307,8 @@ export async function compileTables(opts: {
       if (otherwise.ends) block.push({ id: crypto.randomUUID(), kind: 'end', summary: otherwise.label, outcome: otherwise.outcome, publishes: readBefore });
     }
 
+    if (into) block.unshift(into);
+    if (back) block.push(back);
     steps = [...before, ...block, ...after];
     const afterId = after[0]?.id;
     // Inserted before a step, so it is also inserted before every jump to that
@@ -308,9 +325,10 @@ export async function compileTables(opts: {
     for (const x of steps) {
       if (x.kind !== 'branch') continue;
       if (x.ifTrue === AFTER || x.ifFalse === AFTER) {
-        if (!afterId) { problems.push('nothing follows the table'); break; }
-        if (x.ifTrue === AFTER) x.ifTrue = afterId;
-        if (x.ifFalse === AFTER) x.ifFalse = afterId;
+        if (!afterId && !back) { problems.push('nothing follows the table'); break; }
+        const resume = back?.id ?? afterId!;
+        if (x.ifTrue === AFTER) x.ifTrue = resume;
+        if (x.ifFalse === AFTER) x.ifFalse = resume;
       }
     }
     compiled += 1;

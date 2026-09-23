@@ -429,7 +429,10 @@ export async function authorFromProcedure(opts: {
   // say what an authoring session could have cost.
   // A wait means signing in and finding the record again afterwards, so each
   // one the author marked buys the turns that takes.
-  const maxTurns = opts.maxTurns ?? 12 + 8 * (opts.sentences ?? []).filter((x) => x.waits).length;
+  // Each further application the agent works across buys the turns that going
+  // there takes: moving, signing in, finding the record again (Orbit 2.2).
+  const maxTurns = opts.maxTurns ?? 12 + 8 * (opts.sentences ?? []).filter((x) => x.waits).length
+    + 10 * Math.max(0, (opts.applications?.length ?? 1) - 1);
 
   const numbers = (opts.sentences ?? []).map((x) => x.number);
   const provenance: Record<string, string> = {};
@@ -1360,17 +1363,30 @@ export async function authorFromProcedure(opts: {
   // Across applications, the tables whose rule lines happen on one application
   // are connected on its screen; where the walk read last is not where the
   // decision's controls are when the values came from another system.
-  const groups: Array<{ tables: readonly RuleTable[]; page: { seen: Seen[]; url: string } | null }> = across
-    ? [...new Set(apps.map((a) => a.name))].map((name) => ({
-        tables: (opts.tables ?? []).filter((t) => (opts.sentences ?? []).find((x) => t.sentences.includes(x.number) && x.application)?.application === name),
-        page: finalPageOf.get(name) ?? null }))
-      .concat([{ tables: (opts.tables ?? []).filter((t) => !(opts.sentences ?? []).some((x) => t.sentences.includes(x.number) && x.application)),
-        page: onPage }])
-    : [{ tables: opts.tables ?? [], page: onPage }];
+  // A table belongs with the application whose screen has the controls its
+  // actions press — "refer the file" is a web button, even when the value it
+  // compares came from the green screen. Where no screen has them, the
+  // application its rule lines were placed on.
+  const pressesOn = (t: RuleTable, page: { seen: Seen[] } | undefined) => {
+    const actions = [...t.rows.map((r) => r.then), ...(t.otherwise ? [t.otherwise.then] : [])];
+    return (page?.seen ?? []).filter((e) => (e.what === 'button' || e.what === 'link') && changingVerbOf(e.name)
+      && actions.some((a) => lineAsksFor(e.name, a))).length;
+  };
+  const appOfTable = (t: RuleTable): string | null => {
+    const scored = apps.map((a) => ({ name: a.name, n: pressesOn(t, finalPageOf.get(a.name)) })).sort((x, y) => y.n - x.n);
+    if (scored[0] && scored[0].n > 0) return scored[0].name;
+    return (opts.sentences ?? []).find((x) => t.sentences.includes(x.number) && x.application)?.application ?? null;
+  };
+  const groups: Array<{ tables: readonly RuleTable[]; page: { seen: Seen[]; url: string } | null; app: WalkApplication | null }> = across
+    ? apps.map((a): { tables: readonly RuleTable[]; page: { seen: Seen[]; url: string } | null; app: WalkApplication | null } =>
+        ({ tables: (opts.tables ?? []).filter((t) => appOfTable(t) === a.name), page: finalPageOf.get(a.name) ?? null, app: a }))
+      .concat([{ tables: (opts.tables ?? []).filter((t) => appOfTable(t) === null), page: onPage, app: null }])
+    : [{ tables: opts.tables ?? [], page: onPage, app: null }];
   for (const g of groups) {
     if (!g.tables.length || !g.page) continue;
     const compiled = await compileTables({ tables: g.tables, steps, provenance, order: opts.order ?? [],
-      seen: g.page.seen, pageUrl: g.page.url, model, firstTurn: turns.length + 1 });
+      seen: g.page.seen, pageUrl: g.page.url, model, firstTurn: turns.length + 1,
+      ...(g.app ? { on: { application: applicationKey(g.app.name), path: g.app.startPath } } : {}) });
     steps.splice(0, steps.length, ...compiled.steps);
     for (const t of compiled.turns) noteTurn(t);
     questions.push(...compiled.questions);
