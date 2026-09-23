@@ -133,7 +133,8 @@ export async function sentencesWithLabels(db: ClientBase, workflowId: string): P
             (SELECT p2.key || '.' || s2.n FROM procedure_sentence s2 JOIN procedure_part p2 ON p2.id = s2.part_id
               WHERE s2.id = p.after_sentence_id) AS after,
             -- A label from before the sentence last changed describes words it no longer has.
-            (l.created_at IS NOT NULL AND (s.revised_at IS NULL OR l.created_at > s.revised_at)) AS "labelCurrent"
+            -- A withdrawn sentence has no words to label, and the sort never looks at it again.
+            (s.withdrawn OR (l.created_at IS NOT NULL AND (s.revised_at IS NULL OR l.created_at > s.revised_at))) AS "labelCurrent"
        FROM sentence_now s
        JOIN procedure_part p ON p.id = s.part_id
        LEFT JOIN LATERAL (

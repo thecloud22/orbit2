@@ -177,7 +177,8 @@ export function ChatPanel({ messages, open, closedWhy, busy, onSend, onTake }: {
   onSend: (text: string) => Promise<boolean>; onTake: (messageId: string) => void;
 }) {
   const [text, setText] = useState('');
-  const working = messages.some((m) => m.state === 'queued' || m.state === 'answering');
+  // A message the API has filed and no worker has answered yet (chat_message.state).
+  const working = messages.some((m) => m.state === 'waiting');
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <PanelNote>{open ? 'Changes this draft and nothing else. What you ask for is kept in your words, and marked when it is not in the procedure.' : closedWhy}</PanelNote>
@@ -187,7 +188,7 @@ export function ChatPanel({ messages, open, closedWhy, busy, onSend, onTake }: {
           fontSize: 13, lineHeight: 1.5, borderRadius: 6, padding: '8px 11px',
           background: m.said_by === 'author' ? 'var(--page)' : 'var(--panel-2)',
           border: m.said_by === 'author' ? '1px solid var(--rule-2)' : '1px solid transparent' }}>
-          {m.text ?? (m.state === 'queued' || m.state === 'answering' ? 'Orbit is answering…' : '')}
+          {m.text}
           {m.outcome?.departs && <div style={{ fontSize: 11.5, color: 'var(--attention-ink)', marginTop: 4, fontWeight: 600 }}>Not in the procedure</div>}
           {m.outcome?.refused && <div style={{ fontSize: 12, color: 'var(--failed-ink)', marginTop: 4 }}>{m.outcome.refused}</div>}
           {m.outcome?.offer && open && (
@@ -196,6 +197,7 @@ export function ChatPanel({ messages, open, closedWhy, busy, onSend, onTake }: {
           )}
         </div>
       ))}
+      {working && <PanelNote>Orbit is answering…</PanelNote>}
       {open && (
         <form onSubmit={(e) => { e.preventDefault(); if (!text.trim()) return; void onSend(text).then((ok) => ok && setText('')); }}
           style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
