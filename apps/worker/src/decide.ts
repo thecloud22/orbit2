@@ -304,7 +304,15 @@ export async function compileTables(opts: {
     });
     if (otherwise) {
       for (const x of otherwise.steps) { if (table.otherwise?.sentence) opts.provenance[x.id] = table.otherwise.sentence; block.push(x); }
-      if (otherwise.ends) block.push({ id: crypto.randomUUID(), kind: 'end', summary: otherwise.label, outcome: otherwise.outcome, publishes: readBefore });
+      // An "otherwise" that presses nothing concludes without doing anything,
+      // so it ends the procedure only where nothing else follows the table.
+      // Scenario 10's table said "otherwise, no PMI condition" and ended there:
+      // placed after ATTACH PMI, it caught every file that needed PMI before
+      // it was approved.
+      const goesOn = after.some((x) => x.kind !== 'end');
+      if (otherwise.ends && (otherwise.steps.length > 0 || !goesOn)) {
+        block.push({ id: crypto.randomUUID(), kind: 'end', summary: otherwise.label, outcome: otherwise.outcome, publishes: readBefore });
+      }
     }
 
     if (into) block.unshift(into);

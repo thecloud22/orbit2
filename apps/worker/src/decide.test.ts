@@ -39,3 +39,38 @@ test('an ending is always named within what a step summary takes', async () => {
   const long = endingSummary('The file was referred to a senior underwriter because '.repeat(6));
   assert.ok(long.length <= 200 && long.endsWith('…'), long);
 });
+
+test('an otherwise that presses nothing does not end a procedure that goes on after the table', async () => {
+  const { compileTables } = await import('./decide.ts');
+  const id = () => crypto.randomUUID();
+  const approve = id();
+  const steps = [
+    { id: id(), kind: 'open', summary: 'open', application: 'app', path: '/', arrives: { describe: 'open' }, changesARecord: false },
+    { id: id(), kind: 'read', summary: 'LTV', region: { label: 'LTV', binding: {} },
+      produces: { name: 'loanToValue', label: 'LTV', type: 'number', required: true } },
+    { id: approve, kind: 'activate', summary: 'APPROVE', control: { label: 'APPROVE', binding: {} }, then: { describe: 'x' }, changesARecord: true },
+    { id: id(), kind: 'end', summary: 'approved', outcome: 'approved', publishes: [] },
+  ] as never[];
+  const model = {
+    provider: 'test', model: 'test',
+    async propose() {
+      return { value: { columns: [{ column: 'loanToValue', value: 'loanToValue' }], words: [], why: 'x',
+        actions: [
+          { action: 'Attach the condition requiring private mortgage insurance.', controls: ['ATTACH PMI'], ends: false, outcome: null, label: null },
+          { action: 'No PMI condition is attached.', controls: [], ends: true, outcome: 'noPmiCondition', label: 'No PMI condition' },
+        ] }, model: 'test', provider: 'test', tokensIn: 1, tokensOut: 1, tokensCached: 0, tokensCacheWritten: 0, costMicros: 1 };
+    },
+  };
+  const compiled = await compileTables({
+    tables: [{ question: 'When is PMI attached?', columns: [{ name: 'loanToValue', label: 'LTV', readBy: '1.8' }],
+      rows: [{ when: [{ column: 'loanToValue', is: 'isMoreThan', value: '80' }], then: 'Attach the condition requiring private mortgage insurance.', sentence: '1.9' }],
+      otherwise: { then: 'No PMI condition is attached.', sentence: null }, sentences: ['1.9'] }],
+    steps, provenance: { [approve]: '1.10' }, order: ['1.8', '1.9', '1.10'],
+    seen: [{ index: 1, what: 'button', role: 'key', name: 'ATTACH PMI', binding: {} as never }],
+    pageUrl: 'LSV20', model: model as never, firstTurn: 1,
+  });
+  const kinds = compiled.steps.map((x) => (x.kind === 'end' ? `end:${x.outcome}` : x.kind === 'activate' ? x.summary : x.kind));
+  assert.ok(!kinds.includes('end:noPmiCondition'), kinds.join(' → '));
+  const pmi = kinds.indexOf('ATTACH PMI');
+  assert.equal(kinds[pmi + 1], 'APPROVE', 'after attaching PMI the file is still approved');
+});
