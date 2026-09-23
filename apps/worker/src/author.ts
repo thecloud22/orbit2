@@ -479,6 +479,8 @@ export async function authorFromProcedure(opts: {
    *  controls are, wherever the walk happens to end. */
   let readPage: { seen: Seen[]; url: string } | null = null;
   const toldUndone = new Set<string>();
+  /** Across applications: how many more times a "finished" has been refused with lines left. */
+  let acrossNudges = 0;
   // One application, as it always was; or across several, one session each,
   // opened when the walk first goes there (Orbit 2.2, C12).
   const apps = across ? opts.applications! : [];
@@ -751,6 +753,18 @@ export async function authorFromProcedure(opts: {
           // looking for a way to attach a condition instead of approving.
           const quoted = undone.map((n) => `${n} ("${opts.sentences!.find((x) => x.number === n)!.text.replace(/\s+/g, ' ')}")`);
           noteTurn(record('rejected', `it said the procedure is finished, and ${quoted.join(', ')} ${undone.length === 1 ? 'has' : 'have'} no step yet`));
+          continue;
+        }
+        // Across applications a second "finished" is not taken so easily: a
+        // walk that half signed on to the green screen and stopped (scenario 11)
+        // is told again, where it is and what is left, up to three more times.
+        const leftAcross = across ? (opts.sentences ?? []).filter((x) => !x.waits
+          && (opts.taskSentences ?? []).includes(x.number) && !Object.values(provenance).includes(x.number)) : [];
+        if (leftAcross.length && acrossNudges < 3) {
+          acrossNudges++;
+          noteTurn(record('rejected', `it said the procedure is finished while on ${current}, and `
+            + `${leftAcross.map((x) => `${x.number} ("${x.text.replace(/\s+/g, ' ')}")`).join(', ')} still ${leftAcross.length === 1 ? 'has' : 'have'} no step. `
+            + 'Look at the screen: if something it shows was not done, such as a sign-on that was refused, do that first'));
           continue;
         }
         const stillUndone = [...toldUndone].filter((n) => !Object.values(provenance).includes(n));
