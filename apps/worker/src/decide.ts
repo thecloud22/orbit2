@@ -37,6 +37,9 @@ export const DECIDE = [
   '         (declining, referring, sending away); false when the procedure carries on after it (attaching a',
   '         condition). For an action that ends, outcome is a short camelCase name for the conclusion and',
   '         label how it reads to a person.',
+  'words    For each word a condition compares a value with, how this application writes it: copy it from',
+  '         the page where the page shows that value ("Yes" for "is a first-time buyer" when the page shows',
+  '         First-time buyer as Yes or No); otherwise the word as the procedure writes it, unchanged.',
   '',
   FENCED_IS_DATA,
 ].join('\n');
@@ -49,10 +52,11 @@ const answer = z.object({
     action: z.string(), controls: z.array(z.string()).max(3), ends: z.boolean(),
     outcome: z.string().nullable(), label: z.string().nullable(),
   })),
+  words: z.array(z.object({ column: z.string(), written: z.string(), shown: z.string() })).default([]),
   why: z.string(),
 });
 
-const shapeFor = (columns: string[], actions: string[], values: string[]) => ({
+const shapeFor = (columns: string[], actions: string[], values: string[], written: string[]) => ({
   type: 'object',
   properties: {
     columns: { type: 'array', minItems: columns.length, maxItems: columns.length, items: { type: 'object',
@@ -62,11 +66,37 @@ const shapeFor = (columns: string[], actions: string[], values: string[]) => ({
       properties: { action: { type: 'string', enum: actions }, controls: { type: 'array', items: { type: 'string' } },
         ends: { type: 'boolean' }, outcome: { type: ['string', 'null'] }, label: { type: ['string', 'null'] } },
       required: ['action', 'controls', 'ends', 'outcome', 'label'], additionalProperties: false } },
+    words: { type: 'array', maxItems: written.length, items: { type: 'object',
+      properties: { column: { type: 'string', enum: columns },
+        written: written.length ? { type: 'string', enum: written } : { type: 'string' }, shown: { type: 'string' } },
+      required: ['column', 'written', 'shown'], additionalProperties: false } },
     why: { type: 'string' },
   },
-  required: ['columns', 'actions', 'why'],
+  required: ['columns', 'actions', 'words', 'why'],
   additionalProperties: false,
 });
+
+/**
+ * A text condition compares with a word the page can show. The table is made
+ * from the procedure's sentences before anything is read, so it holds the
+ * procedure's words: scenario 5 compared First-time buyer with "first-time
+ * buyer", a page that shows Yes or No never matched it, and every first-time
+ * buyer without homebuyer education was approved instead of referred. The
+ * model says how the page writes the word; Orbit takes that only where the
+ * page bears it out — the value the example shows, or the other answer of a
+ * yes/no field — and otherwise keeps the procedure's word and asks.
+ */
+const ANSWERS = [['yes', 'no'], ['true', 'false'], ['y', 'n']];
+export function asThePageWritesIt(written: string, shown: string | undefined, example: string | undefined):
+  { word: string; taken: boolean; unsure: boolean } {
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  if (!shown || same(shown, written)) return { word: written, taken: false, unsure: false };
+  if (example && (same(shown, example)
+    || ANSWERS.some((pair) => pair.some((w) => same(w, example)) && pair.some((w) => same(w, shown))))) {
+    return { word: shown.trim(), taken: true, unsure: false };
+  }
+  return { word: written, taken: false, unsure: true };
+}
 
 /** A table the absence check already handles: every row is "the record is not there". */
 const onlyAbsence = (t: RuleTable) => t.rows.every((r) => r.when.length === 1 && r.when[0]!.is === 'isAbsent');
@@ -92,6 +122,8 @@ export async function compileTables(opts: {
     const reads = steps.filter((x): x is Read => x.kind === 'read');
     const values = reads.map((r) => r.produces.name);
     const actionsSaid = [...new Set([...table.rows.map((r) => r.then), ...(table.otherwise ? [table.otherwise.then] : [])])];
+    const written = [...new Set(table.rows.flatMap((r) => r.when
+      .filter((w) => (w.is === 'is' || w.is === 'isNot') && w.value).map((w) => w.value!)))];
     const asking = `Connect "${table.question}" to the page.`;
 
     type Answer = z.infer<typeof answer>;
@@ -101,6 +133,7 @@ export async function compileTables(opts: {
     let problems: string[] = [];
     let valueOf = new Map<string, Read>();
     let acts = new Map<string, Act>();
+    let reworded: Array<{ label: string; written: string; shown: string; taken: boolean; example: string | undefined }> = [];
     let comparisons: Array<Array<ReturnType<typeof comparisonFor> | { of: 'absence'; operator: 'isAbsent'; left: { from: 'step'; value: string } } | null>> = [];
     const record = (verdict: Turn['verdict'], why: string) => turns.push({
       turn: opts.firstTurn + turns.length, shown: { page: opts.pageUrl, elements: opts.seen.length, asking },
@@ -127,7 +160,7 @@ export async function compileTables(opts: {
               `ACTIONS: ${actionsSaid.map((a) => `"${a}"`).join(', ')}`].join('\n')), '',
             `PAGE (${opts.pageUrl}):`, fence('PAGE', asText(withheld(opts.seen))), '', asking,
             ...(correction ? ['', correction] : [])].join('\n') },
-        answer, shapeFor(table.columns.map((c) => c.name), actionsSaid, values));
+        answer, shapeFor(table.columns.map((c) => c.name), actionsSaid, values, written));
 
       problems = [];
       said = answered.value;
@@ -176,6 +209,7 @@ export async function compileTables(opts: {
       }
 
       // Every condition must become a comparison Orbit can carry out.
+      reworded = [];
       comparisons = table.rows.map((r) => r.when.map((w) => {
         const read = valueOf.get(w.column);
         if (!read) return null;
@@ -183,7 +217,16 @@ export async function compileTables(opts: {
           return { of: 'absence' as const, operator: (w.is === 'isAbsent' ? 'isAbsent' : 'isNotAbsent') as 'isAbsent',
             left: { from: 'step' as const, value: read.produces.name } };
         }
-        const made = comparisonFor({ value: read.produces.name, is: w.is, than: withoutUnit(w.value ?? '', read.produces.type) }, read.produces);
+        let than = withoutUnit(w.value ?? '', read.produces.type);
+        if (read.produces.type === 'text' && (w.is === 'is' || w.is === 'isNot') && w.value) {
+          const shown = said?.words.find((x) => x.column === w.column && x.written === w.value)?.shown;
+          const example = opts.seen.find((e) => e.what === 'value'
+            && normaliseName(calledIn(e)).toLowerCase() === read.region.label.toLowerCase())?.name;
+          const page = asThePageWritesIt(w.value, shown, example);
+          than = page.word;
+          if (page.taken || page.unsure) reworded.push({ label: read.produces.label, written: w.value, shown: shown!, taken: page.taken, example });
+        }
+        const made = comparisonFor({ value: read.produces.name, is: w.is, than }, read.produces);
         if (!made) problems.push(`"${read.produces.label} ${readable(w.is)} ${w.value}" is not a comparison Orbit can carry out`);
         return made;
       }));
@@ -267,6 +310,13 @@ export async function compileTables(opts: {
       }
     }
     compiled += 1;
+    for (const r of [...new Map(reworded.map((x) => [`${x.label}|${x.written}`, x])).values()]) {
+      questions.push(r.taken
+        ? asAssumption(`"${r.written}" in "${table.question}" is compared as "${r.shown}", the way the page writes ${r.label}.`,
+          `Taken from the page, which showed ${r.label} as "${r.example}". Check it reads as the procedure means.`)
+        : asQuestion(`"${table.question}" compares ${r.label} with "${r.written}", as the procedure writes it. `
+          + `The page may write it as "${r.shown}", but the example showed ${r.example ? `"${r.example}"` : 'no value'}, so Orbit could not tell. What does the page show?`));
+    }
     record('kept', `"${table.question}": ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`
       + `${table.otherwise ? ' and otherwise' : ''}, from ${table.sentences.join(', ')}`);
     questions.push(asAssumption(

@@ -1072,15 +1072,24 @@ export async function authorFromProcedure(opts: {
     // model named things; it did not get to decide whether they hold together.
     const found = said ? normaliseName(said.whenFound.outcome) : '';
     const absent = said?.whenAbsent ? normaliseName(said.whenAbsent.outcome) : null;
-    const separator = said?.missingValue ? produced.find((v) => v.name === said.missingValue) : undefined;
+    // Which value's absence separates the two endings, when the answer
+    // describes a second ending and leaves that out: the rules already marked
+    // the values that may not be there, and when only one is, it is the one.
+    // Scenario 5 was refused here with "First-time buyer may not be there:
+    // missing means the record was not found" on the same draft, and its
+    // missing file halted instead of concluding.
+    const mayBeAbsent = produced.filter((v) => !v.required);
+    const missingValue = said?.missingValue
+      ?? (said?.whenAbsent && mayBeAbsent.length === 1 ? mayBeAbsent[0]!.name : null);
+    const separator = missingValue ? produced.find((v) => v.name === missingValue) : undefined;
 
     const refusal =
       !said ? (answered.refusedBecause ?? 'the model gave no answer')
       : !found ? 'it did not name the conclusion the procedure reaches when the work is done'
       : said.whenAbsent && !absent ? 'it described a second conclusion without naming it'
-      : said.whenAbsent && !said.missingValue ? 'it described a second conclusion without saying what distinguishes it'
-      : said.missingValue && !separator
-        ? `it named "${said.missingValue}" as the value that would be missing, and no step produces a value by that name`
+      : said.whenAbsent && !missingValue ? 'it described a second conclusion without saying what distinguishes it'
+      : missingValue && !separator
+        ? `it named "${missingValue}" as the value that would be missing, and no step produces a value by that name`
       : separator && separator.required ? `"${separator.name}" is always present, so its absence cannot separate two conclusions`
       : absent && absent === found ? 'it gave both conclusions the same name, which names neither'
       : null;
