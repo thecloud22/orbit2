@@ -1987,6 +1987,17 @@ whether the run ends there or comes back.
 
 Nothing about a version that does not use `waits` changes, and its digest is unchanged.
 
+### Amendment to Decision 14 — values are objects (2026-09-22)
+
+Asked for by Karthik: the DataStore, the inputs and the outputs hold objects — a `loan` with
+`number`, `ltv`, `creditScore` — not loose values. A declared value (an input, or what a read
+produces) may say which object it is a field of: `of: { object, field }`, both names. It is a
+grouping, not a path. A step still names a value by its own unique name, and item 3 stands: there
+is no dotted path anybody types. A run's outputs are handed back shaped as objects
+(`asObjects`, `packages/contract/src/values.ts`); a value that belongs to no object, or whose
+field is already taken, keeps its own name rather than being dropped or merged. The walk proposes
+the object and field; an author moves or renames them on the editor's DataStore tab.
+
 ## Decision 15 — The locator, from measurement
 
 **Status:** adopted.

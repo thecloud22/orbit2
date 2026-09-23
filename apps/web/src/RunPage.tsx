@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { isRetryable, type ArtefactView, type ErrorKind, type RunEventView, type RunView, type StepAttemptView } from '@orbit/contract';
 import { Dot, EmptyState, OutcomePair, Row, Verbatim, type Emptiness } from './ui.tsx';
 import { DataStore } from './DataStore.tsx';
+import { fieldsOf } from '@orbit/contract';
 import { useLinkProps, type Route } from './router.ts';
 
 type Loaded = { kind: 'loaded'; data: RunView } | { kind: 'empty'; of: Emptiness };
@@ -311,7 +312,7 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
           <Row label="Started by"><span style={{ color: 'var(--ink-2)' }}>Not recorded. Attribution starts when sign-in does.</span></Row>
         </div>
         <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 9 }}>
-          {Object.entries(run.outputs ?? {}).map(([key, value]) => (
+          {fieldsOf(run.outputs ?? {}).map(([key, value]) => (
             <Row key={key} label={key}><Verbatim>{String(value)}</Verbatim></Row>
           ))}
           <Row label="It changed"><span style={{ color: 'var(--ok-ink)', fontWeight: 600 }}>

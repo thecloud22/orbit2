@@ -151,7 +151,10 @@ async function run(key) {
     if (JSON.stringify(pressed) !== JSON.stringify(want.pressed)) wrong.push(`pressed [${pressed.join(', ')}], wanted [${want.pressed.join(', ')}]`);
     if (want.ending && !want.ending.test(r.run.outcome ?? '')) wrong.push(`ended ${r.run.outcome}`);
     for (const [k, v] of Object.entries(want.outputs ?? {})) {
-      const got = Object.entries(r.run.outputs ?? {}).find(([name]) => name.toLowerCase().includes(k.toLowerCase()))?.[1];
+      // Outputs come back as objects (R26): { loan: { noteRate } } is checked as loan.noteRate.
+      const fields = Object.entries(r.run.outputs ?? {}).flatMap(([name, v]) => (v && typeof v === 'object'
+        ? Object.entries(v).map(([f, x]) => [`${name}.${f}`, x]) : [[name, v]]));
+      const got = fields.find(([name]) => name.toLowerCase().includes(k.toLowerCase()))?.[1];
       if (got !== v) wrong.push(`${k} was ${got ?? 'not published'}, wanted ${v}`);
     }
     console.log(`  ${wrong.length ? 'FAIL' : 'ok  '}  ${loan} ${refs[loan]} ${r.run.outcome ?? r.run.status}${wrong.length ? ' — ' + wrong.join('; ') : ''}`);

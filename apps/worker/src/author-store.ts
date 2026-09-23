@@ -198,16 +198,19 @@ export async function storeDraft(
 
     // What the model could not work out. §4 and acceptance criterion 3: any
     // outstanding one blocks confirmation, with a link to it.
+    const stepIds = new Set(draft.steps.map((x) => x.id));
     for (const note of draft.questions) {
       // A note Orbit has already answered is settled when it is written. It
       // is on the record and it blocks nothing — the difference between
       // saying what was assumed and demanding that somebody type it back.
+      // Where it belongs: its sentence, the turn whose picture shows the page,
+      // the step, what could be meant, and what answering it does (R19).
       await db.query(
-        note.answer
-          ? `INSERT INTO workflow_note (workflow_id, kind, body, answer, resolved_at)
-             VALUES ($1, $2, $3, $4, now())`
-          : `INSERT INTO workflow_note (workflow_id, kind, body, answer) VALUES ($1, $2, $3, $4)`,
-        [workflowId, note.kind, note.body, note.answer ?? null]);
+        `INSERT INTO workflow_note (workflow_id, kind, body, answer, resolved_at, sentence, at_turn, step_id, candidates, action)
+         VALUES ($1, $2, $3, $4, CASE WHEN $4::text IS NULL THEN NULL ELSE now() END, $5, $6, $7, $8, $9)`,
+        [workflowId, note.kind, note.body, note.answer ?? null, note.sentence ?? null,
+         note.atTurn ? offset + note.atTurn : null, note.stepId && stepIds.has(note.stepId) ? note.stepId : null,
+         note.candidates ? JSON.stringify(note.candidates) : null, note.action ?? null]);
     }
 
     for (const turn of draft.turns) {

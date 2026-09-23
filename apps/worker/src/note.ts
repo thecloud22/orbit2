@@ -21,6 +21,17 @@ export interface Note {
    * a note is outstanding, and confirmation waits for a person.
    */
   answer?: string;
+  /**
+   * Where the question belongs, so it is left on the page under its sentence
+   * with the picture of what Orbit was looking at (Decision 17 item 4): the
+   * sentence, the walk turn, the step it is about, what on that page could be
+   * what the sentence means, and the one-click answer Orbit can act on.
+   */
+  sentence?: string | null;
+  atTurn?: number | null;
+  stepId?: string | null;
+  candidates?: Array<{ name: string; what: string; label?: string }> | null;
+  action?: 'pickElement' | 'useInput' | 'giveExample' | 'mapAgain' | null;
 }
 
 /** Something Orbit could not work out, and a person can say. */

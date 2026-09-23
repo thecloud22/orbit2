@@ -121,6 +121,18 @@ export const constraints = object({
   latest: z.iso.date().optional(),
 });
 
+/**
+ * Which object a value is a field of (procedure editor R26, Decision 14 as
+ * amended): a loan's `ltv`, a borrower's `creditScore`. The DataStore holds
+ * objects, and a run hands its outputs back as objects.
+ *
+ * A grouping, not a path: a step still names a value by its own unique name,
+ * and there is still nowhere to type `loan.ltv` (Decision 14 item 3). The
+ * object and field are what a person and a caller of the run see.
+ */
+export const fieldOf = object({ object: name, field: name });
+export type FieldOf = z.infer<typeof fieldOf>;
+
 /** A value the workflow declares: an input, or something a step produces. */
 export const declaredValue = object({
   name,
@@ -128,5 +140,35 @@ export const declaredValue = object({
   type: valueType,
   required: z.boolean(),
   constraints: constraints.optional(),
+  of: fieldOf.optional(),
 });
 export type DeclaredValue = z.infer<typeof declaredValue>;
+
+/**
+ * Values shaped as the objects they belong to: `{ loan: { number, ltv } }`.
+ * A value that belongs to no object keeps its own name at the top level, and
+ * nothing is dropped or merged: two values claiming one field of one object
+ * cannot both be shown, so the second keeps its own name instead.
+ */
+export function asObjects(values: Record<string, unknown>,
+  declared: ReadonlyArray<{ name: string; of?: FieldOf | undefined }>): Record<string, unknown> {
+  const ofByName = new Map(declared.filter((d) => d.of).map((d) => [d.name, d.of!]));
+  const out: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(values)) {
+    const of = ofByName.get(name);
+    const holder = of ? out[of.object] : undefined;
+    if (of && (holder === undefined || (typeof holder === 'object' && holder !== null && !Array.isArray(holder)))) {
+      const fields = (holder ?? {}) as Record<string, unknown>;
+      if (!(of.field in fields)) { fields[of.field] = value; out[of.object] = fields; continue; }
+    }
+    out[name] = value;
+  }
+  return out;
+}
+
+/** A run's outputs, objects and all, as `loan.ltv`-style names and their values, for showing or checking. */
+export function fieldsOf(outputs: Record<string, unknown>): Array<[string, unknown]> {
+  return Object.entries(outputs).flatMap(([k, v]) => (v && typeof v === 'object' && !Array.isArray(v)
+    ? Object.entries(v as Record<string, unknown>).map(([f, x]): [string, unknown] => [`${k}.${f}`, x])
+    : [[k, v] as [string, unknown]]));
+}

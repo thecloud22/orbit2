@@ -7,7 +7,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Chip } from '../ui.tsx';
 import { Picture } from './Picture.tsx';
 import {
-  elementWords, heldOf, sayStep, targetOf, valueWords, LABEL_NAME,
+  elementWords, heldOf, objectsOf, ruleIdsOf, sayStep, targetOf, valueWords, words, LABEL_NAME,
   type Block, type ChatMessage, type Draft, type RuleTable, type Shot, type Step,
 } from './model.ts';
 
@@ -58,6 +58,7 @@ export function StepsPanel({ draft, block, all, chosen, onChoose, shotOf, positi
   extra?: (step: Step) => ReactNode;
 }) {
   const steps = all ? draft.steps : block?.steps ?? [];
+  const rules = ruleIdsOf(draft.rules);
   const step = steps.find((s) => s.id === chosen) ?? steps.find((s) => shotOf(s)?.digest) ?? steps[0] ?? null;
   const lead = block?.lead ?? block?.sentences[0] ?? null;
   const why = !block ? 'Choose a sentence in the procedure to see the steps that carry it out.'
@@ -92,6 +93,8 @@ export function StepsPanel({ draft, block, all, chosen, onChoose, shotOf, positi
                   <span style={{ display: 'block', fontSize: 13, lineHeight: 1.45 }}>
                     <span style={{ ...mono, fontSize: 11.5, fontWeight: 600, color: 'var(--running-ink)', marginRight: 7 }}>{s.kind}</span>
                     {sayStep(s, positionOf)}
+                    {rules.ofStep(s) && <sup title={`Carries out business rule ${rules.ofStep(s)}`}
+                      style={{ ...mono, fontSize: 9.5, fontWeight: 700, color: 'var(--running-ink)', marginLeft: 3 }}>{rules.ofStep(s)}</sup>}
                   </span>
                   <span style={{ display: 'block', fontSize: 11.5, color: s.missing.length ? 'var(--attention-ink)' : 'var(--ink-2)', marginTop: 2, lineHeight: 1.4 }}>
                     {elementWords(s)}{all && s.from_sentence ? ` · from ${s.from_sentence}` : ''}
@@ -208,42 +211,167 @@ export function ChatPanel({ messages, open, closedWhy, busy, onSend, onTake }: {
   );
 }
 
-// ─── Inputs, Outputs ────────────────────────────────────────────────────────
+// ─── Inputs, Outputs (R8–R11, R13, R26) ────────────────────────────────────
 
-export function InputsPanel({ draft, children }: { draft: Draft; children?: ReactNode }) {
+export type OnEdit = (verb: string, body: unknown) => Promise<boolean>;
+
+/** A camelCase name from a label a person wrote: "Loan number" is `loanNumber`. */
+export const nameFrom = (label: string) => label.trim().replace(/[^A-Za-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean)
+  .map((w, i) => (i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())).join('').replace(/^[^a-z]+/, '');
+
+const small: React.CSSProperties = { font: 'inherit', fontSize: 12.5, fontWeight: 600, borderRadius: 3, padding: '4px 10px', cursor: 'pointer' };
+const dark: React.CSSProperties = { ...small, color: 'var(--page)', background: 'var(--ink)', border: '1px solid var(--ink)' };
+const plain: React.CSSProperties = { ...small, color: 'var(--ink)', background: 'transparent', border: '1px solid var(--rule-2)' };
+
+function ObjectHeading({ object }: { object: string | null }) {
+  return (
+    <div style={{ display: 'flex', gap: 7, alignItems: 'baseline', padding: '8px 0 4px' }}>
+      <span style={{ fontSize: 12.5, fontWeight: 700 }}>{object ? words(object) : 'Not part of an object'}</span>
+      {object && words(object).toLowerCase() !== object && <span style={{ ...mono, fontSize: 11.5, color: 'var(--ink-2)' }}>{object}</span>}
+    </div>
+  );
+}
+
+/** Declaring an input: a label, the name made from it, a type, an example, and the object it belongs to. */
+function NewInput({ objects, busy, onEdit, onDone, seed }: {
+  objects: string[]; busy: boolean; onEdit: OnEdit; onDone: () => void;
+  seed?: { label: string; example: string; object?: string };
+}) {
+  const [label, setLabel] = useState(seed?.label ?? '');
+  const [named, setNamed] = useState<string | null>(null);
+  const [type, setType] = useState('text');
+  const [required, setRequired] = useState(true);
+  const [example, setExample] = useState(seed?.example ?? '');
+  const [object, setObject] = useState(seed?.object ?? objects[0] ?? '');
+  const [field, setField] = useState<string | null>(null);
+  const name = named ?? nameFrom(label);
+  const fieldName = field ?? name;
+  return (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      void onEdit('declare-input', { name, label, type, required, ...(example ? { example } : {}),
+        ...(object ? { of: { object: nameFrom(object), field: fieldName } } : {}) }).then((ok) => ok && onDone());
+    }} style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--page)', border: '1px solid var(--rule-2)', borderRadius: 5, padding: 12 }}>
+      <label style={{ fontSize: 12.5 }}>Label, as a person reads it<input style={field_} value={label} onChange={(e) => setLabel(e.target.value)} required /></label>
+      <label style={{ fontSize: 12.5 }}>Name<input style={{ ...field_, ...mono }} value={name} onChange={(e) => setNamed(e.target.value)} /></label>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <label style={{ fontSize: 12.5, flex: 1 }}>Type<select style={field_} value={type} onChange={(e) => setType(e.target.value)}>
+          <option value="text">text</option><option value="number">number</option><option value="date">date</option><option value="yesNo">yes/no</option></select></label>
+        <label style={{ fontSize: 12.5, flex: 1 }}>Example<input style={field_} value={example} onChange={(e) => setExample(e.target.value)} placeholder="ML-26-04471" /></label>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <label style={{ fontSize: 12.5, flex: 1 }}>Part of the object<input style={{ ...field_, ...mono }} list="objects" value={object} onChange={(e) => setObject(e.target.value)} placeholder="loan" /></label>
+        <label style={{ fontSize: 12.5, flex: 1 }}>as its field<input style={{ ...field_, ...mono }} value={fieldName} onChange={(e) => setField(e.target.value)} /></label>
+      </div>
+      <datalist id="objects">{objects.map((o) => <option key={o} value={o} />)}</datalist>
+      <label style={{ display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 }}><input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />Required on every run</label>
+      <PanelNote>The example is what a test run uses. Changing it later does not redraft (R13).</PanelNote>
+      <div style={{ display: 'flex', gap: 7 }}><button type="submit" style={dark} disabled={busy || !label.trim() || !name}>Add it</button>
+        <button type="button" style={plain} onClick={onDone}>Cancel</button></div>
+    </form>
+  );
+}
+const field_: React.CSSProperties = { ...field, display: 'block', marginTop: 3 };
+
+export function InputsPanel({ draft, editable, busy, onEdit }: { draft: Draft; editable: boolean; busy: boolean; onEdit: OnEdit }) {
+  const [adding, setAdding] = useState<null | { label: string; example: string; stepId?: string }>(null);
+  const [changing, setChanging] = useState<string | null>(null);
+  const [edits, setEdits] = useState<{ label: string; example: string; required: boolean }>({ label: '', example: '', required: true });
   const examples = draft.understanding?.examples ?? {};
+  const inputs = draft.workflow.declared_inputs ?? [];
+  const held = heldOf(draft);
+  const objects = [...new Set(held.flatMap((h) => (h.of ? [h.of.object] : [])))];
   const fixed = draft.steps.filter((s) => s.kind === 'enter' && (s.declares['value'] as { from?: string } | undefined)?.from === 'literal');
   const secrets = draft.steps.filter((s) => s.kind === 'enter' && ['secret', 'account'].includes(String((s.declares['value'] as { from?: string } | undefined)?.from)));
+  const grouped = objectsOf(held.filter((h) => h.section === 'Given'));
+
+  /** "Make it an input": the fixed value becomes the example of a new input the step now types (R10). */
+  const makeInput = async (stepId: string, label: string, example: string) => {
+    const name = nameFrom(label) || 'value';
+    const main = objects[0];
+    if (!inputs.some((i) => i.name === name)) {
+      const ok = await onEdit('declare-input', { name, label, example, ...(main ? { of: { object: main, field: name } } : {}) });
+      if (!ok) return;
+    }
+    await onEdit('set-step-value', { stepId, value: { from: 'input', value: name } });
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <PanelHeading note="asked for when a run starts">Given</PanelHeading>
         <div style={{ borderTop: '1px solid var(--ink)' }}>
-          {(draft.workflow.declared_inputs ?? []).length === 0 && <div style={{ padding: '8px 0' }}><PanelNote>This agent is given nothing when it starts.</PanelNote></div>}
-          {(draft.workflow.declared_inputs ?? []).map((i) => (
-            <div key={i.name} style={{ padding: '8px 0', borderBottom: '1px solid var(--rule)' }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <span style={{ ...mono, fontSize: 12.5, fontWeight: 600 }}>{i.name}</span>
-                <span style={{ flexGrow: 1 }} />
-                <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{i.type ?? 'text'}{i.required ? ' · required' : ' · optional'}</span>
-              </div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 2 }}>
-                {i.label !== i.name ? `${i.label} · ` : ''}{examples[i.name] ? `example ${examples[i.name]}` : 'no example given'}
-              </div>
+          {inputs.length === 0 && <div style={{ padding: '8px 0' }}><PanelNote>This agent is given nothing when it starts.</PanelNote></div>}
+          {grouped.map((g) => (
+            <div key={g.object ?? '-'}>
+              <ObjectHeading object={g.object} />
+              {g.fields.map((h) => {
+                const i = inputs.find((x) => x.name === h.name)!;
+                return (
+                  <div key={h.name} style={{ padding: '7px 0 7px 10px', borderBottom: '1px solid var(--rule)' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                      <span style={{ ...mono, fontSize: 12.5, fontWeight: 600 }}>{h.of ? h.of.field : h.name}</span>
+                      {h.of && h.of.field !== h.name && <span style={{ ...mono, fontSize: 11, color: 'var(--ink-2)' }}>{h.name}</span>}
+                      <span style={{ flexGrow: 1 }} />
+                      <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{i.type ?? 'text'}{i.required ? ' · required' : ' · optional'}</span>
+                      {editable && changing !== h.name && <button type="button" style={quiet} onClick={() => { setChanging(h.name); setEdits({ label: i.label, example: examples[h.name] ?? '', required: i.required }); }}>Change</button>}
+                    </div>
+                    <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 2 }}>
+                      {i.label !== h.name ? `${i.label} · ` : ''}{examples[h.name] ? `example ${examples[h.name]}` : 'no example given'}
+                      {h.used.length ? ` · used at ${h.used.map((u) => u.split(':')[0]).join(', ')}` : ' · not used by any step'}
+                    </div>
+                    {changing === h.name && (
+                      <form onSubmit={(e) => { e.preventDefault(); void onEdit('change-input', { name: h.name, label: edits.label, required: edits.required, example: edits.example }).then((ok) => ok && setChanging(null)); }}
+                        style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 8 }}>
+                        <label style={{ fontSize: 12.5 }}>Label<input style={field_} value={edits.label} onChange={(e) => setEdits({ ...edits, label: e.target.value })} /></label>
+                        <label style={{ fontSize: 12.5 }}>Example<input style={field_} value={edits.example} onChange={(e) => setEdits({ ...edits, example: e.target.value })} /></label>
+                        <label style={{ display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 }}><input type="checkbox" checked={edits.required} onChange={(e) => setEdits({ ...edits, required: e.target.checked })} />Required on every run</label>
+                        <div style={{ display: 'flex', gap: 7 }}>
+                          <button type="submit" style={dark} disabled={busy}>Save</button>
+                          <button type="button" style={plain} onClick={() => setChanging(null)}>Cancel</button>
+                          <span style={{ flexGrow: 1 }} />
+                          <button type="button" style={plain} disabled={busy} onClick={() => void onEdit('remove-input', { name: h.name }).then((ok) => ok && setChanging(null))}>Remove</button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
+        {editable && !adding && <div style={{ marginTop: 8 }}><button type="button" style={plain} onClick={() => setAdding({ label: '', example: '' })}>Add an input</button></div>}
+        {editable && adding && !adding.stepId && <div style={{ marginTop: 8 }}><NewInput objects={objects} busy={busy} onEdit={onEdit} onDone={() => setAdding(null)} seed={adding} /></div>}
       </div>
       {fixed.length > 0 && (
         <div>
           <PanelHeading note="the same on every run">Fixed values</PanelHeading>
           <div style={{ borderTop: '1px solid var(--ink)' }}>
-            {fixed.map((s) => (
-              <div key={s.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--rule)', fontSize: 13 }}>
-                {valueWords(s.declares['value'])} <span style={{ color: 'var(--ink-2)' }}>into {targetOf(s.declares)?.label}, step {s.position}{s.from_sentence ? ` (${s.from_sentence})` : ''}</span>
-              </div>
-            ))}
+            {fixed.map((s) => {
+              const lit = (s.declares['value'] as { literal?: { text?: string } }).literal?.text ?? '';
+              const into = targetOf(s.declares)?.label ?? 'the field';
+              return (
+                <div key={s.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--rule)', fontSize: 13 }}>
+                  <div>{valueWords(s.declares['value'])} <span style={{ color: 'var(--ink-2)' }}>into {into}, step {s.position}{s.from_sentence ? ` (${s.from_sentence})` : ''}</span></div>
+                  {editable && (
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+                      <button type="button" style={plain} disabled={busy} title={`A new input, with ${lit} as its example`}
+                        onClick={() => void makeInput(s.id, into, lit)}>Make it an input</button>
+                      {inputs.length > 0 && (
+                        <select aria-label={`Use an input for step ${s.position}`} defaultValue="" disabled={busy}
+                          onChange={(e) => e.target.value && void onEdit('set-step-value', { stepId: s.id, value: { from: 'input', value: e.target.value } })}
+                          style={{ ...field, width: 'auto', fontSize: 12.5, padding: '3px 6px' }}>
+                          <option value="">or use an input…</option>
+                          {inputs.map((i) => <option key={i.name} value={i.name}>{i.name}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
+          <div style={{ marginTop: 6 }}><PanelNote>An input is picked, or a value is fixed. There is nowhere to type a reference such as {'{loanNumber}'}.</PanelNote></div>
         </div>
       )}
       {secrets.length > 0 && (
@@ -258,32 +386,53 @@ export function InputsPanel({ draft, children }: { draft: Draft; children?: Reac
           </div>
         </div>
       )}
-      {children}
     </div>
   );
 }
 
-export function OutputsPanel({ draft, children }: { draft: Draft; children?: (end: Step) => ReactNode }) {
+export function OutputsPanel({ draft, editable, busy, onEdit }: { draft: Draft; editable: boolean; busy: boolean; onEdit: OnEdit }) {
   const ends = draft.steps.filter((s) => s.kind === 'end');
+  const held = heldOf(draft);
+  const [choosing, setChoosing] = useState<string | null>(null);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <PanelNote>What each ending hands back when a run reaches it. The DataStore holds everything a run touches; these are what it publishes.</PanelNote>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <PanelNote>What each ending hands back when a run reaches it, as objects. The DataStore holds everything a run touches; these are what it publishes.</PanelNote>
       {ends.length === 0 && <PanelNote>No ending yet: a run of this draft would not finish.</PanelNote>}
       {ends.map((e) => {
         const publishes = (e.declares['publishes'] as string[] | undefined) ?? [];
+        const handed = objectsOf(held.filter((h) => publishes.includes(h.name)));
         return (
           <div key={e.id}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
               <span style={{ fontSize: 14, fontWeight: 700 }}>{String(e.declares['summary'] ?? e.declares['outcome'] ?? 'unnamed')}</span>
               <span style={{ ...mono, fontSize: 11.5, color: 'var(--ink-2)' }}>{String(e.declares['outcome'] ?? '')} {'·'} step {e.position}</span>
+              <span style={{ flexGrow: 1 }} />
+              {editable && <button type="button" style={quiet} onClick={() => setChoosing(choosing === e.id ? null : e.id)}>{choosing === e.id ? 'Done' : 'Choose'}</button>}
             </div>
             <div style={{ borderTop: '1px solid var(--ink)', marginTop: 6 }}>
-              {publishes.length === 0 && <div style={{ padding: '7px 0' }}><PanelNote>Hands back nothing but its name.</PanelNote></div>}
-              {publishes.map((p) => (
-                <div key={p} style={{ padding: '6px 0', borderBottom: '1px solid var(--rule)', fontSize: 12.5, ...mono, fontWeight: 600 }}>{p}</div>
+              {publishes.length === 0 && choosing !== e.id && <div style={{ padding: '7px 0' }}><PanelNote>Hands back nothing but its name.</PanelNote></div>}
+              {choosing !== e.id && handed.map((g) => (
+                <div key={g.object ?? '-'} style={{ padding: '6px 0', borderBottom: '1px solid var(--rule)', fontSize: 12.5 }}>
+                  <span style={{ fontWeight: 700 }}>{g.object ? words(g.object) : ''}</span>{g.object ? ' ' : ''}
+                  <span style={{ ...mono }}>{g.object ? `{ ${g.fields.map((f) => f.of?.field ?? f.name).join(', ')} }` : g.fields.map((f) => f.name).join(', ')}</span>
+                </div>
+              ))}
+              {choosing === e.id && objectsOf(held).map((g) => (
+                <div key={g.object ?? '-'}>
+                  <ObjectHeading object={g.object} />
+                  {g.fields.map((h) => (
+                    <label key={h.name} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, padding: '4px 0 4px 10px' }}>
+                      <input type="checkbox" checked={publishes.includes(h.name)} disabled={busy}
+                        onChange={(ev) => void onEdit('set-publishes', { stepId: e.id,
+                          publishes: ev.target.checked ? [...publishes, h.name] : publishes.filter((p) => p !== h.name) })} />
+                      <span style={mono}>{h.of?.field ?? h.name}</span>
+                      <span style={{ color: 'var(--ink-2)' }}>{h.section === 'Given' ? 'given' : 'found'}</span>
+                    </label>
+                  ))}
+                </div>
               ))}
             </div>
-            {children?.(e)}
+            {choosing === e.id && <div style={{ marginTop: 6 }}><PanelNote>Only a value found on every path to this ending can be handed back; anything else is refused, and says why.</PanelNote></div>}
           </div>
         );
       })}
@@ -299,21 +448,23 @@ const IS: Record<string, string> = {
 
 export function RulesPanel({ tables, steps }: { tables: RuleTable[] | null; steps: Step[] }) {
   if (!tables?.length) return <PanelNote>No rules as tables: nothing in this procedure was sorted as a rule, or the tables are still being made.</PanelNote>;
+  const ids = ruleIdsOf(tables);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <PanelNote>Your rule sentences, as tables. A table is changed by changing its sentence, so it can never say something the procedure does not (R15).</PanelNote>
+      <PanelNote>Your rule sentences, as tables, each with its identifier. The steps a rule became carry it too. A table is changed by changing its sentence, so it can never say something the procedure does not (R15).</PanelNote>
       {tables.map((t, i) => {
-        const became = steps.filter((s) => s.from_sentence && t.sentences.includes(s.from_sentence)).map((s) => s.position);
+        const became = steps.filter((s) => ids.ofStep(s)?.startsWith(`BR${i + 1}`)).map((s) => s.position);
         return (
           <div key={i}>
-            <div style={{ fontSize: 13.5, fontWeight: 700 }}>Table {i + 1} {'·'} {t.question}</div>
+            <div style={{ fontSize: 13.5, fontWeight: 700 }}><span style={{ ...mono, color: 'var(--running-ink)' }}>BR{i + 1}</span> {'·'} {t.question}</div>
             <div style={{ fontSize: 12, color: 'var(--ink-2)', margin: '2px 0 7px' }}>
               from {t.sentences.join(', ')} {'·'} {became.length ? `became step${became.length === 1 ? '' : 's'} ${became.join(', ')}` : 'not in the draft yet'}
             </div>
             <div style={{ borderTop: '1px solid var(--ink)' }}>
               {t.rows.map((r, j) => (
                 <div key={j} style={{ display: 'flex', gap: 10, fontSize: 12.5, padding: '6px 0', borderBottom: '1px solid var(--rule)' }}>
-                  <span style={{ width: 160, flexShrink: 0, ...mono, fontSize: 11.5 }}>
+                  <span style={{ width: 44, flexShrink: 0, ...mono, fontSize: 11, color: 'var(--running-ink)' }}>BR{i + 1}.{j + 1}</span>
+                  <span style={{ width: 140, flexShrink: 0, ...mono, fontSize: 11.5 }}>
                     {r.when.map((w) => `${w.column} ${IS[w.is] ?? w.is}${w.value !== null ? ` ${w.value}` : ''}`).join(' and ') || 'always'}
                   </span>
                   <span style={{ flexGrow: 1 }}>{r.then}</span>
@@ -322,7 +473,7 @@ export function RulesPanel({ tables, steps }: { tables: RuleTable[] | null; step
               ))}
               {t.otherwise && (
                 <div style={{ display: 'flex', gap: 10, fontSize: 12.5, padding: '6px 0', borderBottom: '1px solid var(--rule)', color: 'var(--ink-2)' }}>
-                  <span style={{ width: 160, flexShrink: 0 }}>otherwise</span><span style={{ flexGrow: 1 }}>{t.otherwise.then}</span>
+                  <span style={{ width: 44, flexShrink: 0 }} /><span style={{ width: 140, flexShrink: 0 }}>otherwise</span><span style={{ flexGrow: 1 }}>{t.otherwise.then}</span>
                 </div>
               )}
             </div>
@@ -333,7 +484,7 @@ export function RulesPanel({ tables, steps }: { tables: RuleTable[] | null; step
   );
 }
 
-// ─── DataStore ──────────────────────────────────────────────────────────────
+// ─── DataStore (R12, R26) ───────────────────────────────────────────────────
 
 /** What one run held, read from its record: given and found values by name. */
 function useRunValues(reference: string | null): Record<string, string> {
@@ -359,18 +510,42 @@ function useRunValues(reference: string | null): Record<string, string> {
   return values;
 }
 
-export function DataStorePanel({ draft, chosen, onChoose, renamer }: {
-  draft: Draft; chosen: string | null; onChoose: (name: string) => void; renamer?: (name: string) => ReactNode;
+export function DataStorePanel({ draft, chosen, onChoose, editable, busy, onEdit }: {
+  draft: Draft; chosen: string | null; onChoose: (name: string) => void; editable: boolean; busy: boolean; onEdit: OnEdit;
 }) {
   const held = heldOf(draft);
   const run = useRunValues(draft.lastRun?.reference ?? null);
   const pick = held.find((h) => h.name === chosen) ?? held[0] ?? null;
+  const objects = [...new Set(held.flatMap((h) => (h.of ? [h.of.object] : [])))];
+  const [rename, setRename] = useState<{ for: string; to: string }>({ for: '', to: '' });
+  const [place, setPlace] = useState<{ for: string; object: string; field: string }>({ for: '', object: '', field: '' });
+  const to = rename.for === pick?.name ? rename.to : pick?.name ?? '';
+  const obj = place.for === pick?.name ? place.object : pick?.of?.object ?? '';
+  const fld = place.for === pick?.name ? place.field : pick?.of?.field ?? pick?.name ?? '';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <PanelNote>Every value a run of this agent holds, where it comes from and what uses it. Nothing else can be written there, and a secret is only noted.</PanelNote>
+      <PanelNote>What a run of this agent holds, as objects: each with its fields, where each comes from and what uses it. Nothing else can be written there, and a secret is only noted.</PanelNote>
+      <div style={{ borderTop: '1px solid var(--ink)' }}>
+        {held.length === 0 && <div style={{ padding: '8px 0' }}><PanelNote>Nothing yet: no step reads a value and nothing is given.</PanelNote></div>}
+        {objectsOf(held).map((g) => (
+          <div key={g.object ?? '-'} style={{ borderBottom: '1px solid var(--rule)', paddingBottom: 4 }}>
+            <ObjectHeading object={g.object} />
+            {g.fields.map((h) => (
+              <button key={h.name} type="button" onClick={() => onChoose(h.name)}
+                style={{ width: '100%', display: 'flex', gap: 10, alignItems: 'baseline', font: 'inherit', fontSize: 12.5, textAlign: 'left',
+                  background: pick?.name === h.name ? 'var(--running-wash)' : 'transparent', border: 0,
+                  padding: '5px 4px 5px 10px', cursor: 'pointer', color: 'var(--ink)' }}>
+                <span style={{ flexGrow: 1, ...mono, fontWeight: 600 }}>{h.of?.field ?? h.name}</span>
+                <span style={{ width: 42, color: 'var(--ink-2)' }}>{h.section === 'Given' ? 'given' : 'found'}</span>
+                <span style={{ color: 'var(--ink-2)', ...mono, fontSize: 12 }}>{draft.lastRun ? run[h.name] ?? '—' : h.type}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
       {pick && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--page)', border: '1px solid var(--rule-2)', borderRadius: 5, padding: 12 }}>
-          <div><span style={{ ...mono, fontSize: 15, fontWeight: 600 }}>{pick.name}</span>
+          <div><span style={{ ...mono, fontSize: 15, fontWeight: 600 }}>{pick.of ? `${pick.of.object}.${pick.of.field}` : pick.name}</span>
             <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}> {pick.section} {'·'} {pick.type}{pick.mayBeAbsent ? ' · may not be there' : ''}</span></div>
           <div style={{ fontSize: 12.5 }}><span style={{ color: 'var(--ink-2)' }}>Comes from </span>{pick.from}</div>
           <div style={{ fontSize: 12.5 }}>
@@ -382,22 +557,28 @@ export function DataStorePanel({ draft, chosen, onChoose, renamer }: {
             <div style={{ fontSize: 12.5 }}><span style={{ color: 'var(--ink-2)' }}>In test run {draft.lastRun.reference}: </span>
               <span style={{ ...mono, fontWeight: 600 }}>{run[pick.name] ?? 'not held on that run'}</span></div>
           )}
-          {renamer?.(pick.name)}
+          {editable && (
+            <>
+              <form onSubmit={(e) => { e.preventDefault(); void onEdit('rename-value', { from: pick.name, to }).then((ok) => ok && onChoose(to)); }}
+                style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                <label style={{ fontSize: 12.5, flexGrow: 1 }}>Its name<input style={{ ...field_, ...mono }} value={to}
+                  onChange={(e) => setRename({ for: pick.name, to: e.target.value })} /></label>
+                <button type="submit" style={plain} disabled={busy || to === pick.name}>Rename</button>
+              </form>
+              <form onSubmit={(e) => { e.preventDefault(); void onEdit('set-value-object', { name: pick.name, of: obj ? { object: nameFrom(obj), field: fld } : null }); }}
+                style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                <label style={{ fontSize: 12.5, flex: 1 }}>Object<input style={{ ...field_, ...mono }} list="datastore-objects" value={obj} placeholder="loan"
+                  onChange={(e) => setPlace({ for: pick.name, object: e.target.value, field: fld })} /></label>
+                <label style={{ fontSize: 12.5, flex: 1 }}>Field<input style={{ ...field_, ...mono }} value={fld}
+                  onChange={(e) => setPlace({ for: pick.name, object: obj, field: e.target.value })} /></label>
+                <button type="submit" style={plain} disabled={busy}>Place</button>
+              </form>
+              <datalist id="datastore-objects">{objects.map((o) => <option key={o} value={o} />)}</datalist>
+              <PanelNote>Renaming carries through every step, rule and ending that uses it. Leave the object empty to take it out of one.</PanelNote>
+            </>
+          )}
         </div>
       )}
-      <div style={{ borderTop: '1px solid var(--ink)' }}>
-        {held.length === 0 && <div style={{ padding: '8px 0' }}><PanelNote>Nothing yet: no step reads a value and nothing is given.</PanelNote></div>}
-        {held.map((h) => (
-          <button key={h.name} type="button" onClick={() => onChoose(h.name)}
-            style={{ width: '100%', display: 'flex', gap: 10, alignItems: 'baseline', font: 'inherit', fontSize: 12.5, textAlign: 'left',
-              background: pick?.name === h.name ? 'var(--running-wash)' : 'transparent', border: 0, borderBottom: '1px solid var(--rule)',
-              padding: '7px 4px', cursor: 'pointer', color: 'var(--ink)' }}>
-            <span style={{ width: 50, color: 'var(--ink-2)' }}>{h.section}</span>
-            <span style={{ flexGrow: 1, ...mono, fontWeight: 600 }}>{h.name}</span>
-            <span style={{ color: 'var(--ink-2)' }}>{draft.lastRun ? run[h.name] ?? '—' : h.type}</span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

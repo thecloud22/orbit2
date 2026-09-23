@@ -6,7 +6,7 @@
  * lease is what makes a second a deployment change rather than a redesign.
  */
 import { Pool } from 'pg';
-import { looksLikeInstructions, step as stepSchema, type Step, originOf } from '@orbit/contract';
+import { asObjects, looksLikeInstructions, step as stepSchema, type Step, originOf } from '@orbit/contract';
 import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
@@ -374,11 +374,17 @@ async function runOne(runId: string) {
   const db = await pool.connect();
   try {
     const { rows: [row] } = await db.query(
-      `SELECT r.reference, r.inputs, r.held, v.body, v.applications
+      `SELECT r.reference, r.inputs, r.held, v.body, v.applications, v.declared_inputs
          FROM run r JOIN workflow_version v ON v.id = r.version_id WHERE r.id = $1`, [runId]);
     // Validated coming out of the store as well as going in: persistence is a
     // boundary like any other (Decision 9).
     const steps: Step[] = (row.body.steps as unknown[]).map((s) => stepSchema.parse(s));
+    // What each value is a field of, so the run hands back objects (R26).
+    const declared = [
+      ...((row.declared_inputs ?? []) as Array<{ name: string; of?: { object: string; field: string } }>),
+      ...steps.flatMap((s) => (s.kind === 'read' ? [s.produces] : [])),
+    ];
+    const shaped = (values: Map<string, unknown> | Iterable<[string, unknown]>) => asObjects(Object.fromEntries(values), declared);
     const app = row.applications[0];
     const origin = originOf(app.addresses[0]);
 
@@ -463,7 +469,7 @@ async function runOne(runId: string) {
       // success with no conclusion of its own: a person takes it from here.
       await db.query(
         `UPDATE run SET status = 'handedToAPerson', outputs = $2, ended_at = now() WHERE id = $1`,
-        [runId, JSON.stringify(Object.fromEntries(values))]);
+        [runId, JSON.stringify(shaped(values))]);
       await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.succeeded', $2)`,
         [runId, JSON.stringify({ handedToAPerson: handedOff.request })]);
       console.log(`  ${row.reference}: handed to a person — ${handedOff.request}`);
@@ -471,7 +477,7 @@ async function runOne(runId: string) {
     }
 
     const outcome = reached;
-    const outputs = Object.fromEntries(values);
+    const outputs = shaped(values);
     await db.query(
       `UPDATE run SET status = 'succeeded', outcome = $2, outputs = $3, ended_at = now() WHERE id = $1`,
       [runId, outcome, JSON.stringify(outputs)]);

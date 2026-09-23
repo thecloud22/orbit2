@@ -18,6 +18,9 @@ export interface Sentence {
   was?: string | null; withdrawn?: boolean; revisedAt?: string | null;
 }
 
+/** Which object a value is a field of (R26): a loan's `ltv`. */
+export interface FieldOf { object: string; field: string }
+
 export interface Shot { digest?: string; withheld?: string; box?: { x: number; y: number; w: number; h: number } }
 
 export interface Turn {
@@ -54,7 +57,7 @@ export interface ChatMessage {
 export interface Draft {
   workflow: {
     id: string; name: string; procedure: string | null; confirmed_at: string | null;
-    declared_inputs: Array<{ name: string; label: string; required: boolean; type?: string }>;
+    declared_inputs: Array<{ name: string; label: string; required: boolean; type?: string; of?: FieldOf }>;
     live_version_id?: string | null; paused_at?: string | null;
   };
   steps: Step[];
@@ -225,7 +228,51 @@ export function valuesOf(steps: Step[]): Array<{ verb: string; name: string; kin
 }
 
 /** Every value a run of this draft will hold in its DataStore, with where it comes from and what uses it. */
-export interface Held { section: 'Given' | 'Found'; name: string; type: string; from: string; used: string[]; mayBeAbsent?: boolean }
+export interface Held {
+  section: 'Given' | 'Found'; name: string; type: string; from: string; used: string[]; mayBeAbsent?: boolean;
+  of?: FieldOf; label?: string;
+}
+
+/** The DataStore as objects (R26): each object with its fields, then what belongs to none. */
+export function objectsOf(held: Held[]): Array<{ object: string | null; fields: Held[] }> {
+  const groups = new Map<string | null, Held[]>();
+  for (const h of held) {
+    const key = h.of?.object ?? null;
+    groups.set(key, [...(groups.get(key) ?? []), h]);
+  }
+  return [...groups.entries()].sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : 0))
+    .map(([object, fields]) => ({ object, fields }));
+}
+
+/** A camelCase name as words a person reads: `loanFile` is "Loan file". */
+export const words = (n: string) => {
+  const w = n.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  return w.charAt(0).toUpperCase() + w.slice(1);
+};
+
+/**
+ * An identifier for every business rule (BR1, BR2…), and for each of its rows
+ * (BR1.1, BR1.2…), in the order the tables stand. Derived from the confirmed
+ * tables each time, and frozen in a version with them.
+ */
+export function ruleIdsOf(tables: RuleTable[] | null) {
+  const ofSentence = new Map<string, string>();
+  (tables ?? []).forEach((t, i) => {
+    const table = `BR${i + 1}`;
+    for (const n of t.sentences) if (!ofSentence.has(n)) ofSentence.set(n, table);
+    t.rows.forEach((r, j) => {
+      const shared = t.rows.filter((x) => x.sentence === r.sentence).length > 1;
+      ofSentence.set(`${r.sentence}#row`, shared ? table : `${table}.${j + 1}`);
+    });
+    if (t.otherwise?.sentence && !ofSentence.has(`${t.otherwise.sentence}#row`)) ofSentence.set(`${t.otherwise.sentence}#row`, table);
+  });
+  return {
+    /** The rule a sentence belongs to. */
+    ofSentence: (n: string | null | undefined) => (n ? ofSentence.get(n) ?? null : null),
+    /** The rule, and row where it can say, a step was built from. */
+    ofStep: (s: Step) => (s.from_sentence ? ofSentence.get(`${s.from_sentence}#row`) ?? ofSentence.get(s.from_sentence) ?? null : null),
+  };
+}
 
 export function heldOf(draft: Draft): Held[] {
   const steps = draft.steps;
@@ -243,15 +290,16 @@ export function heldOf(draft: Draft): Held[] {
     return [];
   });
   for (const i of draft.workflow.declared_inputs ?? []) {
-    out.push({ section: 'Given', name: i.name, type: i.type ?? 'text', from: 'asked for when a run starts', used: usesOf(i.name) });
+    out.push({ section: 'Given', name: i.name, type: i.type ?? 'text', from: 'asked for when a run starts', used: usesOf(i.name),
+      label: i.label, ...(i.of ? { of: i.of } : {}) });
   }
   for (const s of steps) {
     if (s.kind !== 'read') continue;
-    const p = s.declares['produces'] as { name?: string; type?: string; required?: boolean; label?: string } | undefined;
+    const p = s.declares['produces'] as { name?: string; type?: string; required?: boolean; label?: string; of?: FieldOf } | undefined;
     if (!p?.name || out.some((x) => x.name === p.name)) continue;
     out.push({ section: 'Found', name: p.name, type: p.type ?? 'text',
       from: `step ${s.position}${s.from_sentence ? ` (${s.from_sentence})` : ''}: ${p.label ?? targetOf(s.declares)?.label ?? ''}`,
-      used: usesOf(p.name), mayBeAbsent: p.required === false });
+      used: usesOf(p.name), mayBeAbsent: p.required === false, ...(p.label ? { label: p.label } : {}), ...(p.of ? { of: p.of } : {}) });
   }
   return out;
 }

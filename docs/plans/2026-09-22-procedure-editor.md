@@ -84,12 +84,14 @@ Each rule says whether it already holds, is new behaviour within the settled des
 | R12 | **Renaming a value carries through.** Every step, table and ending that uses it follows. Names are unique in the DataStore. Runs already made keep the name they were made with. | New |
 | R13 | **Changing an example does not redraft.** The draft says which example it was mapped with. | New |
 | R14 | **The run's data container is the DataStore.** Renamed from InMem. | Done (P0) |
+| R26 | **Values are objects.** The DataStore, the inputs and the outputs hold objects — a `loan` with `number`, `ltv`, `creditScore` — not loose values. Each value says which object it is a field of (`of: { object, field }`); the walk proposes it and the author can move or rename it. A step still names a value by its own unique name, so there is still nothing to type (R8); a run hands its outputs back as objects. Added 2026-09-22 at Karthik's request. | New (Decision 14, amended) |
 
 ### Rules
 
 | # | Rule | Standing |
 |---|---|---|
 | R15 | **Rule tables are read-only.** A table is changed by changing its sentence, so a table can never say something the procedure does not. Each table shows which steps it became. | Holds (2.1 §16) |
+| R27 | **Every business rule has an identifier.** BR1, BR2… in the order the tables stand, and BR1.1, BR1.2… for their rows. The rule sentence shows it beside its label, and every step built from a rule carries it as a superscript. "BR" keeps them apart from this plan's own R-numbers. Added 2026-09-22 at Karthik's request. | New |
 
 ### Editing and mapping
 

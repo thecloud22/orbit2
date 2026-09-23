@@ -15,7 +15,7 @@ import type { Route } from '../router.ts';
 import { Configure } from './Configure.tsx';
 import { CONFIGURABLE, Confirm } from './Agent.tsx';
 import {
-  actsOn, blocksOf, valuesOf, LABEL_INK, LABEL_NAME,
+  actsOn, blocksOf, ruleIdsOf, valuesOf, LABEL_INK, LABEL_NAME,
   type Block, type Draft, type Shot, type Step,
 } from '../editor/model.ts';
 import {
@@ -81,6 +81,7 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
   }, [working]);
 
   const blocks = useMemo(() => blocksOf(draft?.document ?? null, draft?.steps ?? []), [draft]);
+  const rules = useMemo(() => ruleIdsOf(draft?.rules ?? null), [draft]);
   const turnOf = useMemo(() => new Map((draft?.authoring.turns ?? []).map((t) => [t.turn, t])), [draft]);
 
   if (!draft) {
@@ -226,7 +227,7 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
             <p style={{ fontSize: 15.5, lineHeight: 1.7, maxWidth: 680, whiteSpace: 'pre-wrap' }}>{workflow.procedure}</p>
           )}
           {blocks.map((b) => (
-            <DocumentBlock key={b.id} block={b} on={tab === 'steps' && !allSteps && block?.id === b.id}
+            <DocumentBlock key={b.id} block={b} on={tab === 'steps' && !allSteps && block?.id === b.id} ruleOf={rules.ofSentence}
               selectedValues={selectedValues} onChoose={() => choose(b)} onValue={pickValue}
               notes={outstanding.filter((n) => n.sentence && b.sentences.some((s) => s.number === n.sentence))}
               pending={pending} />
@@ -279,10 +280,11 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
               onSend={async (text) => edit('chat', { text })}
               onTake={(messageId) => void edit('take-offer', { messageId })} />
           )}
-          {tab === 'inputs' && <InputsPanel draft={draft} />}
-          {tab === 'outputs' && <OutputsPanel draft={draft} />}
+          {tab === 'inputs' && <InputsPanel draft={draft} editable={editable} busy={busy} onEdit={edit} />}
+          {tab === 'outputs' && <OutputsPanel draft={draft} editable={editable} busy={busy} onEdit={edit} />}
           {tab === 'rules' && <RulesPanel tables={draft.rules} steps={steps} />}
-          {tab === 'datastore' && <DataStorePanel draft={draft} chosen={valueName} onChoose={setValueName} />}
+          {tab === 'datastore' && <DataStorePanel draft={draft} chosen={valueName} onChoose={setValueName}
+            editable={editable} busy={busy} onEdit={edit} />}
           {editRefusal && (
             <div style={{ marginTop: 12, background: 'var(--failed-wash)', borderLeft: '3px solid var(--failed)', borderRadius: 4, padding: '9px 12px' }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--failed-ink)', marginBottom: 3 }}>That change was not made</div>
@@ -345,8 +347,8 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
 }
 
 /** One block of the author's document: the words, the margin, and what Orbit made of them (R2–R6). */
-function DocumentBlock({ block, on, selectedValues, onChoose, onValue, notes, pending }: {
-  block: Block; on: boolean; selectedValues: Set<string>; onChoose: () => void; onValue: (name: string) => void;
+function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending }: {
+  block: Block; on: boolean; ruleOf: (n: string | null | undefined) => string | null; selectedValues: Set<string>; onChoose: () => void; onValue: (name: string) => void;
   notes: Draft['notes']; pending: string[];
 }) {
   const { sentences, lead, steps } = block;
@@ -412,7 +414,8 @@ function DocumentBlock({ block, on, selectedValues, onChoose, onValue, notes, pe
         <div style={{ width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, paddingTop: 3 }}>
           {lead && lead.label && lead.label !== 'background' && (
             <span style={{ fontSize: 12, fontWeight: 700, color: LABEL_INK[lead.label], textAlign: 'right' }}>
-              {LABEL_NAME[lead.label]}{lead.waits ? ', the run waits' : ''}</span>
+              {LABEL_NAME[lead.label]}{lead.waits ? ', the run waits' : ''}
+              {lead.label === 'rule' && ruleOf(lead.number) && <span style={{ ...mono, color: 'var(--running-ink)' }}> {'\u00b7'} {ruleOf(lead.number)}</span>}</span>
           )}
           {changed && <Chip state="running">changed, not mapped</Chip>}
           {noStep && !changed && <Chip state="attention">no step yet</Chip>}
