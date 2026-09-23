@@ -513,6 +513,8 @@ export async function authorFromProcedure(opts: {
    * loan; scenario 8's sign-in did nothing the same way.
    */
   const typed: Array<{ field: Locator; value: string }> = [];
+  /** Whether confirmed rule tables will be built into the steps: then they, not the walk, decide. */
+  const tablesDecide = (opts.tables ?? []).some((t) => t.rows.some((r) => r.when.some((w) => w.is !== 'isAbsent')));
 
   /** A line of work left without a step, as a question under it (R19). */
   const unmapped = (n: string) => {
@@ -911,7 +913,19 @@ export async function authorFromProcedure(opts: {
       // act is kept. A condition naming a value no step produces is not a
       // condition — and an act kept without the condition the procedure put on
       // it is worse than no act at all.
-      const conditions = p.onlyIf ?? [];
+      let conditions = p.onlyIf ?? [];
+      // Where the rules are confirmed as tables, the tables decide, and a
+      // condition the walk puts on an act decides the same thing twice. On
+      // scenario 7 the walk put "only if the loan amount is at most $806,500"
+      // on Approve file; a failed condition leaves for the second ending, which
+      // was "No such loan file", so the jumbo file concluded not found. It is
+      // said, not dropped silently.
+      if (conditions.length > 0 && tablesDecide) {
+        questions.push(asAssumption(
+          `Orbit did not put the walk's own condition on "${made.summary}" (${conditions.map((c) => `${c.value} ${readable(c.is)} ${c.than}`).join(' and ')}): the rules as confirmed decide it.`,
+          'Taken from the confirmed tables, which are built into the steps. Check each branch against the procedure.'));
+        conditions = [];
+      }
       const readSoFar = new Map(steps.flatMap((x) => (x.kind === 'read' ? [[x.produces.name, x.produces]] : [])));
       const unknown = conditions.filter((c) => !readSoFar.has(c.value));
       if (unknown.length > 0) {
