@@ -930,7 +930,16 @@ export async function authorFromProcedure(opts: {
         noteTurn(record('rejected', `"${wanted}" is on the page ${named.length} times, so it names neither`));
         continue;
       }
-      const element = named[0]!;
+      // On a green screen a message can quote a value the screen also shows
+      // under its label — "LSV405I LOAN BOARDED. SERVICING ACCOUNT 7704471"
+      // beside "SERVICING ACCOUNT : 7704471". The labelled one is the value;
+      // the message is words about it, and scenario 12 saved the whole message
+      // on the web file (Orbit 2.2).
+      const quoted = p.act === 'read' && named[0]!.what === 'value' && !named[0]!.labelledBy
+        && (named[0]!.binding as { connector?: string }).connector
+        ? seen.find((x) => x.what === 'value' && x.labelledBy && x.name.trim().length >= 3 && named[0]!.name.includes(x.name.trim()))
+        : undefined;
+      const element = quoted ?? named[0]!;
 
       // An act has to suit the thing it names. Typing into a button and
       // pressing a cell are not slips to be tolerated — they are the model
