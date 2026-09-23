@@ -62,12 +62,13 @@ export function onlyARuleAsksFor(s: Pick<Seen, 'what' | 'name'>, ruleLines: read
     && ruleLines.some((l) => lineAsksFor(s.name, l)) && !workLines.some((l) => lineAsksFor(s.name, l));
 }
 
-export function couldMean(act: 'enter' | 'activate' | 'read' | 'done' | 'wait', s: Pick<Seen, 'what'>): boolean {
+export function couldMean(act: 'enter' | 'activate' | 'read' | 'done' | 'wait' | 'switch', s: Pick<Seen, 'what'>): boolean {
   return act === 'enter' ? s.what === 'field'
     : act === 'activate' ? s.what === 'button' || s.what === 'link'
     : act === 'read' ? s.what === 'value' || s.what === 'heading'
-    // A wait acts on nothing on the page; Orbit builds it without an element.
-    : act === 'wait' ? false
+    // A wait, or going to another application, acts on nothing on the page;
+    // Orbit builds either without an element.
+    : act === 'wait' || act === 'switch' ? false
     : true;
 }
 
@@ -84,7 +85,7 @@ export function mismatchOf(act: string, it: Pick<Seen, 'what' | 'name'>): string
  * because no field accepts one.
  */
 const proposal = z.object({
-  act: z.enum(['enter', 'activate', 'read', 'done', 'wait']),
+  act: z.enum(['enter', 'activate', 'read', 'done', 'wait', 'switch']),
   /** The element's name, exactly as it appeared in the list it was shown.
    *  A name rather than an index: the model reasons about names, and asking
    *  it to carry a number alongside is an indirection Orbit introduced and
@@ -214,11 +215,11 @@ const CONCLUDE = [
   'A second conclusion is not a failure. "There is no such file" is a correct result.',
 ].join('\n');
 
-const shapeWith = (numbers: readonly string[]) => ({
+const shapeWith = (numbers: readonly string[], across = false) => ({
   type: 'object',
   properties: {
     sentence: numbers.length ? { type: ['string', 'null'], enum: [...numbers, null] } : { type: 'null' },
-    act: { type: 'string', enum: ['enter', 'activate', 'read', 'done', 'wait'] },
+    act: { type: 'string', enum: ['enter', 'activate', 'read', 'done', 'wait', ...(across ? ['switch'] : [])] },
     element: { type: ['string', 'null'] },
     value: { type: ['string', 'null'] },
     optional: { type: ['boolean', 'null'] },
@@ -343,6 +344,28 @@ const INSTRUCTION = [
   '  because it happens to be on the page.',
 ].join('\n');
 
+/** Said only when the agent works across several applications (Orbit 2.2, C11–C12). */
+const ACROSS = [
+  '',
+  'This procedure works across several applications. Each line is marked with the application it',
+  'happens on, and you are shown the one you are on now (YOU ARE ON below).',
+  'act=switch  the next line to carry out is marked with another application: go there first.',
+  '            element=null, sentence=that line. Orbit opens it, or returns to it where it was left.',
+  'A value read on one application may be entered on another: for act=enter, value=the name the',
+  'value was read into.',
+].join('\n');
+
+/** One application an agent works across, for the walk (Orbit 2.2). */
+export interface WalkApplication {
+  name: string;
+  origin: string;
+  startPath: string;
+  looking: OpenLooking;
+  credentialName: string | null;
+  signsInAs: string | null;
+  signsInWith: string | null;
+}
+
 export async function authorFromProcedure(opts: {
   procedure: string;
   origin: string;
@@ -367,7 +390,7 @@ export async function authorFromProcedure(opts: {
   /** The confirmed sentences the procedure was built from (Orbit 2.1). When
    *  given, the procedure is shown numbered and each step says which one it
    *  carries out. */
-  sentences?: ReadonlyArray<{ number: string; text: string; waits?: boolean }>;
+  sentences?: ReadonlyArray<{ number: string; text: string; waits?: boolean; application?: string }>;
   /** Task sentences after which, the confirmed rule tables say, the record
    *  may not be there ("if there is no such file, say so"). The first value
    *  read after each is taken as possibly absent (Orbit 2.1). */
@@ -395,8 +418,13 @@ export async function authorFromProcedure(opts: {
    *  agent is built: its connector's walk session (Orbit 2.2). A browser when
    *  nothing says otherwise, which is every agent built before connectors. */
   looking?: OpenLooking;
+  /** The applications the agent works across, when it is more than one
+   *  (Orbit 2.2): each sentence names its application, and the walk moves
+   *  between them. Absent, or one, and the walk is exactly what it was. */
+  applications?: readonly WalkApplication[];
 }): Promise<AuthoredDraft> {
   const { procedure, origin, startPath, inputs, model } = opts;
+  const across = (opts.applications?.length ?? 0) > 1;
   // A ceiling, for the same reason `for each` has one: without it nobody can
   // say what an authoring session could have cost.
   // A wait means signing in and finding the record again afterwards, so each
@@ -417,7 +445,7 @@ export async function authorFromProcedure(opts: {
   // walks have always been shown.
   const said = (opts.hints ?? []).filter((h) => numbers.includes(h.sentence));
   const shownProcedure = opts.sentences?.length
-    ? [...opts.sentences.map((x) => `${x.number} ${x.waits ? 'WAIT FOR A PERSON: '
+    ? [...opts.sentences.map((x) => `${x.number} ${across && x.application ? `[on ${x.application}] ` : ''}${x.waits ? 'WAIT FOR A PERSON: '
          : opts.ruleSentences?.includes(x.number) ? 'RULE (already handled: Orbit applies this itself, from its confirmed table, at this point in the procedure, so treat it as done and go on to the next line; only read what it names): '
          : ''}${x.text.replace(/\s+/g, ' ')}`), '',
        'Each line above starts with its number. Set sentence to the number of the line the next step carries out,',
@@ -441,7 +469,24 @@ export async function authorFromProcedure(opts: {
    *  controls are, wherever the walk happens to end. */
   let readPage: { seen: Seen[]; url: string } | null = null;
   const toldUndone = new Set<string>();
-  const looking = await (opts.looking ?? lookInBrowser)(origin);
+  // One application, as it always was; or across several, one session each,
+  // opened when the walk first goes there (Orbit 2.2, C12).
+  const apps = across ? opts.applications! : [];
+  const firstWork = (opts.sentences ?? []).find((x) => (opts.taskSentences ?? []).includes(x.number) && x.application);
+  let current: string = across ? (apps.find((a) => a.name === firstWork?.application) ?? apps[0]!).name : 'app';
+  const appNamed = (name: string) => apps.find((a) => a.name === name)!;
+  const lookings = new Map<string, Awaited<ReturnType<OpenLooking>>>();
+  let looking = across
+    ? await appNamed(current).looking(appNamed(current).origin)
+    : await (opts.looking ?? lookInBrowser)(origin);
+  if (across) lookings.set(current, looking);
+  /** The sign-in of the application the walk is on. */
+  const registry = () => (across
+    ? { credentialName: appNamed(current).credentialName, signsInAs: appNamed(current).signsInAs, signsInWith: appNamed(current).signsInWith }
+    : { credentialName: opts.credentialName ?? null, signsInAs: opts.signsInAs ?? null, signsInWith: opts.signsInWith ?? null });
+  /** Values the walk has read, as the example showed them: what a later step types when it enters one. */
+  const readValues: Record<string, string> = {};
+  const typing = () => ({ inputs, ...registry(), values: readValues });
   const steps: Step[] = [];
   /** Conditions the procedure puts on a step, kept aside until the conclusions
    *  are known — the path a failed condition takes is a conclusion, and those
@@ -477,19 +522,35 @@ export async function authorFromProcedure(opts: {
   };
 
   const openId = crypto.randomUUID();
+  const firstPath = across ? appNamed(current).startPath : startPath;
   steps.push({
-    id: openId, kind: 'open', summary: `Open ${startPath}`,
-    application: 'app', path: startPath,
+    id: openId, kind: 'open', summary: across ? `Open ${current}` : `Open ${startPath}`,
+    application: current, path: firstPath,
     arrives: { describe: 'the page is showing' }, changesARecord: false,
   });
 
+  /** Moves the walk to another application: opened the first time, returned to after that. */
+  const goTo = async (name: string) => {
+    const app = appNamed(name);
+    current = name;
+    const known = lookings.get(name);
+    looking = known ?? await app.looking(app.origin);
+    if (!known) { lookings.set(name, looking); await looking.open(app.startPath); }
+  };
+
   try {
-    await looking.open(startPath);
+    await looking.open(firstPath);
 
     // Mapping again: the steps before the first change are done as they are,
     // with no model, so the walk starts where the change is (Decision 17).
     for (const r of opts.replay?.steps ?? []) {
-      const done = await looking.replay(r, opts);
+      if (across && r.kind === 'open' && r.application !== current && apps.some((a) => a.name === r.application)) {
+        await goTo(r.application);
+        steps.push(r);
+        replayed.push(r.id);
+        continue;
+      }
+      const done = await looking.replay(r, typing());
       if (!done.ok) {
         questions.push(asQuestion(`Orbit could not replay step ${steps.length + 1} (${r.summary}) to reach what changed: ${done.why} `
           + 'It mapped the procedure again from there.'));
@@ -578,7 +639,7 @@ export async function authorFromProcedure(opts: {
       const answered = await model.propose(
         {
           purpose: 'propose the next step',
-          instruction: INSTRUCTION,
+          instruction: across ? INSTRUCTION + ACROSS : INSTRUCTION,
           shown: ['PROCEDURE:', fence('PROCEDURE', shownProcedure), '',
                   `DECLARED INPUTS: ${Object.keys(inputs).join(', ') || 'none'}`,
                   // The registry's answer to "who is this agent". Withholding
@@ -590,10 +651,11 @@ export async function authorFromProcedure(opts: {
                   // it supplies a registered fact and the model maps it, and
                   // an entry matching this becomes a reference to the
                   // registered account rather than a declared input.
-                  `SIGNS IN AS: ${opts.signsInAs || 'nothing registered — do not invent an account'}`,
+                  `SIGNS IN AS: ${registry().signsInAs || 'nothing registered — do not invent an account'}`,
+                  ...(across ? [`YOU ARE ON: ${current}`] : []),
                   '', `PAGE (${looking.place()}):`, fence('PAGE', asText(withheld(seen.filter((s) => !forRulesOnly(s))))), '', asking].join('\n'),
         },
-        proposal, shapeWith(numbers),
+        proposal, shapeWith(numbers, across),
       );
 
       // Every verdict passes through here, so the correction fed to the next
@@ -680,6 +742,26 @@ export async function authorFromProcedure(opts: {
         }
         noteTurn(record('kept', 'the model said the procedure is finished'));
         break;
+      }
+
+      if (p.act === 'switch') {
+        // Going to the application the next line happens on (C12). Orbit
+        // checks the line names another application this agent works across.
+        const line = opts.sentences?.find((x) => x.number === p.sentence);
+        const to = line?.application;
+        if (!across || !to || to === current || !apps.some((a) => a.name === to)) {
+          noteTurn(record('rejected', !across ? 'this agent works on one application'
+            : !line ? 'it switched without saying which line it is going to carry out'
+            : to === current ? `line ${line.number} is on ${current}, where it already is`
+            : `line ${line.number} names no other application this agent works across`));
+          continue;
+        }
+        await goTo(to);
+        steps.push({ id: crypto.randomUUID(), kind: 'open', summary: `Go to ${to}`,
+          application: to, path: appNamed(to).startPath, arrives: { describe: 'the application is showing' }, changesARecord: false });
+        lastActMoved = true;
+        noteTurn(record('kept', `step ${steps.length}: goes to ${to}, for ${line!.number}`));
+        continue;
       }
 
       if (p.act === 'wait') {
@@ -817,8 +899,9 @@ export async function authorFromProcedure(opts: {
         }
       }
 
+      const readNames = new Set(steps.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : [])));
       const made = makeStep(p, element, procedure,
-        { credentialName: opts.credentialName ?? null, signsInAs: opts.signsInAs ?? null });
+        { credentialName: registry().credentialName, signsInAs: registry().signsInAs }, readNames);
       if (!made) {
         const why = element.secret
           ? `"${element.labelledBy ?? element.name}" takes a password and no credential is registered for this application`
@@ -919,7 +1002,10 @@ export async function authorFromProcedure(opts: {
         if (of && !inputOf.has(made.value.value)) inputOf.set(made.value.value, of);
       }
       if (p.sentence && numbers.includes(p.sentence)) provenance[made.id] = p.sentence;
-      if (made.kind === 'read') readPage = { seen, url: looking.place() };
+      if (made.kind === 'read') {
+        readPage = { seen, url: looking.place() };
+        if (element.what === 'value') readValues[made.produces.name] = element.name;
+      }
       if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)! })));
       noteTurn(record('kept', conditions.length > 0
         ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
@@ -929,7 +1015,7 @@ export async function authorFromProcedure(opts: {
       // Do it, so the next turn sees the page the next step would meet.
       lastActMoved = p.act === 'activate';
       if (p.act === 'enter' && made.kind === 'enter') {
-        await looking.type(element, toType(made.value, opts));
+        await looking.type(element, toType(made.value, typing()));
       } else if (p.act === 'activate') {
         await looking.press(element);
       }
@@ -958,7 +1044,8 @@ export async function authorFromProcedure(opts: {
     if (opts.tables?.length) {
       decisionPage = { seen: await looking.look().catch(() => []), url: looking.place() };
     }
-    await looking.close();
+    if (across) { for (const l of lookings.values()) await l.close().catch(() => undefined); }
+    else await looking.close();
   }
 
   // Every path has to reach an ending (§4), and the session has none: the
@@ -1276,6 +1363,11 @@ export async function authorFromProcedure(opts: {
  * confidently wrong 28 times in 54 and refuses it uncorroborated.
  */
 function regionFor(element: Seen): { label: string; binding: unknown } {
+  // A connector's own binding already finds a value by its label and place
+  // (a green screen's, Decision 18): named by the label, kept as it is.
+  if ((element.binding as { connector?: string }).connector) {
+    return { label: element.labelledBy ?? element.name, binding: element.binding };
+  }
   if (!element.labelledBy || !element.tag) {
     // Nothing labels it, so there is no non-circular way to name it. Left as
     // it is and refused at publication, rather than invented here: a binding
@@ -1395,7 +1487,9 @@ function fieldOfProposal(p: Proposal): { object: string; field: string } | null 
 
 /** A proposal becomes a step, with Orbit's binding rather than the model's. */
 function makeStep(p: Proposal, element: Seen, procedure: string,
-  registry: { credentialName: string | null; signsInAs: string | null }): Step | null {
+  registry: { credentialName: string | null; signsInAs: string | null },
+  /** Values earlier steps read: entering one types what was read (Orbit 2.2). */
+  read: ReadonlySet<string> = new Set()): Step | null {
   const { credentialName, signsInAs } = registry;
   const id = crypto.randomUUID();
   const target = { label: element.labelledBy ?? element.name, binding: element.binding };
@@ -1422,6 +1516,14 @@ function makeStep(p: Proposal, element: Seen, procedure: string,
     if (signsInAs && p.value.trim() === signsInAs.trim()) {
       return { id, kind: 'enter', summary: `The registered account, into ${target.label}`,
         into: target, value: { from: 'account' }, sensitive: false };
+    }
+
+    // A value an earlier step read is typed as it was read — on this
+    // application or another. It used to become a declared input of the same
+    // name, which a person starting the run would have been asked to supply.
+    if (read.has(p.value.trim())) {
+      return { id, kind: 'enter', summary: `${p.value.trim()}, into ${target.label}`,
+        into: target, value: { from: 'step', value: p.value.trim() }, sensitive: false };
     }
 
     const supplied = valueToEnter(p.value, procedure);

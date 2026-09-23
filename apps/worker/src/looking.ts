@@ -21,6 +21,8 @@ export interface Typing {
   inputs: Record<string, string>;
   signsInAs?: string | null;
   signsInWith?: string | null;
+  /** What earlier steps read, for a step that enters one (Orbit 2.2). */
+  values?: Record<string, string>;
 }
 
 export interface Looking {
@@ -75,6 +77,7 @@ export interface Looking {
  */
 export function toType(value: Extract<Step, { kind: 'enter' }>['value'], opts: Typing): string {
   if (value.from === 'input') return opts.inputs[value.value] ?? '';
+  if (value.from === 'step') return opts.values?.[value.value] ?? '';
   if (value.from === 'account') return opts.signsInAs ?? '';
   if (value.from === 'secret') return opts.signsInWith ?? '';
   if (value.from === 'literal') {
