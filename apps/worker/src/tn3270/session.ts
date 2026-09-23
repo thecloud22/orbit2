@@ -7,7 +7,7 @@
  * host's answer on the screen. A keyboard left locked is said, not retried.
  */
 import { S3270, TerminalError, quoted } from './s3270.ts';
-import { commandFor, parseBuffer, type Screen } from './screen.ts';
+import { PAUSE, commandFor, parseBuffer, seenOf, type Screen } from './screen.ts';
 
 /**
  * Where the application is, from its origin: `tn3270://host:port`, or
@@ -27,6 +27,14 @@ export function hostOf(origin: string): { host: string; tls: boolean; codePage?:
 
 /** How long a key may take to be answered, and a connection to be made. */
 const ANSWER_MS = 15_000;
+/**
+ * How long the host must be silent for its answer to be whole (Orbit 2.3).
+ * A real host unlocks the keyboard and then writes: TSO's password prompt
+ * arrived after the unlock, so a screen read at the unlock was blank.
+ */
+const QUIET = '0.3';
+/** How many of TSO's "***" pauses are passed before Orbit says the host is stuck. */
+const PAUSES = 20;
 
 export class Tn3270Session {
   #emulator: S3270 | null = null;
@@ -48,7 +56,14 @@ export class Tn3270Session {
       throw new TerminalError('applicationUnavailable',
         `The host at ${host} refused the connection or did not answer${done.data.length ? `: ${done.data.join(' ')}` : ''}.`);
     }
-    await this.#wait('Wait(15,InputField)');
+    // A host may open on a banner that takes no input and wants Clear, as
+    // Hercules' does; Clear on a screen with nothing to type is safe.
+    const first = await emulator.run('Wait(15,InputField)', ANSWER_MS + 5000);
+    if (!first.ok) {
+      await emulator.run('Clear()');
+      await this.#wait('Wait(15,InputField)');
+    }
+    await this.#whole();
   }
 
   async disconnect(): Promise<void> { await this.close(); }
@@ -75,7 +90,7 @@ export class Tn3270Session {
   async screen(): Promise<Screen> {
     const done = await this.#need().run('ReadBuffer(Ascii)');
     if (!done.ok) throw new TerminalError('applicationUnavailable', 'The screen could not be read.');
-    return parseBuffer(done.data);
+    return parseBuffer(done.data, done.status?.cursor);
   }
 
   /** Type a value into the field whose data begins at this row and column. */
@@ -106,11 +121,43 @@ export class Tn3270Session {
   }
 
   async settle(): Promise<void> {
-    const e = this.#need();
-    const done = await e.run('Wait(15,Unlock)', ANSWER_MS + 5000);
+    await this.#unlocked();
+    await this.#whole();
+  }
+
+  async #unlocked(): Promise<void> {
+    const done = await this.#need().run('Wait(15,Unlock)', ANSWER_MS + 5000);
     if (!done.ok) throw new TerminalError('timedOut', 'The host did not answer within 15 seconds; the keyboard is still locked.');
     if (done.status?.keyboard === 'E') {
       throw new TerminalError('terminalKeyboardLocked', 'The keyboard is locked in an error state the host set.');
     }
   }
+
+  /**
+   * Until the host has finished answering: silent for a moment, the keyboard
+   * unlocked, and past any "***" — TSO's "there is more; press Enter", which
+   * is paging, not a step anyone's procedure takes, and which a run must pass
+   * however many broadcast messages there are today.
+   */
+  async #whole(): Promise<void> {
+    const e = this.#need();
+    for (let paused = 0; ; paused++) {
+      const until = Date.now() + ANSWER_MS;
+      // s3270's Wait(Output) asks whether the screen has changed since it
+      // was last read, so it is read first: then a change is a new write.
+      do await e.run('Ascii(0,0,1)');
+      while (Date.now() < until && (await e.run(`Wait(${QUIET},Output)`, 5000)).ok);
+      await this.#unlocked();
+      const screen = await this.screen();
+      if (!pausedAt(screen)) return;
+      if (paused >= PAUSES) throw new TerminalError('timedOut', `The host paused for Enter ${PAUSES} times and did not stop.`);
+      await e.run('Enter()', ANSWER_MS);
+      await this.#unlocked();
+    }
+  }
+}
+
+/** A screen written line by line whose live prompt is "***". */
+function pausedAt(screen: Screen): boolean {
+  return screen.lineMode && screen.identity === PAUSE && seenOf(screen).every((s) => s.what !== 'field');
 }

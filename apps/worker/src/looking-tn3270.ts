@@ -86,7 +86,7 @@ class Tn3270Looking implements Looking {
       if (step.kind === 'read' && !step.produces.required) return { ok: true };
       return { ok: false, why: found.found === 'many' ? `"${target.label}" is on the screen ${found.count} times.` : found.why };
     }
-    if (step.kind === 'enter') await this.#session.type(b, toType(step.value, typing));
+    if (step.kind === 'enter') await this.#session.type(found.field, toType(step.value, typing));
     if (step.kind === 'activate' && found.key) await this.#session.press(found.key);
     return { ok: true };
   }

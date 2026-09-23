@@ -31,6 +31,14 @@ export interface Screen {
   fields: Field[];
   /** What names this screen: its code (LSV20) or else its title. */
   identity: string;
+  /** Where the host left the cursor, when the emulator said. */
+  cursor?: { row: number; column: number };
+  /**
+   * A screen the host writes line by line, as TSO does while it signs a
+   * person on: nothing on it is protected, earlier prompts stay where they
+   * were written, and the one field that is live is the one with the cursor.
+   */
+  lineMode: boolean;
 }
 
 /**
@@ -52,16 +60,26 @@ export interface TerminalBinding {
 }
 
 const KEY = /^(ENTER|CLEAR|PA[1-3]|PF(?:[1-9]|1\d|2[0-4]))=(.+)$/;
-const LABEL = /(===>|:)\s*$/;
+/** A label ends in an arrow, a colon, or the dot leaders of CUA panels ("Loan number . . ."). */
+const LABEL = /(={1,3}>|:|(?:\.\s?){2,})\s*$/;
 const CODE = /^[A-Z]{2,5}\d{1,4}[A-Z]?$/;
+/** A clock or a date is on every screen and names none of them. */
+const CLOCK = /^(date|time|\d{1,4}[./:-]\d{1,2}[./:-]\d{1,4})$/i;
+/** TSO's "more to come; press Enter" (Orbit 2.3). */
+export const PAUSE = '***';
 
-/** "LOAN NUMBER  ===>" and "LTV          :" both name "LOAN NUMBER" and "LTV". */
+/** "LOAN NUMBER  ===>", "LTV          :" and "Loan number . . ." name "LOAN NUMBER", "LTV" and "Loan number". */
 export function cleanLabel(text: string): string {
-  return text.replace(/(===>|:)\s*$/, '').replace(/\s+/g, ' ').trim();
+  return text.replace(LABEL, '').replace(/\s+/g, ' ').trim();
+}
+
+/** "ENTER CURRENT PASSWORD FOR HERC02-" and "IKJ56700A ENTER USERID -" as the names of what they ask for. */
+function cleanPrompt(text: string): string {
+  return text.trim().replace(/\s*[-?:]\s*$/, '').replace(/\s+/g, ' ').trim();
 }
 
 /** Parses `ReadBuffer(Ascii)` rows into cells and fields. */
-export function parseBuffer(rows: string[]): Screen {
+export function parseBuffer(rows: string[], cursor?: { row: number; column: number }): Screen {
   const height = rows.length;
   const cells: Array<{ ch: string; attr: number | null }> = [];
   let width = 0;
@@ -103,15 +121,60 @@ export function parseBuffer(rows: string[]): Screen {
   }
   const lines = Array.from({ length: height }, (_, r) => shown.slice(r * columns, (r + 1) * columns).join(''));
 
-  return { rows: height, columns, lines, fields, identity: identityOf(fields) };
+  const lineMode = fields.every((f) => !f.protected);
+  const screen: Screen = { rows: height, columns, lines, fields, identity: '', lineMode, ...(cursor ? { cursor } : {}) };
+  return { ...screen, identity: identityOf(screen) };
 }
 
-/** The screen's code where it shows one (row 0), else its title (the first words on rows 1–3). */
-function identityOf(fields: Field[]): string {
+/**
+ * The screen's code where it shows one (row 0); else its title — words, not a
+ * clock, on rows 1–3 and then row 0; else, on a screen the host writes line
+ * by line, what it is asking for; else what its first field is called; else
+ * the first text on rows 1–3, as before Orbit 2.3, so that nothing already
+ * published is found on a screen of another name.
+ */
+function identityOf(screen: Screen): string {
+  const { fields } = screen;
   const code = fields.find((f) => f.protected && f.row === 0 && CODE.test(f.text.trim()));
   if (code) return code.text.trim();
-  const title = fields.find((f) => f.protected && f.row >= 1 && f.row <= 3 && f.text.trim() && !LABEL.test(f.text.trim()));
-  return title?.text.trim() ?? '';
+  // A title is words that stand alone on their row: beside it, at most a
+  // clock or something short (a version, a user). "ISPF PARMS" on a menu row
+  // is one choice among several; "SERVICE REQUEST LOOKUP" is the screen's name.
+  const texts = (row: number) => fields.filter((f) => f.protected && f.row === row && bare(f.text));
+  const alone = (f: Field) => texts(f.row).every((x) => x === f || CLOCK.test(bare(x.text)) || bare(x.text).length < 9);
+  const titled = (f: Field) => f.protected && !LABEL.test(f.text.trim()) && !CLOCK.test(bare(f.text))
+    && /\S\s\S/.test(bare(f.text)) && alone(f);
+  const title = fields.find((f) => f.row >= 1 && f.row <= 3 && titled(f)) ?? fields.find((f) => f.row === 0 && titled(f));
+  if (title) return bare(title.text);
+  if (screen.lineMode) return liveOf(screen)?.label ?? '';
+  const named = entriesOf({ ...screen, identity: '' }).find((e) => e.seen.what === 'field');
+  if (named) return named.seen.name;
+  const first = fields.find((f) => f.protected && f.row >= 1 && f.row <= 3 && f.text.trim() && !LABEL.test(f.text.trim()));
+  return first?.text.trim() ?? '';
+}
+
+/** A title without the rules drawn either side of it: "----  TSO COMMAND PROCESSOR  ----". */
+const bare = (text: string) => text.replace(/^[\s\-=*:]+|[\s\-=*]+$/g, '').replace(/\s+/g, ' ');
+
+/**
+ * On a screen written line by line: the field with the cursor, and the prompt
+ * the host wrote before it. With no fields at all (TSO's READY), the rest of
+ * the screen from the cursor is the input.
+ */
+function liveOf(screen: Screen): { field: Field; label: string } | null {
+  const c = screen.cursor;
+  if (!c) return null;
+  const at = c.row * screen.columns + c.column;
+  const offset = (f: Field) => f.row * screen.columns + f.column;
+  const field = screen.fields.find((f) => at >= offset(f) - 1 && at < offset(f) + Math.max(1, f.length))
+    ?? (screen.fields.length === 0
+      ? { attrRow: c.row, attrColumn: c.column, row: c.row, column: c.column, length: screen.rows * screen.columns - at,
+          protected: false, hidden: false, intense: false, text: '' }
+      : null);
+  if (!field) return null;
+  const before = screen.fields.filter((f) => offset(f) < offset(field) && f.text.trim()).at(-1)?.text
+    ?? [screen.lines[c.row]!.slice(0, c.column), ...screen.lines.slice(0, c.row).reverse()].find((l) => l.trim());
+  return { field, label: cleanPrompt(before ?? '') };
 }
 
 /** One entry of a key line: `PF5=APPROVE`. */
@@ -138,14 +201,23 @@ function keysOf(f: Field): KeyEntry[] {
  * past an input — "(CONV FHA VA JUMB)" after the PROGRAM box is a hint, not a
  * second thing called PROGRAM.
  */
-function labelBefore(row: Field[], f: Field): string | undefined {
+function labelBefore(row: Field[], f: Field, above: Field[] = []): string | undefined {
   const before = row.filter((x) => x.column < f.column).sort((a, b) => b.column - a.column);
   for (const x of before) {
     if (!x.protected) return undefined;
     if (!x.text.trim()) continue;
-    return LABEL.test(x.text.trim()) ? cleanLabel(x.text) : undefined;
+    if (!LABEL.test(x.text.trim())) return undefined;
+    // A bare "===>" is named by what the screen writes over it:
+    // "ENTER TSO COMMAND, CLIST, OR REXX EXEC BELOW:".
+    return cleanLabel(x.text) || labelAbove(above, f);
   }
   return undefined;
+}
+
+function labelAbove(fields: Field[], f: Field): string | undefined {
+  const over = fields.filter((x) => x.protected && x.row < f.row && x.row >= f.row - 3 && x.text.trim())
+    .sort((a, b) => b.row - a.row || a.column - b.column)[0];
+  return over ? cleanLabel(over.text) || undefined : undefined;
 }
 
 const isKeyLine = (f: Field) => f.protected && f.text.split(/\s{2,}/).some((p) => KEY.test(p.trim()));
@@ -157,29 +229,61 @@ const isKeyLine = (f: Field) => f.protected && f.text.split(/\s{2,}/).some((p) =
  * before it; a key by what its legend says it does (`APPROVE`, never `PF5`,
  * because the verb is what Decision 16 checks a press against); the title
  * and header are headings; any other text — a message — is a value to read.
+ * Enter is offered where a screen takes input and no legend names it: every
+ * 3270 screen answers it, and most do not say so.
+ *
+ * A screen written line by line offers one field, the live one, named by the
+ * prompt before it; what the host wrote earlier is there to be read.
  */
 export function seenOf(screen: Screen): Seen[] {
-  const seen: Seen[] = [];
-  const add = (s: Omit<Seen, 'index'>) => seen.push({ index: seen.length + 1, ...s } as Seen);
+  return entriesOf(screen).map((e) => e.seen);
+}
+
+interface Entry { seen: Seen; field: Field }
+
+function entriesOf(screen: Screen): Entry[] {
+  const out: Entry[] = [];
+  const add = (field: Field, s: Omit<Seen, 'index'>) => out.push({ field, seen: { index: out.length + 1, ...s } as Seen });
+  const binding = (f: Field, what: TerminalBinding['what'], extra: Partial<TerminalBinding> = {}): TerminalBinding =>
+    ({ connector: 'tn3270', screen: screen.identity, what, row: f.row, column: f.column, length: f.length, ...extra });
+  const enter = (f: Field) => add(f, { what: 'button', role: 'key', name: 'ENTER',
+    binding: binding(f, 'key', { key: 'ENTER', label: 'ENTER' }) as never });
+
+  if (screen.lineMode) {
+    const live = liveOf(screen);
+    for (const f of screen.fields) {
+      if (f === live?.field || !f.text.trim()) continue;
+      add(f, { what: 'value', role: 'text', name: f.text.trim(), binding: binding(f, 'value') as never });
+    }
+    if (live && live.label && live.label !== PAUSE) {
+      add(live.field, { what: 'field', role: 'textbox', name: live.label, ...(live.field.hidden ? { secret: true } : {}),
+        binding: binding(live.field, 'field', { label: live.label }) as never });
+    }
+    if (live) enter(live.field);
+    return out;
+  }
+
   const byRow = new Map<number, Field[]>();
   for (const f of screen.fields) byRow.set(f.row, [...(byRow.get(f.row) ?? []), f]);
+  let enterListed = false;
+  let takesInput: Field | null = null;
 
   for (const f of screen.fields) {
     const text = f.text.trim();
-    const label = labelBefore(byRow.get(f.row) ?? [], f);
-    const binding = (what: TerminalBinding['what'], extra: Partial<TerminalBinding> = {}): TerminalBinding =>
-      ({ connector: 'tn3270', screen: screen.identity, what, row: f.row, column: f.column, length: f.length, ...extra });
+    const label = labelBefore(byRow.get(f.row) ?? [], f, screen.fields);
 
     if (!f.protected) {
       if (!label) continue;          // a field nothing names cannot be found again
-      add({ what: 'field', role: 'textbox', name: label, ...(f.hidden ? { secret: true } : {}),
-        binding: binding('field', { label }) as never });
+      takesInput ??= f;
+      add(f, { what: 'field', role: 'textbox', name: label, ...(f.hidden ? { secret: true } : {}),
+        binding: binding(f, 'field', { label }) as never });
       continue;
     }
     if (!text) continue;
     if (isKeyLine(f)) {
       for (const k of keysOf(f)) {
-        add({ what: 'button', role: 'key', name: k.label,
+        if (k.key === 'ENTER') enterListed = true;
+        add(f, { what: 'button', role: 'key', name: k.label,
           binding: { connector: 'tn3270', screen: screen.identity, what: 'key', key: k.key, label: k.label,
             row: f.row, column: f.column + k.offset, length: `${k.key}=${k.label}`.length } as never });
       }
@@ -187,16 +291,17 @@ export function seenOf(screen: Screen): Seen[] {
     }
     if (LABEL.test(text)) continue;  // a label names the field or value after it
     if (label) {
-      add({ what: 'value', role: 'text', name: text, labelledBy: label, binding: binding('value', { label }) as never });
+      add(f, { what: 'value', role: 'text', name: text, labelledBy: label, binding: binding(f, 'value', { label }) as never });
       continue;
     }
     if (f.row <= 1) {
-      add({ what: 'heading', role: 'heading', name: text, binding: binding('value') as never });
+      add(f, { what: 'heading', role: 'heading', name: text, binding: binding(f, 'value') as never });
       continue;
     }
-    add({ what: 'value', role: 'text', name: text, binding: binding('value') as never });
+    add(f, { what: 'value', role: 'text', name: text, binding: binding(f, 'value') as never });
   }
-  return seen;
+  if (takesInput && !enterListed) enter(takesInput);
+  return out;
 }
 
 export type Located =
@@ -210,8 +315,7 @@ export function locate(screen: Screen, b: TerminalBinding): Located {
     return { found: 'none', unexpectedScreen: true,
       why: `The screen showing is ${screen.identity || 'one without a name'}, and this step was mapped on ${b.screen}.` };
   }
-  const seen = seenOf(screen);
-  const same = seen.filter((s) => {
+  const same = entriesOf(screen).filter(({ seen: s }) => {
     const x = s.binding as unknown as TerminalBinding;
     if (x.what !== b.what) return false;
     if (b.what === 'key') return x.key === b.key;
@@ -224,12 +328,14 @@ export function locate(screen: Screen, b: TerminalBinding): Located {
       : `Nothing labelled "${b.label ?? `at row ${b.row + 1}`}" is on ${screen.identity}.` };
   }
   if (same.length > 1) return { found: 'many', count: same.length };
-  const x = same[0]!.binding as unknown as TerminalBinding;
-  if (b.what !== 'key' && (x.row !== b.row || x.column !== b.column)) {
+  const { seen, field } = same[0]!;
+  const x = seen.binding as unknown as TerminalBinding;
+  // On a screen written line by line the host writes where it is up to, so a
+  // prompt is found by what it asks, not where; a formatted screen's field
+  // that has moved is a refusal.
+  if (b.what !== 'key' && !screen.lineMode && (x.row !== b.row || x.column !== b.column)) {
     return { found: 'none', why: `"${b.label}" has moved: it was at row ${b.row + 1}, column ${b.column + 1}, and is now at row ${x.row + 1}, column ${x.column + 1}.` };
   }
-  const field = screen.fields.find((f) => f.row === x.row && f.column === x.column)
-    ?? screen.fields.find((f) => f.row === x.row) ?? screen.fields[0]!;
   return { found: 'one', field, ...(b.key ? { key: b.key } : {}) };
 }
 
