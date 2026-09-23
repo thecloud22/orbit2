@@ -74,7 +74,7 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
   const working = Boolean(draft && (
     (u && (u.status === 'queued' || u.status === 'sorting'))
     || (u?.confirmed_at && u.walk && !['brought in', 'refused'].includes(u.walk))
-    || draft.chat.some((m) => m.state === 'queued' || m.state === 'answering')
+    || draft.chat.some((m) => m.state === 'waiting')
     || (draft.mapping && ['queued', 'walking', 'running'].includes(draft.mapping.status))));
   useEffect(() => {
     if (!working) return;
