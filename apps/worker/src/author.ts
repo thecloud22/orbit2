@@ -549,7 +549,20 @@ export async function authorFromProcedure(opts: {
     // A press for a rule is refused by design, so it does not spend the turns
     // the procedure's own lines need; a few are given back, and no more.
     let ruleRefusals = 0;
+    /** The address and the visible text after the last turn, to tell a slow page from a still one. */
+    let lastLooked: string | null = null;
+    const looked = async () => `${page.url()}|${String(await page.evaluate('document.body ? document.body.innerText : ""').catch(() => ''))}`;
     for (let turn = 1; turn <= maxTurns + Math.min(ruleRefusals, 4); turn++) {
+      // A press whose page has not moved yet is given longer before it is
+      // held against the walk. `settleAfterActivating` waits two seconds for
+      // the address to change; on a loaded machine the portal's sign-in took
+      // longer, the next turn was shown /login "unchanged", and the model
+      // said the procedure was finished before the loan was ever searched for
+      // (scenario 8). A press that really changes nothing costs ten seconds.
+      if (lastActMoved && lastLooked !== null) {
+        for (let waited = 0; waited < 10_000 && (await looked()) === lastLooked; waited += 500) await page.waitForTimeout(500);
+        await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+      }
       const seen = await snapshot(page);
       // The picture of what the model is about to be asked about. Never of a
       // sign-in page: nothing of signing in is captured (Decision 4, item 13).
@@ -576,6 +589,7 @@ export async function authorFromProcedure(opts: {
         lastActMoved = false;
       }
       lastFingerprint = fingerprint;
+      lastLooked = `${page.url()}|${visible}`;
       if (unchanged >= 2) {
         finished = true;   // said in its own words below; not the ceiling
         questions.push(asQuestion('The page stopped changing, so the rest of the procedure could not be worked out here.'));
