@@ -2,7 +2,7 @@ import type { RunEventView, RunView, StepAttemptView } from '@orbit/contract';
 import { Verbatim } from './ui.tsx';
 
 /**
- * A run's InMem (plan §11): everything the run touched, in one place, by
+ * A run's DataStore (plan §11): everything the run touched, in one place, by
  * section — what it was given, what it found, what it decided, what it handed
  * to a person and what it concluded.
  *
@@ -60,7 +60,7 @@ const readable = (op: string) => ({
 
 const SECTIONS = ['Given', 'Found', 'Decided', 'Handed over', 'Conclusion'];
 
-export function InMem({ data }: { data: RunView }) {
+export function DataStore({ data }: { data: RunView }) {
   const entries = entriesOf(data.run, data.events, data.attempts, data.steps as Array<{ summary?: string }>);
   const download = () => {
     const cell = (s: string) => `"${s.replace(/"/g, '""')}"`;
@@ -68,13 +68,13 @@ export function InMem({ data }: { data: RunView }) {
       .map((r) => r.map(cell).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const a = document.createElement('a');
-    a.href = url; a.download = `run-${data.run.reference}-inmem.csv`; a.click();
+    a.href = url; a.download = `run-${data.run.reference}-datastore.csv`; a.click();
     URL.revokeObjectURL(url);
   };
   return (
     <section style={{ padding: '16px 0 18px', borderBottom: '1px solid var(--rule)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, paddingBottom: 9 }}>
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>InMem</h2>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>DataStore</h2>
         <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>everything this run was given, found, decided and concluded, and where each came from</span>
         <span style={{ flexGrow: 1 }} />
         <button type="button" onClick={download} disabled={entries.length === 0}

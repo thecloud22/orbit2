@@ -249,6 +249,9 @@ well. Either:
 The second is smaller and keeps §4 intact. Both need `declared_inputs` to stop
 being write-once.
 
+**Planned.** The second, in `docs/plans/2026-09-22-procedure-editor.md`: phase P2 (R10,
+editing inputs) and P3 (R19, an answer to a question is an edit).
+
 ---
 
 ## Adding a step produces a draft that cannot be published

@@ -768,7 +768,7 @@ function coverageLine(c: { total: number; byLabel: Record<string, number> }): st
 }
 
 /**
- * What every run of this draft will keep in its InMem (plan §11), worked out
+ * What every run of this draft will keep in its DataStore (plan §11), worked out
  * from the steps: the values it is given, reads, decides on, hands over and
  * concludes with. Nothing else can be written there, so this is also what an
  * auditor will find on every run.
@@ -798,7 +798,7 @@ function WillHold({ steps, inputs }: {
     }
   }
   return (
-    <Section title="What each run's InMem will hold"
+    <Section title="What each run's DataStore will hold"
       note="every value a run is given, finds, decides and concludes with, and the step each comes from">
       <div style={{ borderTop: '1px solid var(--ink)', maxWidth: 1100 }}>
         {rows.map(([section, what, from], i) => (
