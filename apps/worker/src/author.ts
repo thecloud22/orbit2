@@ -431,8 +431,13 @@ export async function authorFromProcedure(opts: {
   // one the author marked buys the turns that takes.
   // Each further application the agent works across buys the turns that going
   // there takes: moving, signing in, finding the record again (Orbit 2.2).
-  const maxTurns = opts.maxTurns ?? 12 + 8 * (opts.sentences ?? []).filter((x) => x.waits).length
-    + 10 * Math.max(0, (opts.applications?.length ?? 1) - 1);
+  //
+  // Across applications the ceiling follows the procedure: three turns a line
+  // of work, and a base for signing in on each. Scenario 12 boarded the loan
+  // in 21 turns and was cut off before bringing the account back to the web.
+  const waits = (opts.sentences ?? []).filter((x) => x.waits).length;
+  const acrossCeiling = 12 * (opts.applications?.length ?? 1) + 3 * (opts.taskSentences ?? []).length + 8 * waits;
+  const maxTurns = opts.maxTurns ?? ((opts.applications?.length ?? 1) > 1 ? acrossCeiling : 12 + 8 * waits);
 
   const numbers = (opts.sentences ?? []).map((x) => x.number);
   const provenance: Record<string, string> = {};
