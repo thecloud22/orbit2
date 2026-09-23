@@ -1,0 +1,10 @@
+Meridian Home Lending
+Mortgage Insurance Check
+
+Steps
+1. Sign in to Meridian Home Lending with any user ID and password.
+2. Open the loan file using the loan number from the processing queue.
+3. If there is no such file, say so. That is not an error.
+4. Read the loan-to-value from the underwriting summary.
+5. If the loan-to-value is over 80%, attach the condition requiring private mortgage insurance.
+6. Then approve the file.

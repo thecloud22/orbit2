@@ -1,0 +1,14 @@
+Meridian Home Lending
+Broker Rate and Terms Enquiry
+
+Purpose
+When a broker phones about a file, we tell them the terms on it. We never change the file.
+
+Steps
+1. Sign in to Meridian Home Lending with any user ID and password.
+2. Search for the loan file with the loan number the broker quoted and open it.
+3. If there is no such file, tell the broker so. That happens often and is not an error.
+4. Record the note rate, the loan amount, the loan program and the credit score, and hand them back to the broker.
+5. If the broker asks for anything else, pass the call to the underwriter named on the file.
+
+Do not change anything on the file, and do not press any decision button.

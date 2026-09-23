@@ -569,6 +569,11 @@ export async function authorFromProcedure(opts: {
       const fingerprint = `${page.url()}|${seen.map((s) => s.name).join('|')}|${visible}`;
       if (lastActMoved) {
         unchanged = fingerprint === lastFingerprint ? unchanged + 1 : 0;
+        // Compared once, on the turn straight after the press. A turn that
+        // presses nothing — a refusal, an early "done" — is not a press that
+        // failed to move the page: counting them ended scenario 1's walk as
+        // "stuck" two turns after a sign-in that had worked.
+        lastActMoved = false;
       }
       lastFingerprint = fingerprint;
       if (unchanged >= 2) {

@@ -1,0 +1,18 @@
+Meridian Home Lending
+First-Time Buyer File Review
+
+Purpose
+This review is done by an underwriter on every purchase file where the borrower is buying their first home. Refinances follow a different procedure.
+
+Steps
+1. Sign in to Meridian Home Lending with any user ID and password.
+2. Open the loan file using the loan number from the processing queue.
+3. If there is no such file, say so. That is not an error; the file was withdrawn.
+4. Read the first-time buyer flag, the homebuyer education status, the loan-to-value and the reserves in months from the file.
+5. If the borrower is a first-time buyer and homebuyer education is not completed, refer the file to a senior underwriter and stop there. Education must be finished before we lend to a first-time buyer.
+6. If the loan-to-value is over 80%, attach the condition requiring private mortgage insurance.
+7. If the reserves are under 6 months, attach the condition requiring additional reserves.
+8. Then approve the file.
+9. Email the borrower our welcome pack once the file is approved.
+
+Never decline a file under this procedure.

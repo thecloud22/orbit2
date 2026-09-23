@@ -148,7 +148,7 @@ Five processes come up. `scripts/orbit status | stop | restart | logs <name>`.
 | `http://localhost:4000` | the API |
 | — | the worker, which holds no port |
 
-## Your first agent, in four minutes
+## Your first agent, in five minutes
 
 **1. Register the system.** `http://localhost:5173/admin` → Register an
 application.
@@ -164,34 +164,66 @@ application.
 The password is encrypted before it is written, and nothing ever reads it back
 except the worker, at the moment of a run's sign-in.
 
-**2. Write a procedure.** `http://localhost:5173/bring-in` → Write it out.
+**2. Bring a procedure in.** `http://localhost:5173/bring-in` → Write it out.
+Paste `docs/testing/scenarios/09-live-edit.txt`, start at `/login`, and give
+`loanNumber` = `ML-26-04561` as the example. (Or tick *Start from a blank page*
+and write it on the agent's page.)
 
-| | |
-|---|---|
-| Which system | Mortgage Portal |
-| Start at | `/login` |
-| Call this agent | anything |
-| An example to work through | name `loanNumber`, value `ML-26-04471` |
+**3. On the agent's page.** Everything happens on one page. Your procedure is on
+the left, as you wrote it, with Orbit's sentence numbers in the margin; what
+Orbit made of each sentence opens in the panel beside it.
+
+- Orbit sorts every sentence: *Orbit does this*, *A rule*, *For a person*,
+  *Background*, *Orbit won't*. Change any with **Edit**, or ask in the **Chat**.
+- **Confirm and draft it.** Orbit works through the application, and you watch
+  each turn and the page it is looking at.
+- Each sentence now shows the values it uses and finds, as objects — a `loan`
+  with its `ltv`. Its steps open in the panel, each said in words, naming what it
+  acts on ("the field labelled “Loan number”"), with a small picture Orbit
+  captured of the page and the element boxed. Steps built from a rule carry the
+  rule's identifier, **BR1**.
+- A question Orbit could not settle sits under its sentence, with the picture.
+  Answer it there.
+
+**4. Confirm and publish.** Name the endings, press Confirm, then *Publish a
+version*.
+
+**5. Run it.** Start a run with `ML-26-04561` (loan-to-value 85%): it attaches
+the mortgage-insurance condition and approves. Then `ML-26-04471` (72.7%): it
+approves with no condition.
+
+**6. Change it.** Press *Edit for a new version*, **Edit** sentence 5, and make
+the threshold 90%. Only that sentence waits to be mapped. Press *Map changes*:
+Orbit replays the earlier steps without a model and maps just the change. Confirm,
+publish version 2, and `ML-26-04561` now approves with no condition. Runs of
+version 1 are untouched.
+
+Every run page shows, beside each sentence of the procedure, what the run did:
+values found, which way each rule went, what it pressed, what it left to a
+person — with the run's own screenshots.
+
+## The demo, end to end
+
+Five scenarios against the mortgage portal, run the way a person runs them —
+brought in, sorted, confirmed with no relabelling, drafted, published, and every
+loan checked by what the run actually pressed:
 
 ```
-Sign in to Meridian Home Lending, then open the loan file. Approve the file
-when the credit score is at least 620. If it is lower than that, decline the
-file citing a low credit score.
+node scripts/scenarios.mjs demo     # scenarios 5 to 9, about 25 minutes
+pnpm test:scenarios                 # all nine
 ```
 
-A browser opens and Orbit works through it once, against the real application,
-showing each turn as it is recorded.
+| # | Scenario | What it shows |
+|---|---|---|
+| 5 | First-time buyer review | a rule with two conditions over text; mortgage insurance and reserves |
+| 6 | Property risk review | a flood zone "anything other than X", a condo rule, program-specific credit floors |
+| 7 | Income and loan size | a money threshold (jumbo), self-employed tax returns, a DTI referral |
+| 8 | Broker rate enquiry | read-only; the outputs handed back as objects |
+| 9 | A live edit | publish, run, change the threshold on the page, map only the change, version 2 decides differently |
 
-**3. Confirm and publish.** Name the two conclusions, press Confirm, then
-Publish a version.
-
-**4. Run it.** Start a run with `loanNumber = ML-26-04471` — credit score 762,
-so it approves. Then run it again with `ML-26-04547` — credit score 596, so it
-stops at your check and says why.
-
-The run page shows every step, what it compared, and a screenshot of what it
-saw — except on a step that typed a password, where the picture is not taken
-rather than taken and judged safe.
+They call the model `ORBIT_MODEL` names, so they cost a few cents. What each
+procedure says and which loan should conclude how is in
+`docs/testing/scenarios/README.md`.
 
 ## What is in here
 
@@ -208,7 +240,7 @@ rather than taken and judged safe.
 ## Working on it
 
 ```
-pnpm test        # 216 tests: contract, model, api, worker
+pnpm test        # 383 tests: contract, model, procedure, api, worker
 pnpm typecheck
 ```
 
@@ -236,6 +268,9 @@ can act on.
   measurably wrong.
 - **Consult a model when it runs.** Authoring is model-driven and execution is
   not; the worker executes with no model key set at all.
+- **Rewrite your words.** A sentence you change is kept as a revision beside what
+  it said before; Orbit never rewrites one, and the chat only proposes a
+  rewording for you to accept.
 
 `docs/pilot-readiness.md` is the honest list of what stands between this and a
 real pilot. `docs/TODO.md` is what is understood and deliberately not done.

@@ -1,0 +1,18 @@
+Meridian Home Lending
+Property Risk Review
+
+Purpose
+Underwriters run this review on every file before a decision, so that the collateral is insured and the program's credit floor is met.
+
+Steps
+1. Sign in to Meridian Home Lending with any user ID and password.
+2. Open the loan file using the loan number from the processing queue.
+3. If there is no such file, say so; this is not an error.
+4. Read the FEMA flood zone, the property type, the loan-to-value, the loan program and the credit score from the file.
+5. If the flood zone is anything other than X, attach the condition requiring flood insurance.
+6. If the property is a condominium and the loan-to-value is over 80%, attach the condition requiring private mortgage insurance.
+7. If the program is FHA and the credit score is below 600, refer the file to a senior underwriter and stop. Our investor overlay for FHA is 600, not the agency's 580.
+8. If the program is Conventional and the credit score is below 620, refer the file to a senior underwriter and stop.
+9. Otherwise approve the file.
+
+A person checks the flood certificate itself; Orbit only reads the zone recorded on the file. Never decline a file under this procedure.

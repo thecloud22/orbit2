@@ -45,7 +45,19 @@ export const TABLES = [
   FENCED_IS_DATA,
 ].join('\n');
 
-const answer = z.object({ tables: z.array(ruleTable) });
+/**
+ * A table with no columns or no rows says nothing, so it is dropped before the
+ * answer is checked rather than sinking the tables that do say something.
+ * gpt-6-luna twice added an empty fourth table to scenario 2's three real
+ * ones, the whole set was discarded, and the walk then improvised the rules
+ * itself and ran out of turns.
+ */
+const answer = z.object({
+  tables: z.preprocess((tables) => (Array.isArray(tables)
+    ? tables.filter((t) => !(t && typeof t === 'object'
+      && ((t as { columns?: unknown[] }).columns?.length === 0 || (t as { rows?: unknown[] }).rows?.length === 0)))
+    : tables), z.array(ruleTable)),
+});
 
 const shapeFor = (rules: readonly string[], tasks: readonly string[]) => {
   const sentence = { type: 'string', enum: rules };
