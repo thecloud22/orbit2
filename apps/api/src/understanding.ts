@@ -112,7 +112,7 @@ export type SentenceView = {
   suspicious?: string | null;
 };
 
-async function sentencesWithLabels(db: ClientBase, workflowId: string): Promise<SentenceView[]> {
+export async function sentencesWithLabels(db: ClientBase, workflowId: string): Promise<SentenceView[]> {
   const { rows } = await db.query<SentenceView>(
     `SELECT p.key || '.' || s.n AS number, p.key AS part, s.n, s.text, s.kind, s.unterminated, s.page,
             l.label, l.reason, l.basis, l.given_by AS "givenBy", coalesce(l.waits, false) AS waits

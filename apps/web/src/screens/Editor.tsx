@@ -1,0 +1,442 @@
+/**
+ * The procedure editor: one page for an agent's whole life (plan
+ * docs/plans/2026-09-22-procedure-editor.md, rules R1–R25).
+ *
+ * The author's words sit on the left, laid out as written, with Orbit's
+ * sentence numbers in the margin; what Orbit made of them opens in the panel
+ * beside it. Steps never sit between the sentences (R4), and nothing that
+ * needs a person is folded away (R6).
+ */
+import { useEffect, useMemo, useState } from 'react';
+import { Action, Page, Refusal, Section } from '../Page.tsx';
+import { Chip, EmptyState, Row, type Emptiness } from '../ui.tsx';
+import { send } from '../fetching.ts';
+import type { Route } from '../router.ts';
+import { Configure } from './Configure.tsx';
+import { CONFIGURABLE, Confirm } from './Agent.tsx';
+import {
+  actsOn, blocksOf, valuesOf, LABEL_INK, LABEL_NAME,
+  type Block, type Draft, type Shot, type Step,
+} from '../editor/model.ts';
+import {
+  ChatPanel, DataStorePanel, InputsPanel, OutputsPanel, PanelNote, RulesPanel, StepsPanel, TABS, ValueChip, mono, quiet,
+  type Tab,
+} from '../editor/panels.tsx';
+
+/**
+ * The draft, kept on screen while it is read again. `useFetch` starts every
+ * read from "not loaded yet", which is right for a new page and wrong for a
+ * page Orbit is working on: it blanked the procedure every few seconds.
+ */
+function useDraft(id: string, refresh: number): { state: 'loaded'; value: Draft } | { state: 'empty'; of: Emptiness } {
+  const [result, setResult] = useState<{ state: 'loaded'; value: Draft } | { state: 'empty'; of: Emptiness }>(
+    { state: 'empty', of: { kind: 'notLoadedYet' } });
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/workflows/${id}`)
+      .then(async (r) => {
+        const body: unknown = await r.json();
+        if (!live) return;
+        if (r.status === 404) setResult({ state: 'empty', of: { kind: 'nothingMatching', searched: id } });
+        else if (!r.ok) setResult((was) => was.state === 'loaded' ? was : { state: 'empty', of: { kind: 'couldNotLoad',
+          why: (body as { why?: string }).why ?? 'The record store did not answer. Nothing is lost: this screen could not read it.' } });
+        else setResult({ state: 'loaded', value: body as Draft });
+      })
+      .catch(() => live && setResult((was) => was.state === 'loaded' ? was : { state: 'empty', of: { kind: 'couldNotLoad',
+        why: 'The record store did not answer. Nothing is lost: this screen could not read it.' } }));
+    return () => { live = false; };
+  }, [id, refresh]);
+  return result;
+}
+
+export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
+  const [refresh, setRefresh] = useState(0);
+  const loaded = useDraft(id, refresh);
+  const [tab, setTab] = useState<Tab>('steps');
+  const [blockId, setBlockId] = useState<string | null>(null);
+  const [stepId, setStepId] = useState<string | null>(null);
+  const [allSteps, setAllSteps] = useState(false);
+  const [valueName, setValueName] = useState<string | null>(null);
+  const [refused, setRefused] = useState<string[] | null>(null);
+  const [editRefusal, setEditRefusal] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [configuring, setConfiguring] = useState<string | null>(null);
+  const [adding, setAdding] = useState<string>('end');
+  const [showWhy, setShowWhy] = useState(false);
+
+  const draft = loaded.state === 'loaded' ? loaded.value : null;
+  const u = draft?.understanding ?? null;
+  // Orbit is at work: sorting, drafting, answering the chat or mapping. The
+  // page reads itself again until it is not, so nobody refreshes to find out.
+  const working = Boolean(draft && (
+    (u && (u.status === 'queued' || u.status === 'sorting'))
+    || (u?.confirmed_at && u.walk && !['brought in', 'refused'].includes(u.walk))
+    || draft.chat.some((m) => m.state === 'queued' || m.state === 'answering')
+    || (draft.mapping && ['queued', 'walking', 'running'].includes(draft.mapping.status))));
+  useEffect(() => {
+    if (!working) return;
+    const timer = setInterval(() => setRefresh((n) => n + 1), 2500);
+    return () => clearInterval(timer);
+  }, [working]);
+
+  const blocks = useMemo(() => blocksOf(draft?.document ?? null, draft?.steps ?? []), [draft]);
+  const turnOf = useMemo(() => new Map((draft?.authoring.turns ?? []).map((t) => [t.turn, t])), [draft]);
+
+  if (!draft) {
+    return <Page title="Agent"><div style={{ marginTop: 18, border: '1px solid var(--rule)', borderRadius: 6,
+      background: 'var(--panel)' }}><EmptyState of={loaded.state === 'empty' ? loaded.of : { kind: 'notLoadedYet' }} /></div></Page>;
+  }
+
+  const { workflow, steps, notes, versions, authoring } = draft;
+  const published = versions.length > 0;
+  const live = Boolean(workflow.live_version_id);
+  const confirmed = Boolean(workflow.confirmed_at);
+  const editable = !live && !confirmed;
+  const outstanding = notes.filter((n) => !n.resolved_at);
+  const assumed = notes.filter((n) => n.resolved_at && n.kind === 'assumption');
+  const sorted = !u || u.status === 'sorted';
+  const drafting = Boolean(u?.confirmed_at && u.walk && !['brought in', 'refused'].includes(u.walk));
+
+  const positionOf = (sid: unknown) => steps.find((s) => s.id === sid)?.position ?? null;
+  const shotOf = (s: Step): Shot | null => (s.made_at_turn ? turnOf.get(s.made_at_turn)?.screenshot ?? null : null);
+  const block: Block | null = blocks.find((b) => b.id === blockId)
+    ?? blocks.find((b) => b.steps.length > 0) ?? null;
+
+  const choose = (b: Block) => {
+    setBlockId(b.id); setStepId(null); setAllSteps(false); setTab('steps');
+  };
+  const pickValue = (name: string) => { setValueName(name); setTab('datastore'); };
+
+  const act = async (path: string, body: unknown = {}) => {
+    setBusy(true); setRefused(null);
+    const result = await send<{ blockers?: string[]; unproved?: string[] }>(path, body);
+    setBusy(false);
+    const value = result.value;
+    if (value?.blockers?.length) { setRefused(value.blockers); return false; }
+    if (!result.ok) { setRefused([result.why]); return false; }
+    setRefresh((n) => n + 1);
+    return true;
+  };
+  const edit = async (verb: string, body: unknown) => {
+    setBusy(true); setEditRefusal(null);
+    const result = await send(`/api/workflows/${id}/${verb}`, body);
+    setBusy(false);
+    if (result.ok) setRefresh((n) => n + 1);
+    else setEditRefusal(result.why);
+    return result.ok;
+  };
+
+  // The readiness strip (plan §3): four facts, each derived from the record.
+  const document = draft.document ?? [];
+  const placed = document.filter((s) => s.label).length;
+  const work = document.filter(actsOn);
+  const covered = new Set(steps.map((s) => s.from_sentence).filter(Boolean));
+  const unstepped = work.filter((s) => s.label !== 'rule' && !covered.has(s.number));
+  const pending = draft.pending ?? [];
+  const ready: Array<[string, string, boolean]> = [
+    ['Placed', document.length ? `${placed} of ${document.length} sentences` : 'written as one procedure', placed === document.length],
+    ['Mapped', drafting ? 'Orbit is drafting…' : !steps.length ? 'nothing yet'
+      : pending.length ? `${pending.length} change${pending.length === 1 ? '' : 's'} not mapped`
+      : unstepped.length ? `${unstepped.length} sentence${unstepped.length === 1 ? ' has' : 's have'} no step` : `${steps.length} steps`,
+      !drafting && steps.length > 0 && !pending.length && !unstepped.length],
+    ['Questions', outstanding.length ? `${outstanding.length} to answer` : 'none', outstanding.length === 0],
+    ['Orbit assumed', assumed.length ? `${assumed.length}, not blocking` : 'nothing', true],
+  ];
+
+  const selectedValues = new Set(tab === 'datastore' && valueName ? [valueName] : []);
+  const produced = steps.flatMap((s) => {
+    const p = s.declares['produces'] as { name?: string; type?: string } | undefined;
+    return s.kind === 'read' && p?.name ? [{ name: p.name, type: p.type ?? 'text' }] : [];
+  });
+
+  return (
+    <Page
+      kicker={[live ? 'Published, and live' : published ? 'Published' : confirmed ? 'Confirmed' : 'Draft',
+        u?.application ? `against ${u.application}` : null].filter(Boolean).join(' · ')}
+      title={workflow.name}
+      actions={<>
+        {u && !u.confirmed_at && (
+          <Action disabled={!sorted} why="Orbit is still sorting" onClick={() => go({ at: 'understanding', id })}>Check the sort</Action>
+        )}
+        {!confirmed && steps.length > 0 && !drafting && (
+          <Action kind={confirming ? 'ghost' : 'primary'} onClick={() => setConfirming((c) => !c)}>
+            {confirming ? 'Not yet' : 'Confirm…'}</Action>
+        )}
+        {confirmed && !published && (
+          <Action disabled={busy} onClick={() => void act(`/api/workflows/${id}/publish`)}>Publish a version</Action>
+        )}
+        {live && <Action onClick={() => go({ at: 'start', version: workflow.live_version_id! })}>Start a run</Action>}
+        {confirmed && !published && (
+          <Action kind="ghost" disabled={busy} onClick={() => void act(`/api/workflows/${id}/back-to-draft`)}>Back to editing</Action>
+        )}
+        {!published && (
+          <Action kind="ghost" disabled={busy} onClick={() => {
+            if (!window.confirm('Discard this draft? Nothing has been published, so it goes for good.')) return;
+            void (async () => {
+              setBusy(true);
+              const result = await send(`/api/workflows/${id}/discard`, {});
+              setBusy(false);
+              if (result.ok) go({ at: 'agents' }); else setRefused([result.why]);
+            })();
+          }}>Discard it</Action>
+        )}
+      </>}>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 4, paddingTop: 16 }}>
+        {ready.map(([name, value, done]) => (
+          <div key={name} style={{ borderTop: `3px solid ${done ? 'var(--ok)' : 'var(--attention)'}`, paddingTop: 7 }}>
+            <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>{name}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2, color: done ? 'var(--ink)' : 'var(--attention-ink)' }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {refused && <Refusal title="Nothing was changed" blockers={refused} />}
+      {u?.walk === 'refused' && u.confirmed_at && (
+        <Refusal tone="failed" title="The draft could not be made"
+          blockers={['The walk over these sentences did not produce a draft. See each turn under "Why the workflow says this".']} />
+      )}
+
+      {confirming && !confirmed && (
+        <Confirm draft={draft as never} onDone={async (path, body) => { if (await act(path, body)) setConfirming(false); }} />
+      )}
+
+      {outstanding.length > 0 && !confirming && (
+        <div style={{ marginTop: 16, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)', borderRadius: 5, padding: '12px 16px' }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--attention-ink)', marginBottom: 5 }}>
+            {outstanding.length === 1 ? 'Orbit has one question' : `Orbit has ${outstanding.length} questions`}</div>
+          {outstanding.filter((n) => !n.sentence).map((n) => (
+            <div key={n.id} style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55 }}>{n.body}</div>
+          ))}
+          {outstanding.some((n) => n.sentence) && (
+            <div style={{ fontSize: 13, color: 'var(--ink-2)' }}>Questions about a sentence are shown under it.</div>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, marginTop: 18 }}>
+        <article style={{ flexGrow: 1, minWidth: 0, paddingRight: 26 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 12.5, color: 'var(--ink-2)',
+            paddingBottom: 10, borderBottom: '1px solid var(--rule)' }}>
+            <span style={{ fontWeight: 600, color: 'var(--ink)' }}>Your procedure</span>
+            <span>{document.length ? 'as you wrote it; Orbit’s sentence numbers in the margin' : 'as written'}</span>
+          </div>
+          {document.length === 0 && workflow.procedure && (
+            <p style={{ fontSize: 15.5, lineHeight: 1.7, maxWidth: 680, whiteSpace: 'pre-wrap' }}>{workflow.procedure}</p>
+          )}
+          {blocks.map((b) => (
+            <DocumentBlock key={b.id} block={b} on={tab === 'steps' && !allSteps && block?.id === b.id}
+              selectedValues={selectedValues} onChoose={() => choose(b)} onValue={pickValue}
+              notes={outstanding.filter((n) => n.sentence && b.sentences.some((s) => s.number === n.sentence))}
+              pending={pending} />
+          ))}
+        </article>
+
+        <aside style={{ width: 430, flexShrink: 0, position: 'sticky', top: 12, maxHeight: 'calc(100vh - 24px)', overflowY: 'auto',
+          boxSizing: 'border-box', border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--panel)', padding: '14px 18px 18px' }}>
+          <div role="tablist" aria-label="Beside the procedure" style={{ display: 'flex', gap: 14, borderBottom: '1px solid var(--rule)', marginBottom: 14, flexWrap: 'wrap' }}>
+            {TABS.map(([key, name]) => (
+              <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+                style={{ font: 'inherit', fontSize: 13.5, background: 'transparent', border: 0, cursor: 'pointer', padding: '0 0 9px',
+                  color: tab === key ? 'var(--ink)' : 'var(--ink-2)', fontWeight: tab === key ? 700 : 500,
+                  boxShadow: tab === key ? 'inset 0 -2px 0 var(--primary)' : 'none' }}>{name}</button>
+            ))}
+          </div>
+          {tab === 'steps' && (
+            <StepsPanel draft={draft} block={block} all={allSteps} chosen={stepId} onChoose={setStepId}
+              shotOf={shotOf} positionOf={positionOf} editable={editable} busy={busy}
+              onEdit={(verb, body) => void edit(verb, body)} onShowAll={setAllSteps}
+              extra={(step) => editable && (configuring === step.id || step.missing.length > 0) ? (
+                <Configure step={step as never} produced={produced} busy={busy}
+                  reachable={steps.filter((o) => o.id !== step.id).map((o) => ({ id: o.id, position: o.position, kind: o.kind, summary: String(o.declares['summary'] ?? o.kind) }))}
+                  onSave={(body) => { setConfiguring(null); void edit('configure-step', body); }}
+                  onCancel={() => setConfiguring(null)} />
+              ) : editable && CONFIGURABLE.includes(step.kind as never) ? (
+                <button type="button" style={quiet} onClick={() => setConfiguring(step.id)}>Configure</button>
+              ) : null} />
+          )}
+          {tab === 'steps' && editable && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginTop: 14, fontSize: 12.5, color: 'var(--ink-2)' }}>
+              Add a
+              <select aria-label="Kind of step to add" value={adding} onChange={(e) => setAdding(e.target.value)}
+                style={{ font: 'inherit', fontSize: 12.5, ...mono, padding: '3px 5px', border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
+                {CONFIGURABLE.map((k) => <option key={k} value={k}>{k}</option>)}
+              </select>
+              step after the one chosen
+              <button type="button" style={quiet} disabled={busy} onClick={() => {
+                const after = steps.find((s) => s.id === stepId)?.position ?? block?.steps.at(-1)?.position ?? steps.length;
+                void edit('insert-step', { kind: adding, after });
+              }}>Add</button>
+            </div>
+          )}
+          {tab === 'chat' && (
+            <ChatPanel messages={draft.chat} busy={busy}
+              open={Boolean(u) && sorted && !u?.confirmed_at}
+              closedWhy={!u ? 'The chat is for a procedure brought in to be understood.'
+                : u.confirmed_at ? 'The chat closed when the sort was confirmed, because the draft was made from it. The conversation stays on the record.'
+                : 'Orbit is sorting. The chat opens as soon as it has finished.'}
+              onSend={async (text) => edit('chat', { text })}
+              onTake={(messageId) => void edit('take-offer', { messageId })} />
+          )}
+          {tab === 'inputs' && <InputsPanel draft={draft} />}
+          {tab === 'outputs' && <OutputsPanel draft={draft} />}
+          {tab === 'rules' && <RulesPanel tables={draft.rules} steps={steps} />}
+          {tab === 'datastore' && <DataStorePanel draft={draft} chosen={valueName} onChoose={setValueName} />}
+          {editRefusal && (
+            <div style={{ marginTop: 12, background: 'var(--failed-wash)', borderLeft: '3px solid var(--failed)', borderRadius: 4, padding: '9px 12px' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--failed-ink)', marginBottom: 3 }}>That change was not made</div>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>{editRefusal}</div>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      {assumed.length > 0 && (
+        <Section title={`What Orbit assumed (${assumed.length})`} note="taken on its own, blocking nothing; say so when you confirm if any of it is wrong">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 820 }}>
+            {assumed.map((n) => (
+              <div key={n.id} style={{ fontSize: 13.5, lineHeight: 1.6 }}>{n.body}{n.answer && <span style={{ color: 'var(--ink-2)' }}> {n.answer}</span>}</div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <Section title="Why the workflow says this" note={`${authoring.turns.length} turns, ${authoring.producedNothing} produced nothing usable`}
+        right={<button type="button" style={quiet} onClick={() => setShowWhy((v) => !v)}>{showWhy ? 'Hide' : 'Show every turn'}</button>}>
+        {showWhy && (
+          <div style={{ borderTop: '1px solid var(--ink)' }}>
+            {authoring.turns.map((t) => (
+              <div key={t.turn} style={{ borderBottom: '1px solid var(--rule)', padding: '11px 0', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                <span style={{ width: 22, fontSize: 12, color: 'var(--ink-2)', textAlign: 'right', paddingTop: 2 }}>{t.turn}</span>
+                <span style={{ width: 92, flexShrink: 0 }}><Chip state={t.verdict === 'kept' ? 'ok' : 'failed'}>{t.verdict}</Chip></span>
+                <div style={{ flexGrow: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, marginBottom: 3 }}>{t.why}</div>
+                  {t.answered?.element && <div style={{ fontSize: 12.5 }}><span style={{ color: 'var(--ink-2)' }}>It named </span><span style={{ ...mono, fontSize: 12 }}>{t.answered.element}</span></div>}
+                  {t.answered && <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontStyle: 'italic', lineHeight: 1.5 }}>{'“'}{t.answered.why}{'”'}</div>}
+                  <div style={{ fontSize: 11, color: 'var(--ink-2)', ...mono, marginTop: 4 }}>{t.model} {'·'} {t.shown.elements} elements shown {'·'} {t.tokens_in}/{t.tokens_out} tokens</div>
+                </div>
+                {t.screenshot && <div style={{ width: 140, flexShrink: 0 }}>{t.screenshot.digest
+                  ? <a href={`/api/screens/${t.screenshot.digest}`} target="_blank" rel="noreferrer"><img src={`/api/screens/${t.screenshot.digest}`} alt={`The page at turn ${t.turn}`} loading="lazy" style={{ width: '100%', border: '1px solid var(--rule-2)', borderRadius: 3 }} /></a>
+                  : <span style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>{t.screenshot.withheld}</span>}</div>}
+              </div>
+            ))}
+            <div style={{ paddingTop: 12 }}><Row label="Cost to build">{authoring.costUnknown ? 'not known: no price is held for this model'
+              : `$${(authoring.costMicros / 1e6).toFixed(6)}`}</Row></div>
+          </div>
+        )}
+      </Section>
+
+      {published && (
+        <Section title="Versions" note="a version is a fact; editing the draft does not change one">
+          <div style={{ borderTop: '1px solid var(--ink)' }}>
+            {versions.map((v) => (
+              <div key={v.version} style={{ borderBottom: '1px solid var(--rule)', padding: '10px 0', display: 'flex', alignItems: 'center', gap: 16 }}>
+                <span style={{ width: 90, fontSize: 13.5, fontWeight: 600 }}>Version {v.version}</span>
+                <span style={{ flexGrow: 1, ...mono, fontSize: 11.5, color: 'var(--ink-2)' }}>{v.digest.replace('sha256:', '').slice(0, 24)}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{new Date(v.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+    </Page>
+  );
+}
+
+/** One block of the author's document: the words, the margin, and what Orbit made of them (R2–R6). */
+function DocumentBlock({ block, on, selectedValues, onChoose, onValue, notes, pending }: {
+  block: Block; on: boolean; selectedValues: Set<string>; onChoose: () => void; onValue: (name: string) => void;
+  notes: Draft['notes']; pending: string[];
+}) {
+  const { sentences, lead, steps } = block;
+  if (block.type === 'orbit') {
+    return (
+      <div onClick={onChoose} style={{ display: 'flex', gap: 14, padding: on ? '12px 10px 12px 0' : '12px 0', marginTop: 10,
+        borderTop: '1px dashed var(--rule-2)', cursor: 'pointer', background: on ? 'var(--panel)' : 'transparent',
+        boxShadow: on ? 'inset 3px 0 0 var(--primary)' : 'none' }}>
+        <span style={{ width: 58, flexShrink: 0 }} />
+        <span style={{ flexGrow: 1, fontSize: 13.5, color: 'var(--ink-2)' }}>Added by Orbit: steps no sentence asks for directly, such as opening the application and how a run finishes.</span>
+        <button type="button" style={{ font: 'inherit', fontSize: 12.5, fontWeight: 600, color: 'var(--failed-ink)', background: 'transparent', border: 0, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap' }}>
+          {steps.length} step{steps.length === 1 ? '' : 's'} {'›'}</button>
+      </div>
+    );
+  }
+  const nums = sentences.length === 1 ? sentences[0]!.number : `${sentences[0]!.number}–${sentences.at(-1)!.number}`;
+  const heading = block.type === 'heading';
+  const acting = lead && actsOn(lead);
+  const values = valuesOf(steps);
+  const changed = sentences.some((s) => pending.includes(s.number));
+  const noStep = Boolean(acting && lead && lead.label !== 'rule' && steps.length === 0);
+  const clickable = steps.length > 0 || Boolean(lead);
+  return (
+    <div onClick={clickable ? onChoose : undefined}
+      style={{ padding: on ? '9px 10px 9px 0' : heading ? '16px 0 4px' : '9px 0', cursor: clickable ? 'pointer' : 'default',
+        background: on ? 'var(--panel)' : 'transparent', boxShadow: on ? 'inset 3px 0 0 var(--primary)' : 'none' }}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        <span style={{ width: 58, flexShrink: 0, ...mono, fontSize: 11, color: 'var(--ink-2)', textAlign: 'right', paddingTop: heading ? 2 : 4 }}>{nums}</span>
+        <div style={{ flexGrow: 1, minWidth: 0 }}>
+          <div style={{ fontSize: heading ? 14.5 : 16, fontWeight: heading ? 700 : 400, lineHeight: 1.6, maxWidth: 680 }}>
+            {sentences.map((s, i) => (
+              <span key={s.number}>
+                {i > 0 && sentences[i - 1]!.part !== s.part && (
+                  <span title={`Part ${s.part} begins here${sentences[i - 1]!.unterminated ? ', mid-sentence' : ''}`}
+                    style={{ ...mono, fontSize: 10.5, fontWeight: 600, color: 'var(--ink-2)', background: 'var(--panel-2)', borderRadius: 3, padding: '1px 5px', margin: '0 5px' }}>
+                    part {s.part} {'›'}</span>
+                )}
+                <span style={{ color: s.withdrawn ? 'var(--ink-2)' : s.label === 'background' ? 'var(--ink-2)' : 'var(--ink)',
+                  textDecoration: s.withdrawn ? 'line-through' : 'none' }}>{s.text}</span>{' '}
+              </span>
+            ))}
+          </div>
+          {sentences.filter((s) => s.was).map((s) => (
+            <div key={s.number} style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 3, lineHeight: 1.45 }}>
+              <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{s.number} changed.</span> Was {'“'}{s.was}{'”'}</div>
+          ))}
+          {values.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 5, fontSize: 12.5, color: 'var(--ink-2)' }}>
+              {values.map((v, i) => (
+                <span key={`${v.kind}-${v.name}`} style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+                  {(i === 0 || values[i - 1]!.verb !== v.verb) && <span>{v.verb}</span>}
+                  {v.kind === 'secret' ? <span style={{ ...mono, fontSize: 12 }}>{v.name}</span>
+                    : <ValueChip name={v.name} on={selectedValues.has(v.name)} onPick={onValue} />}
+                </span>
+              ))}
+            </div>
+          )}
+          {sentences.some((s) => s.suspicious) && (
+            <div style={{ fontSize: 12, color: 'var(--failed-ink)', marginTop: 4 }}>Reads like instructions to a machine. Orbit treats it as text and does not follow it.</div>
+          )}
+          {notes.map((n) => <InlineQuestion key={n.id} note={n} />)}
+        </div>
+        <div style={{ width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, paddingTop: 3 }}>
+          {lead && lead.label && lead.label !== 'background' && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: LABEL_INK[lead.label], textAlign: 'right' }}>
+              {LABEL_NAME[lead.label]}{lead.waits ? ', the run waits' : ''}</span>
+          )}
+          {changed && <Chip state="running">changed, not mapped</Chip>}
+          {noStep && !changed && <Chip state="attention">no step yet</Chip>}
+          {steps.some((s) => !s.complete) && <Chip state="attention">not finished</Chip>}
+          {notes.length > 0 && <Chip state="attention">{notes.length === 1 ? '1 question' : `${notes.length} questions`}</Chip>}
+          {steps.length > 0 && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onChoose(); }}
+              style={{ font: 'inherit', fontSize: 12.5, fontWeight: 600, color: 'var(--failed-ink)', background: 'transparent', border: 0, cursor: 'pointer', padding: 0 }}>
+              {steps.length} step{steps.length === 1 ? '' : 's'} {'›'}</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A question about this sentence, on the page under it (R6, R19). */
+function InlineQuestion({ note }: { note: Draft['notes'][number] }) {
+  return (
+    <div style={{ marginTop: 8, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)', borderRadius: 5, padding: '10px 13px' }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--attention-ink)', marginBottom: 3 }}>Orbit is asking</div>
+      <div style={{ fontSize: 13, lineHeight: 1.5 }}>{note.body}</div>
+    </div>
+  );
+}
+
+export { PanelNote };

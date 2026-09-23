@@ -24,6 +24,7 @@ import { asAssumption, asQuestion, type Note } from './note.ts';
 import { asNumber } from './compare.ts';
 import { capture } from './evidence.ts';
 import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
+import { resolve as resolveBinding } from './binder.ts';
 
 /**
  * What the walk types into a field, taken from the step it just built.
@@ -297,8 +298,16 @@ export interface Turn {
   costMicros: number | null;
   /** The page the model was looking at, as a picture in the evidence store, or
    *  why there is none (Decision 4, items 12 and 13). */
-  screenshot?: { digest: string } | { withheld: string };
+  screenshot?: { digest: string; box?: Box } | { withheld: string };
 }
+
+/**
+ * Where on a turn's picture the element Orbit acted on was, as fractions of
+ * the picture, so a screen can box it at any size. Measured when the step is
+ * made, on the page the picture shows; absent when the element could not be
+ * found again or was off the picture.
+ */
+export interface Box { x: number; y: number; w: number; h: number }
 
 export interface AuthoredDraft {
   steps: Step[];
@@ -318,6 +327,8 @@ export interface AuthoredDraft {
   declaredInputs: Array<{ name: string; label: string; type: 'text'; required: true }>;
   /** Which confirmed sentence each step carries out, by step id (Orbit 2.1). */
   provenance: Record<string, string>;
+  /** Which turn made each step, by step id, so a step reaches its picture. */
+  madeAt: Record<string, number>;
 }
 
 const INSTRUCTION = [
@@ -409,6 +420,7 @@ export async function authorFromProcedure(opts: {
 
   const numbers = (opts.sentences ?? []).map((x) => x.number);
   const provenance: Record<string, string> = {};
+  const madeAt: Record<string, number> = {};
   // Numbered when there are numbers to give; the plain text otherwise, as 2.0
   // walks have always been shown.
   const shownProcedure = opts.sentences?.length
@@ -478,7 +490,7 @@ export async function authorFromProcedure(opts: {
       const seen = await snapshot(page);
       // The picture of what the model is about to be asked about. Never of a
       // sign-in page: nothing of signing in is captured (Decision 4, item 13).
-      const picture: Turn['screenshot'] = seen.some((x) => x.secret)
+      let picture: NonNullable<Turn['screenshot']> = seen.some((x) => x.secret)
         ? { withheld: 'A sign-in page: nothing of signing in is captured.' }
         : await page.screenshot({ type: 'png' }).then(async (bytes) => ({ digest: (await capture(bytes, 'image/png')).digest }))
           .catch(() => ({ withheld: 'The page could not be captured.' }));
@@ -846,6 +858,12 @@ export async function authorFromProcedure(opts: {
           + ' the application did with nothing in that box — check they are the ones a real value would produce.'));
       }
 
+      // Where the element is on this turn's picture, so the step can be shown
+      // boxed on the page Orbit found it on. Before the act, which may move on.
+      if ('digest' in picture) {
+        const box = await boxOf(page, element);
+        if (box) picture = { ...picture, box };
+      }
       steps.push(made);
       if (p.sentence && numbers.includes(p.sentence)) provenance[made.id] = p.sentence;
       if (made.kind === 'read') readPage = { seen, url: page.url() };
@@ -853,6 +871,7 @@ export async function authorFromProcedure(opts: {
       noteTurn(record('kept', conditions.length > 0
         ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
         : `step ${steps.length}: ${made.summary}`));
+      madeAt[made.id] = turn;
 
       // Do it, so the next turn sees the page the next step would meet.
       lastActMoved = p.act === 'activate';
@@ -1174,7 +1193,24 @@ export async function authorFromProcedure(opts: {
     steps.flatMap((s) => (s.kind === 'enter' && s.value.from === 'input' ? [s.value.value] : [])),
   )].map((name) => ({ name, label: name, type: 'text' as const, required: true as const }));
 
-  return { steps, turns, questions, declaredInputs, provenance };
+  return { steps, turns, questions, declaredInputs, provenance, madeAt };
+}
+
+/** Where an element is on the page's picture, as fractions of it (see `Box`). */
+async function boxOf(page: Page, element: Seen): Promise<Box | undefined> {
+  const viewport = page.viewportSize();
+  if (!viewport) return undefined;
+  const found = await resolveBinding(page, element.binding).catch(() => null);
+  const locator = found?.found === 'one' ? found.locator
+    : page.getByRole(element.role as 'button', { name: element.name, exact: true }).first();
+  const b = await locator.boundingBox({ timeout: 1000 }).catch(() => null);
+  if (!b) return undefined;
+  const x = Math.max(0, b.x), y = Math.max(0, b.y);
+  const right = Math.min(viewport.width, b.x + b.width), bottom = Math.min(viewport.height, b.y + b.height);
+  if (right <= x || bottom <= y) return undefined;   // off the picture
+  const round = (n: number) => Math.round(n * 10000) / 10000;
+  return { x: round(x / viewport.width), y: round(y / viewport.height),
+    w: round((right - x) / viewport.width), h: round((bottom - y) / viewport.height) };
 }
 
 /**

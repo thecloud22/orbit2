@@ -184,9 +184,10 @@ export async function storeDraft(
     for (const [i, step] of draft.steps.entries()) {
       const { id, kind, ...declares } = step;
       await db.query(
-        `INSERT INTO workflow_step (id, workflow_id, position, kind, declares, complete, from_sentence)
-         VALUES ($1, $2, $3, $4, $5, true, $6)`,
-        [id, workflowId, i + 1, kind, JSON.stringify(declares), draft.provenance?.[id] ?? null]);
+        `INSERT INTO workflow_step (id, workflow_id, position, kind, declares, complete, from_sentence, made_at_turn)
+         VALUES ($1, $2, $3, $4, $5, true, $6, $7)`,
+        [id, workflowId, i + 1, kind, JSON.stringify(declares), draft.provenance?.[id] ?? null,
+         draft.madeAt?.[id] !== undefined ? offset + draft.madeAt[id]! : null]);
     }
     for (const [i, step] of draft.steps.entries()) {
       const next = draft.steps[i + 1];

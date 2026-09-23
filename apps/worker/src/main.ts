@@ -334,6 +334,7 @@ async function recordOne(sessionId: string) {
 
     const result = await storeDraft(db, { name: s.name, procedure: null }, {
       provenance: {},
+      madeAt: {},          // no turn made these: a person showed them
       steps: recording.steps,
       questions: recording.questions,
       turns: [],          // nothing was asked of a model: the person showed it
