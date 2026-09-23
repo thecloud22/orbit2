@@ -2185,6 +2185,64 @@ mapping on every keystroke (a browser session and model calls per character, aga
 system); holding a browser open for an answer (sessions expire and do not survive a restart,
 Decision 6 constraint 6).
 
+## Decision 18 — Green screens, and how a step finds a field on one
+
+**Status:** adopted 2026-09-23 with the build Karthik approved ("Go ahead. Build it."). Plan:
+`docs/plans/2026-09-23-green-screen-connector.md` (rules C1–C10, C16).
+
+**Settles:** how Orbit drives a TN3270 green screen, and what stands in for Decision 15's locator
+there. Decision 15 measured a browser; a terminal "names a field by its address on a screen", and
+this was left for when the surface arrived.
+
+1. **A connector owns what knows its kind of screen**: registration, looking while an agent is
+   built, acting, finding a thing again at run time, evidence, and named failures. Orbit's core
+   never learns which connector it is talking to. The browser's was moved behind that boundary
+   first, unchanged, and proved by the nine scenarios before anything else landed.
+2. **Orbit never decodes the 3270 datastream.** It drives the s3270 emulator, one child process per
+   session, over a private pipe; the session is the run's, opened on first use and closed however the
+   run ends. A worker without s3270 drives every web agent as before, and publication refuses an
+   agent for a green screen no worker can drive, naming the connector.
+3. **A green-screen binding is the screen, the label and the address**: `{connector: 'tn3270',
+   screen, what: field | value | key, label, key, row, column, length}`. At run time the screen must
+   be the one mapped (else `terminalScreenUnexpected`), the label must be found exactly once, and the
+   address must agree. Any disagreement is a refusal, never a guess (Decision 12 for a screen).
+4. **A key is named by what it does, verb first** (`PF5=APPROVE` is "APPROVE"), because Decision 16
+   checks a press against its verb; the PF key is in the binding.
+5. **A hidden field's content is never read** — blanked in the parse, before the model, a picture
+   or a log could see it. A green screen's picture is its text drawn as SVG, the field boxed.
+6. **A locked keyboard is its own failure** (`terminalKeyboardLocked`), never retried blindly.
+
+**Rejected:** decoding the datastream in Orbit (the practice host and Orbit could share a
+misreading and cancel it out); binding by address alone (a layout change would type into the wrong
+field and say it went fine); pooling terminal sessions between runs (one run's sign-on would act
+for another).
+
+## Decision 19 — An agent that works across applications
+
+**Status:** adopted 2026-09-23 with the same build (rules C11–C15). The swivel chair — read a web
+system, key it into a green screen, bring the answer back — is a core use case.
+
+1. **An agent may work on several applications.** The author adds one; each line of work is placed
+   on one, proposed after the sort and changed by the author like a label. A version carries them
+   all, the one it was brought in against first.
+2. **Moving between applications is an `open` step**, naming the application by a key derived from
+   its name. The first `open` of an application opens it; a later one only moves focus back — the
+   web page is where the run left it. A run holds a session per application until it ends. No step
+   kind was added, and a single-application version is unchanged.
+3. **A value read on one system is typed on another as the value read.** Where the two systems spell
+   it differently, a small table of codes is proposed only when the screen shows the codes a field
+   takes, asked of the author, and kept on the step; a value with no code halts the run.
+4. **Nothing spans two systems as one transaction, and Orbit never guesses a reversal.** A run that
+   stops part-way records what each application now holds: presses that went through, and one that
+   was pressed and never answered.
+5. **A run is never run again blind.** Retry is held after a part-way stop that changed anything,
+   and re-run while a press is unknown, until a person says they have checked.
+
+**Rejected:** a "switch application" step kind (the set is closed, and `open` already names an
+application); undoing the first system's change when the second fails (a reversal is itself a
+record-changing act nobody asked for); a distributed transaction (neither a web portal nor a green
+screen offers one).
+
 ## What these decisions commit each other to
 
 The decisions are not independent, and it is worth stating the joins so that a later change to one

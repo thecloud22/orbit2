@@ -24,12 +24,16 @@ export type Queued = { ok: true; id: string } | { ok: false; because: string };
 const words = z.string().trim().min(1, 'Say what it should say.').max(4000);
 
 async function openFor(db: ClientBase, workflowId: string): Promise<{ hosts: string[] } | { because: string }> {
+  // Every application the agent works on is its own (Orbit 2.2): an address
+  // of any of them is not an outside address.
   const { rows: [u] } = await db.query<{ status: string; hosts: string[] | null }>(
     `SELECT u.status,
-            (SELECT array_agg(a->>'host') FROM jsonb_array_elements(r.addresses) a) AS hosts
+            (SELECT array_agg(a->>'host') FROM application_revision r, jsonb_array_elements(r.addresses) a
+              WHERE r.id IN (SELECT DISTINCT ON (application_id) id FROM application_revision
+                              WHERE application_id = u.application_id
+                                 OR application_id IN (SELECT application_id FROM workflow_application WHERE workflow_id = u.workflow_id)
+                              ORDER BY application_id, revision DESC)) AS hosts
        FROM understanding u
-       JOIN LATERAL (SELECT addresses FROM application_revision WHERE application_id = u.application_id
-                      ORDER BY revision DESC LIMIT 1) r ON true
       WHERE u.workflow_id = $1`, [workflowId]);
   if (!u) return { because: 'This draft was not brought in as a procedure, so it has no sentences to change.' };
   if (u.status === 'queued' || u.status === 'sorting') return { because: 'Orbit is sorting the last change. Make the next one when it has finished.' };
@@ -143,11 +147,67 @@ export async function pendingOf(db: ClientBase, workflowId: string): Promise<str
        LEFT JOIN LATERAL (SELECT label, waits, created_at FROM sentence_label WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) l ON true
       WHERE p.workflow_id = $1
         AND (s.revised_at > $2 OR p.added_at > $2 OR l.created_at > $2
+             OR EXISTS (SELECT 1 FROM sentence_application t WHERE t.sentence_id = s.id AND t.created_at > $2)
              OR EXISTS (SELECT 1 FROM workflow_note n WHERE n.workflow_id = p.workflow_id AND n.sentence = p.key || '.' || s.n
                          AND n.resolved_at > $2 AND n.action IN ('pickElement', 'giveExample', 'mapAgain')))
       ORDER BY p.added_at, p.key, s.n`, [workflowId, last.at]);
   return rows.filter((r) => r.stepped || (!r.withdrawn && (r.label === 'task' || r.label === 'rule' || (r.label === 'forAPerson' && r.waits))))
     .map((r) => r.number);
+}
+
+/**
+ * The agent works on another application as well (Orbit 2.2, C11): a web
+ * portal and a green screen, for the swivel chair. The sort then places each
+ * line of work on one of them, and the author can change where.
+ */
+export async function attachApplication(db: PoolClient, workflowId: string, body: unknown): Promise<Revised> {
+  const asked = object({ applicationId: z.uuid(), startPath: z.string().trim().max(2048).default('/') }).safeParse(body);
+  if (!asked.success) return { ok: false, because: 'Say which registered application to add.' };
+  const open = await openFor(db, workflowId);
+  if ('because' in open) return { ok: false, because: open.because };
+  const { rows: [app] } = await db.query<{ name: string; retired_at: string | null; first: boolean; already: boolean }>(
+    `SELECT a.name, a.retired_at,
+            EXISTS (SELECT 1 FROM understanding u WHERE u.workflow_id = $1 AND u.application_id = a.id) AS first,
+            EXISTS (SELECT 1 FROM workflow_application w WHERE w.workflow_id = $1 AND w.application_id = a.id) AS already
+       FROM application a WHERE a.id = $2`, [workflowId, asked.data.applicationId]);
+  if (!app) return { ok: false, because: 'There is no such application.' };
+  if (app.retired_at) return { ok: false, because: `${app.name} is retired, so no agent can be attached to it.` };
+  if (app.first || app.already) return { ok: false, because: `This agent already works on ${app.name}.` };
+  const path = asked.data.startPath.startsWith('/') ? asked.data.startPath : `/${asked.data.startPath}`;
+  await db.query('BEGIN');
+  try {
+    await db.query(`INSERT INTO workflow_application (workflow_id, application_id, start_path) VALUES ($1, $2, $3)`,
+      [workflowId, asked.data.applicationId, path]);
+    await changed(db, workflowId, 'application attached', { application: app.name });
+    await db.query('COMMIT');
+    return { ok: true };
+  } catch (error) { await db.query('ROLLBACK'); throw error; }
+}
+
+/** Which application a sentence happens on, as the author says (C11): kept beside Orbit's, never over it. */
+export async function placeSentence(db: PoolClient, workflowId: string, body: unknown): Promise<Revised> {
+  const asked = object({ sentence: sentenceNumber, applicationId: z.uuid() }).safeParse(body);
+  if (!asked.success) return { ok: false, because: 'Say which sentence, and which of the agent\'s applications it happens on.' };
+  const open = await openFor(db, workflowId);
+  if ('because' in open) return { ok: false, because: open.because };
+  const id = await sentenceId(db, workflowId, asked.data.sentence);
+  if (!id) return { ok: false, because: `This procedure has no sentence ${asked.data.sentence}.` };
+  const { rows: [on] } = await db.query<{ name: string }>(
+    `SELECT a.name FROM application a WHERE a.id = $2 AND (
+       a.id IN (SELECT application_id FROM understanding WHERE workflow_id = $1)
+       OR a.id IN (SELECT application_id FROM workflow_application WHERE workflow_id = $1))`, [workflowId, asked.data.applicationId]);
+  if (!on) return { ok: false, because: 'This agent does not work on that application. Add it first.' };
+  const { rows: [now] } = await db.query<{ application_id: string }>(
+    `SELECT application_id FROM sentence_application WHERE sentence_id = $1 ORDER BY seq DESC LIMIT 1`, [id]);
+  if (now?.application_id === asked.data.applicationId) return { ok: false, because: `${asked.data.sentence} already happens on ${on.name}.` };
+  await db.query('BEGIN');
+  try {
+    await db.query(`INSERT INTO sentence_application (sentence_id, application_id, given_by) VALUES ($1, $2, 'author')`,
+      [id, asked.data.applicationId]);
+    await changed(db, workflowId, 'sentence placed', { sentence: asked.data.sentence, application: on.name });
+    await db.query('COMMIT');
+    return { ok: true };
+  } catch (error) { await db.query('ROLLBACK'); throw error; }
 }
 
 /** Orbit maps what changed, and only that: queued like any walk, scoped to the pending sentences (R18). */

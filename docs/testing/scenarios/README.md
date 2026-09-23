@@ -1,4 +1,4 @@
-# The mortgage scenarios for Orbit 2.1
+# The mortgage scenarios for Orbit 2.1 and 2.2
 
 All of them run against the **Mortage Portal** application (`localhost:4101`, signs in as `admin`). Each
 loan number below is seeded in `demo/mortgage-portal/src/data/loans.ts`, and the expected
@@ -181,5 +181,65 @@ same steps on the agent's page.
 
 ---
 
-`pnpm test:scenarios` runs all nine, the way a person would, and checks every loan.
-`node scripts/scenarios.mjs 6` runs one; `node scripts/scenarios.mjs demo` runs 5 to 9.
+---
+
+# The green screen and the swivel chair: scenarios 10 to 12
+
+Orbit 2.2. The loan-servicing green screen is the web portal's twin over TN3270 — the same nine
+files — served by `demo/terminal-portal` on `localhost:3271` (`scripts/orbit start` runs it) and
+driven through the s3270 emulator. The runner registers it as **Loan Servicing**
+(`tn3270://localhost:3271`, signs in as `ADMIN`) if it is not already, as a person would in Admin.
+`node scripts/scenarios.mjs green` runs these three.
+
+| Screen | What it is |
+|---|---|
+| LSV01 | Sign on: USERID, and a PASSWORD field that is never displayed |
+| LSV10 | Loan inquiry; `LSV102E NO LOAN MATCHES THAT NUMBER` for a file that is not there |
+| LSV20 | Loan detail, every figure the web portal shows; PF5 APPROVE, PF6 REFER, PF7–PF10 ATTACH a condition |
+| LSV40 | Board a new loan: loan number, borrower, amount, note rate, program (`CONV FHA VA JUMB`); PF10 SUBMIT |
+| LSV50 | A borrower's existing loans with us, and the worst days past due |
+
+## Scenario 10: scenario 9's words, on the green screen
+
+**What it shows:** one written procedure, two systems. `09-live-edit.txt`, unchanged, brought in
+against Loan Servicing: Orbit signs on, inquires, reads LTV off LSV20, builds the PMI rule as the
+ATTACH PMI key, and approves with PF5.
+
+| Loan | LTV | Should press |
+|---|---|---|
+| ML-26-04561 | 85.00 | ATTACH PMI, APPROVE |
+| ML-26-04471 | 72.73 | APPROVE |
+| ML-26-99999 | — | nothing: *no such file* |
+
+## Scenario 11: the existing-loan check, web and green screen
+
+**What it shows:** a decision made on the web from what the green screen says. `11-existing-loans.txt`
+is brought in against the web portal and Loan Servicing is added; the sort places lines 5–6 on the
+green screen. The web file gives the borrower and the LTV; LSV50 gives the worst days past due; the
+rules decide on the web.
+
+| Loan | Existing loans with us | LTV | Should press |
+|---|---|---|---|
+| ML-26-04488 | a home equity line 45 days past due | 92.1% | **Refer** |
+| ML-26-04561 | an auto loan, current | 85.0% | PMI, **Approve** |
+| ML-26-04471 | none | 72.7% | **Approve** |
+| ML-26-04502 | a home equity line, current | 75.0% | **Approve** |
+| ML-26-99999 | — | — | nothing: *no such file* |
+
+## Scenario 12: board the approved loan — the swivel chair
+
+**What it shows:** reading the web file, keying it into the green screen, and bringing the answer
+back. `12-board-the-loan.txt`: the borrower, amount, note rate and program are read on the web; on
+LSV40 they are typed, the program as its code (Orbit proposes *Conventional → CONV, FHA → FHA,
+VA → VA, Jumbo → JUMB* and asks), and SUBMIT boards it; the servicing account comes back and is saved
+on the web file.
+
+| Loan | Should press | Hands back |
+|---|---|---|
+| ML-26-04471 | SUBMIT, Save servicing account | servicing account 7704471 |
+| ML-26-04561 | SUBMIT, Save servicing account | servicing account 7704561 |
+
+---
+
+`pnpm test:scenarios` runs all twelve, the way a person would, and checks every loan.
+`node scripts/scenarios.mjs 6` runs one; `demo` runs 5 to 9; `green` runs 10 to 12.

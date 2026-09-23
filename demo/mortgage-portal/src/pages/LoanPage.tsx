@@ -100,6 +100,10 @@ const CONDITIONS = [
 function LoanFile({ loan }: { loan: Loan }) {
   const [conditions, setConditions] = useState<readonly string[]>([]);
   const [decision, setDecision] = useState<Decision | null>(null);
+  // The servicing system's account for this loan, once it has been boarded:
+  // the swivel chair brings it back here (Orbit 2.2 practice data).
+  const [servicingDraft, setServicingDraft] = useState('');
+  const [servicingAccount, setServicingAccount] = useState<string | null>(null);
 
   const ltv = loanToValue(loan);
   const dti = debtToIncome(loan);
@@ -231,6 +235,11 @@ function LoanFile({ loan }: { loan: Loan }) {
             <div className="mt-5">
               <Panel title="Borrower & employment" testId="borrower-panel">
                 <div className="grid grid-cols-2 gap-x-6 sm:grid-cols-3">
+                  <Field
+                    label="Borrower"
+                    testId="borrower-value"
+                    value={loan.borrowerName}
+                  />
                   <Field
                     label="Employment type"
                     testId="employment-type-value"
@@ -387,6 +396,35 @@ function LoanFile({ loan }: { loan: Loan }) {
                     Decline file
                   </button>
                 </div>
+              </Panel>
+            </div>
+
+            <div className="mt-5">
+              <Panel title="Servicing" testId="servicing-panel">
+                <label className="block text-xs font-semibold tracking-wide text-slate-500 uppercase" htmlFor="servicing-account">
+                  Servicing account
+                </label>
+                <input
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                  data-testid="servicing-account-input"
+                  id="servicing-account"
+                  onChange={(event) => setServicingDraft(event.target.value)}
+                  placeholder="From loan servicing, once boarded"
+                  value={servicingDraft}
+                />
+                <button
+                  className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-sky-400 hover:bg-sky-50"
+                  data-testid="save-servicing-button"
+                  onClick={() => setServicingAccount(servicingDraft.trim() || null)}
+                  type="button"
+                >
+                  Save servicing account
+                </button>
+                {servicingAccount && (
+                  <p className="mt-2 text-sm text-emerald-800" data-testid="servicing-saved">
+                    Servicing account {servicingAccount} saved on this file.
+                  </p>
+                )}
               </Panel>
             </div>
           </section>

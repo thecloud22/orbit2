@@ -298,3 +298,36 @@ if the walk is started live, so start the demo from a drafted agent.
 as "is not 'completed'", which is right for how procedures are written. A procedure that means the
 portal's literal status "Not enrolled" would be read as "is not 'enrolled'". Nothing in the scenarios
 does this; the tables screen shows the comparison, so a person can see it.
+
+---
+
+## The green-screen connector and the swivel chair: what 2.2 knowingly leaves undone
+
+Built on `2.2/connectors` (`docs/plans/2026-09-23-green-screen-connector.md`, Decisions 18 and 19).
+
+**No real mainframe has been driven.** The connector is proved against the repo's own loan-servicing
+twin, through the independent s3270 emulator. The next check is Hercules running MVS 3.8j (TK5) in
+Docker, with KICKS for CICS-style screens: real VTAM sign-on, real keyboard-lock behaviour, real
+EBCDIC. TN3270E LU names, code pages and TLS are carried to s3270 but only TN3270 without TLS has
+been exercised.
+
+**A rule's action is presses only.** "Attach PMI" on a green screen that wants PF9, then S beside
+the condition, then Enter cannot be compiled from a table; the twin attaches a condition with one
+key instead. Typing inside a rule's action is the extension.
+
+**A code table's correction is not read back.** Orbit proposes the table and asks; an answer that
+says "JUMB is Jumbo, not Jumbo loan" resolves the question and leaves the table as proposed. The
+table is kept on the step, so it can be corrected there once the editor shows it.
+
+**Paged lists.** A green-screen list that continues on PF8 ("MORE…") needs `forEach`, which is not
+executed yet; a procedure that reads past the first page is not supported.
+
+**Checking a version against the live application before publication** (`resolve.ts`,
+`check-publication.ts`) and **recording a demonstration** remain browser-only.
+
+**Retry after "I have checked" replays the version from the start.** A person has said the systems
+were looked at; a retry can still press again what went through. Resuming from the failed step is
+the fix, and belongs with pilot-readiness item 6 (once-only semantics).
+
+**5250 (IBM i) and character terminals** are out of scope (Decision 18); they would be further
+connectors behind the same six parts.

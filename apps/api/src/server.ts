@@ -63,7 +63,8 @@ createServer(async (req, res) => {
         if (verb === 'move-step')   { const r = await actions.moveStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'delete-step') { const r = await actions.deleteStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'insert-step') { const r = await actions.insertStep(id, body); return json(res, r.status, r.body); }
-        if (verb === 'revise-sentence' || verb === 'add-sentence' || verb === 'withdraw-sentence') {
+        if (verb === 'revise-sentence' || verb === 'add-sentence' || verb === 'withdraw-sentence'
+          || verb === 'attach-application' || verb === 'sentence-application') {
           const r = await actions.revise(verb, id, body); return json(res, r.status, r.body);
         }
         if (verb === 'map-changes') { const r = await actions.mapChanges(id); return json(res, r.status, r.body); }
@@ -77,6 +78,7 @@ createServer(async (req, res) => {
       if (kind === 'runs' && id) {
         if (verb === 'cancel') { const r = await actions.cancelRun(id); return json(res, r.status, r.body); }
         if (verb === 'retry')  { const r = await actions.retryRun(id); return json(res, r.status, r.body); }
+        if (verb === 'checked') { const r = await actions.checkRun(id); return json(res, r.status, r.body); }
         if (verb === 'continue') { const r = await actions.continueRun(id, body); return json(res, r.status, r.body); }
         if (verb === 'rerun')  { const r = await actions.rerun(id); return json(res, r.status, r.body); }
       }
@@ -135,7 +137,10 @@ createServer(async (req, res) => {
     if (screen) {
       const served = await serveScreen(screen[1]!);
       if (!served.ok) return json(res, served.kind === 'notFound' ? 404 : 409, served);
-      res.writeHead(200, { 'content-type': served.mediaType, 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
+      res.writeHead(200, { 'content-type': served.mediaType, 'cache-control': 'no-store', 'access-control-allow-origin': '*',
+        // A green screen's picture is SVG drawn from the host's text: never
+        // allowed to run anything, whatever the text said (Orbit 2.2).
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'x-content-type-options': 'nosniff' });
       return res.end(served.bytes);
     }
 
@@ -144,7 +149,8 @@ createServer(async (req, res) => {
       const served = await serveArtefact(artefact[1]!);
       if (!served.ok) return json(res, served.kind === 'notFound' ? 404 : 409, served);
       res.writeHead(200, { 'content-type': served.mediaType, 'cache-control': 'no-store',
-        'access-control-allow-origin': '*' });
+        'access-control-allow-origin': '*',
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'x-content-type-options': 'nosniff' });
       return res.end(served.bytes);
     }
 

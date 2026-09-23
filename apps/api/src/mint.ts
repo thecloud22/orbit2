@@ -13,7 +13,7 @@ import { asDraftStep, checkForPublication, type DraftStep } from './publish.ts';
 import { inDocumentOrder } from './procedure.ts';
 
 const unfinishedStep = (s: DraftStep): boolean => 'incomplete' in s;
-import { type Blocker, type Publication, step as stepSchema, type Step } from '@orbit/contract';
+import { applicationKey, type Blocker, type Publication, step as stepSchema, type Step } from '@orbit/contract';
 
 /**
  * Key order changes a hash and must not change an identity, so the body is
@@ -93,17 +93,46 @@ export async function mintVersion(db: PoolClient, workflowId: string): Promise<P
     // version authored against the mortgage portal ran against google.com the
     // day somebody registered a test application whose id sorted first.
     // Decision 5 item 8: a workflow names its own set.
-    `SELECT DISTINCT ON (a.id) a.name, a.surface, r.revision, r.addresses, r.sign_in_as, r.credential_name, r.formats
-       FROM application a JOIN application_revision r ON r.application_id = a.id
-      WHERE a.id IN (
-        SELECT application_id FROM understanding WHERE workflow_id = $1
-        UNION SELECT application_id FROM authoring_session WHERE workflow_id = $1 OR into_workflow_id = $1
-        UNION SELECT application_id FROM recording_session WHERE workflow_id = $1)
-      ORDER BY a.id, r.revision DESC`, [workflowId]);
+    //
+    // Orbit 2.2: and every application the author attached, for an agent that
+    // works across several — the one it was brought in against first, where
+    // a run starts. A green screen carries its settings with it.
+    `SELECT name, surface, revision, addresses, sign_in_as, credential_name, formats, terminal
+       FROM (SELECT DISTINCT ON (a.id) a.id, a.name, a.surface, r.revision, r.addresses, r.sign_in_as, r.credential_name, r.formats, r.terminal
+               FROM application a JOIN application_revision r ON r.application_id = a.id
+              WHERE a.id IN (
+                SELECT application_id FROM understanding WHERE workflow_id = $1
+                UNION SELECT application_id FROM authoring_session WHERE workflow_id = $1 OR into_workflow_id = $1
+                UNION SELECT application_id FROM recording_session WHERE workflow_id = $1
+                UNION SELECT application_id FROM workflow_application WHERE workflow_id = $1)
+              ORDER BY a.id, r.revision DESC) x
+      ORDER BY (x.id = (SELECT application_id FROM understanding WHERE workflow_id = $1)) DESC NULLS LAST, x.name`, [workflowId]);
   if (apps.length === 0) blockers.push({ kind: 'applicationUnknown' });
-  // Slice 1 fills the set with exactly one (Decision 5 item 8), and the worker
-  // runs against the first. Two would be a choice the version cannot make yet.
-  if (apps.length > 1) blockers.push({ kind: 'applicationUnknown' });
+  // A web application's version carries no terminal settings: the key is
+  // left out, so the body of every web agent reads as it always has.
+  for (const a of apps) if (a.terminal === null) delete a.terminal;
+
+  // Each step that opens an application opens one the version carries. One
+  // application is named `app`, as it always has been (Decision 5 item 8).
+  steps.forEach((x, i) => {
+    if (x.kind !== 'open') return;
+    const named = (x as { application?: string }).application ?? 'app';
+    if (named === 'app' ? apps.length > 1 : !apps.some((a) => a.name === named || applicationKey(a.name) === named)) {
+      blockers.push({ kind: 'applicationNotCarried', step: i + 1, application: named === 'app' ? 'the application' : named });
+    }
+  });
+
+  // An application no worker can drive would publish a version nobody could
+  // run (C4): refused, naming the connector that is missing.
+  for (const a of apps.filter((x) => x.surface !== 'browser')) {
+    const { rows: [can] } = await db.query<{ ready: boolean; why: string | null }>(
+      `SELECT ready, why FROM worker_connector WHERE connector = $1 ORDER BY ready DESC, reported_at DESC LIMIT 1`, [a.surface])
+      .catch(() => ({ rows: [] as Array<{ ready: boolean; why: string | null }> }));
+    if (!can?.ready) {
+      blockers.push({ kind: 'connectorUnavailable', application: a.name, connector: a.surface,
+        why: can?.why ?? 'no worker has said it can' });
+    }
+  }
 
   if (blockers.length > 0) return { outcome: 'refused', blockers };
 

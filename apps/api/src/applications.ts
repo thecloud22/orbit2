@@ -63,7 +63,7 @@ const address = z.preprocess((given) => {
   return {
     ...a,
     host: rest,
-    scheme: a['scheme'] ?? (named === 'https' || named === 'http' ? named
+    scheme: a['scheme'] ?? (named === 'https' || named === 'http' || named === 'tn3270' || named === 'tn3270s' ? named
       : /:443$/.test(rest) ? 'https' : 'http'),
   };
 }, object({
@@ -72,8 +72,16 @@ const address = z.preprocess((given) => {
   scheme: schemeOf.default('http'),
 }));
 
+/** How s3270 is told to speak to a green screen (Orbit 2.2). Absent for a web application. */
+const terminal = object({
+  codePage: z.string().trim().regex(/^[A-Za-z0-9_-]{1,32}$/, 'is a code page name, like cp037').optional(),
+  model: z.string().trim().regex(/^(327[89]-)?[2-5](-E)?$/, 'is a screen model, like 3278-2').optional(),
+  luName: z.string().trim().regex(/^[A-Za-z0-9@#$.-]{1,32}$/, 'is an LU name').optional(),
+}).optional();
+
 const connectionFields = {
   addresses: z.array(address).min(1, 'needs at least one address').max(8),
+  terminal,
   signInAs: z.string().trim().max(120).optional(),
 
   // The password itself, filed under a name Orbit derives. Never
@@ -114,8 +122,8 @@ export type ApplicationResult =
 const issues = (error: z.ZodError) =>
   error.issues.map((i) => `${i.path.join('.') || 'the application'}: ${i.message}`).join('; ');
 
-type Connection = { addresses: unknown; signInAs: string | undefined; credentialName: string | undefined };
-type StoredConnection = { addresses: unknown; sign_in_as: string | null; credential_name: string | null };
+type Connection = { addresses: unknown; signInAs: string | undefined; credentialName: string | undefined; terminal?: unknown };
+type StoredConnection = { addresses: unknown; sign_in_as: string | null; credential_name: string | null; terminal?: unknown };
 
 /**
  * An address as a list, so comparing two of them cannot depend on key order.
@@ -139,7 +147,9 @@ const canonical = (addresses: unknown): string =>
 /** Whether an edit actually changes what a revision would carry, so an edit
  *  that only renames the application does not mint a revision nobody asked for. */
 function sameConnection(stored: StoredConnection, given: Connection): boolean {
+  const settings = (t: unknown) => JSON.stringify(Object.entries((t ?? {}) as Record<string, unknown>).sort());
   return canonical(stored.addresses) === canonical(given.addresses)
+    && settings(stored.terminal) === settings(given.terminal)
     && (stored.sign_in_as ?? null) === (given.signInAs ?? null)
     && (stored.credential_name ?? null) === (given.credentialName ?? null);
 }
@@ -147,7 +157,13 @@ function sameConnection(stored: StoredConnection, given: Connection): boolean {
 export async function registerApplication(db: PoolClient, body: unknown): Promise<ApplicationResult> {
   const checked = registration.safeParse(body);
   if (!checked.success) return { ok: false, because: issues(checked.error) };
-  const { name, surface, addresses, signInAs, credentialValue } = checked.data;
+  const { name, surface, addresses, signInAs, credentialValue, terminal: settings } = checked.data;
+  // A green screen is reached over TN3270, and a web application is not (C3).
+  const green = addresses.every((a) => a.scheme === 'tn3270' || a.scheme === 'tn3270s');
+  if (surface === 'terminal' && !green) return { ok: false, because: 'A green-screen application is reached as tn3270:// (or tn3270s:// with TLS), host and port.' };
+  if (surface === 'browser' && addresses.some((a) => a.scheme === 'tn3270' || a.scheme === 'tn3270s')) {
+    return { ok: false, because: 'A web application is reached over http or https; tn3270 is for a green screen.' };
+  }
 
   await db.query('BEGIN');
   try {
@@ -155,9 +171,10 @@ export async function registerApplication(db: PoolClient, body: unknown): Promis
       `INSERT INTO application (name, surface) VALUES ($1, $2) RETURNING id`,
       [name, surface]);
     await db.query(
-      `INSERT INTO application_revision (application_id, revision, addresses, sign_in_as, credential_name)
-       VALUES ($1, 1, $2, $3, $4)`,
-      [app!.id, JSON.stringify(addresses), signInAs ?? null, credentialFor(app!.id)]);
+      `INSERT INTO application_revision (application_id, revision, addresses, sign_in_as, credential_name, terminal)
+       VALUES ($1, 1, $2, $3, $4, $5)`,
+      [app!.id, JSON.stringify(addresses), signInAs ?? null, credentialFor(app!.id),
+       surface === 'terminal' ? JSON.stringify(settings ?? {}) : null]);
     if (credentialValue) await setCredential(db, credentialFor(app!.id), credentialValue);
     await db.query(
       `INSERT INTO audit_entry (act, object_kind, object_id, changed)
@@ -171,18 +188,19 @@ export async function registerApplication(db: PoolClient, body: unknown): Promis
 export async function editApplication(db: PoolClient, id: string, body: unknown): Promise<ApplicationResult> {
   const checked = edit.safeParse(body);
   if (!checked.success) return { ok: false, because: issues(checked.error) };
-  const { name, addresses, signInAs, credentialValue } = checked.data;
+  const { name, addresses, signInAs, credentialValue, terminal: settings } = checked.data;
 
   const { rows: [existing] } = await db.query<{ name: string }>(
     `SELECT name FROM application WHERE id = $1`, [id]);
   if (!existing) return { ok: false, because: 'There is no such application.', notFound: true };
 
   const { rows: [latest] } = await db.query<{ revision: number } & StoredConnection>(
-    `SELECT revision, addresses, sign_in_as, credential_name FROM application_revision
+    `SELECT revision, addresses, sign_in_as, credential_name, terminal FROM application_revision
       WHERE application_id = $1 ORDER BY revision DESC LIMIT 1`, [id]);
   if (!latest) return { ok: false, because: 'There is no such application.', notFound: true };
 
-  const given: Connection = { addresses, signInAs, credentialName: credentialFor(id) };
+  const given: Connection = { addresses, signInAs, credentialName: credentialFor(id),
+    ...(latest.terminal !== null && latest.terminal !== undefined ? { terminal: settings ?? {} } : {}) };
   const renamed = existing.name !== name;
   const reconnected = !sameConnection(latest, given);
   // A value can be set with nothing else changing — rotation replaces a value
@@ -198,9 +216,10 @@ export async function editApplication(db: PoolClient, id: string, body: unknown)
     const revision = reconnected ? latest.revision + 1 : latest.revision;
     if (reconnected) {
       await db.query(
-        `INSERT INTO application_revision (application_id, revision, addresses, sign_in_as, credential_name)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [id, revision, JSON.stringify(addresses), signInAs ?? null, credentialFor(id)]);
+        `INSERT INTO application_revision (application_id, revision, addresses, sign_in_as, credential_name, terminal)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id, revision, JSON.stringify(addresses), signInAs ?? null, credentialFor(id),
+         latest.terminal !== null && latest.terminal !== undefined ? JSON.stringify(settings ?? {}) : null]);
     }
     if (credentialValue) await setCredential(db, credentialFor(id), credentialValue);
     await db.query(

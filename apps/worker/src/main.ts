@@ -13,23 +13,27 @@ import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
 import { authorAndStore, storeDraft } from './author-store.ts';
 import { sortAndStore, tabulateAndStore } from './sort-store.ts';
+import { tagApplications } from './tag.ts';
 import { answerAndStore } from './chat-store.ts';
 import { record } from './record.ts';
-import { openBrowser } from './surface-browser.ts';
-import type { OpenSurface } from './surface.ts';
+import { CONNECTORS } from './connectors.ts';
+import { readCredential } from '@orbit/credentials';
+import { surfaceAcross } from './surface-across.ts';
+import type { Surface } from './surface.ts';
 
 /**
- * Which driver each surface is executed through.
- *
- * Decision 5 item 9: a step never names a surface, so the surface is chosen
- * here, at run time, from what the version copied about the application. A
- * table rather than a branch, so that adding the terminal is a line here and a
- * file beside `surface-browser.ts` — which is the whole of what Decision 2
- * asked for when it said a second surface must not reopen the first.
+ * Where a connector reaches an application. A web application's origin, as
+ * ever; a green screen's is `tn3270://host:port` (`tn3270s://` with TLS), with
+ * its registered settings as a query the TN3270 connector reads (Orbit 2.2).
  */
-const SURFACES: Partial<Record<string, OpenSurface>> = {
-  browser: openBrowser,
-};
+function originFor(app: { surface: string; addresses: Array<{ host: string; scheme?: string | null }>;
+  terminal?: Record<string, string> | null }): string {
+  const address = app.addresses[0];
+  if (app.surface !== 'terminal') return originOf(address);
+  const scheme = address?.scheme === 'tn3270s' ? 'tn3270s' : 'tn3270';
+  const settings = new URLSearchParams(Object.entries(app.terminal ?? {}).filter(([, v]) => v)).toString();
+  return `${scheme}://${address?.host ?? ''}${settings ? `?${settings}` : ''}`;
+}
 
 const pool = new Pool({
   connectionString: process.env['ORBIT_DATABASE_URL']
@@ -92,6 +96,11 @@ async function sortOne(workflowId: string) {
     const model = modelFromEnvironment();
     const result = await sortAndStore(db, workflowId, model);
     if (result.sorted) await tabulateAndStore(db, workflowId, model);
+    // Across several applications, each line of work is placed on one (C11).
+    if (result.sorted) {
+      const { tagged } = await tagApplications(db, workflowId, model);
+      if (tagged) console.log(`  placed ${tagged} lines on their applications`);
+    }
     if (result.sorted) {
       await db.query(`UPDATE understanding SET status = 'sorted', sorted_at = now(), tries = 0 WHERE workflow_id = $1`,
         [workflowId]);
@@ -184,14 +193,28 @@ async function authorOne(sessionId: string) {
     const { rows: [s] } = await db.query<{
       name: string; procedure: string; application_id: string; start_path: string;
       inputs: Record<string, string>; host: string; into_workflow_id: string | null;
-      scope: string[] | null; hints: Array<{ sentence: string; answer: string }> | null;
+      scope: string[] | null; hints: Array<{ sentence: string; answer: string }> | null; surface: string;
+      addresses: Array<{ host: string; scheme?: string }>; terminal: Record<string, string> | null;
     }>(`SELECT s.name, s.procedure, s.application_id, s.start_path, s.inputs, s.into_workflow_id, s.scope, s.hints,
-               (r.addresses->0->>'host') AS host, (r.addresses->0->>'scheme') AS scheme
+               (r.addresses->0->>'host') AS host, (r.addresses->0->>'scheme') AS scheme, a.surface, r.addresses, r.terminal
           FROM authoring_session s
+          JOIN application a ON a.id = s.application_id
           JOIN application_revision r ON r.application_id = s.application_id
          WHERE s.id = $1
          ORDER BY r.revision DESC LIMIT 1`, [sessionId]);
     if (!s) return;
+
+    // The application's connector (Orbit 2.2, C3–C4). An application this
+    // worker cannot drive is refused in words, never walked as a browser.
+    const connector = CONNECTORS[s.surface];
+    const ready = connector ? await connector.ready() : { ready: false as const, why: `this worker has no ${s.surface} connector` };
+    if (!connector || !ready.ready) {
+      const why = `This application is a ${s.surface} application, and ${'why' in ready ? ready.why : 'its connector is not ready'}.`;
+      await db.query(`UPDATE authoring_session SET status = 'refused', refused = $2, ended_at = now() WHERE id = $1`,
+        [sessionId, JSON.stringify({ describe: why })]);
+      console.log(`  not brought in: ${why}`);
+      return;
+    }
 
     console.log(`  bringing in "${s.name}" against http://${s.host}`);
     // One write at a time, in the order the turns happened — the same
@@ -203,8 +226,10 @@ async function authorOne(sessionId: string) {
     // A walk after a sort is shown the sentences it was confirmed with,
     // numbered, so each step it drafts can say which one it carries out.
     // As they now read, in the author's order, without what was taken out (Decision 17).
-    const { rows: every } = s.into_workflow_id ? await db.query<{ number: string; text: string; waits: boolean; label: string; part: string; after: string | null }>(
+    const { rows: every } = s.into_workflow_id ? await db.query<{ number: string; text: string; waits: boolean; label: string; part: string; after: string | null; application: string | null }>(
       `SELECT p.key || '.' || x.n AS number, x.text, coalesce(l.waits, false) AS waits, l.label, p.key AS part,
+              (SELECT a.name FROM sentence_application t JOIN application a ON a.id = t.application_id
+                WHERE t.sentence_id = x.id ORDER BY t.seq DESC LIMIT 1) AS application,
               (SELECT p2.key || '.' || s2.n FROM procedure_sentence s2 JOIN procedure_part p2 ON p2.id = s2.part_id
                 WHERE s2.id = p.after_sentence_id) AS after
          FROM sentence_now x JOIN procedure_part p ON p.id = x.part_id
@@ -213,7 +238,37 @@ async function authorOne(sessionId: string) {
         ORDER BY p.added_at, p.key, x.n`, [s.into_workflow_id]) : { rows: [] };
     const inOrder = inDocumentOrder(every);
     const sentences = inOrder.filter((x) => x.label === 'task' || x.label === 'rule' || x.waits)
-      .map(({ part: _, after: __, ...x }) => x);
+      .map(({ part: _, after: __, application, ...x }) => ({ ...x, ...(application ? { application } : {}) }));
+
+    // Every application the agent works across (Orbit 2.2, C11–C12): the one it
+    // was brought in against, and those the author added. One is the walk as
+    // it always was; several, and it moves between them.
+    const { rows: attached } = s.into_workflow_id ? await db.query<{ name: string; surface: string; start_path: string;
+      addresses: Array<{ host: string; scheme?: string }>; sign_in_as: string | null; credential_name: string | null;
+      terminal: Record<string, string> | null }>(
+      `SELECT a.name, a.surface, coalesce(wa.start_path, $2) AS start_path, r.addresses, r.sign_in_as, r.credential_name, r.terminal
+         FROM application a
+         LEFT JOIN workflow_application wa ON wa.application_id = a.id AND wa.workflow_id = $1
+         JOIN LATERAL (SELECT * FROM application_revision WHERE application_id = a.id ORDER BY revision DESC LIMIT 1) r ON true
+        WHERE a.id = $3 OR wa.workflow_id IS NOT NULL
+        ORDER BY (a.id = $3) DESC, wa.added_at`, [s.into_workflow_id, s.start_path, s.application_id]) : { rows: [] };
+    const across = [];
+    if (attached.length > 1) {
+      for (const a of attached) {
+        const c = CONNECTORS[a.surface];
+        const ok = c ? await c.ready() : { ready: false as const, why: `this worker has no ${a.surface} connector` };
+        if (!c || !ok.ready) {
+          const why = `${a.name} is a ${a.surface} application, and ${'why' in ok ? ok.why : 'its connector is not ready'}.`;
+          await db.query(`UPDATE authoring_session SET status = 'refused', refused = $2, ended_at = now() WHERE id = $1`,
+            [sessionId, JSON.stringify({ describe: why })]);
+          console.log(`  not brought in: ${why}`);
+          return;
+        }
+        across.push({ name: a.name, origin: originFor(a), startPath: a.start_path, looking: c.look,
+          credentialName: a.credential_name, signsInAs: a.sign_in_as,
+          signsInWith: a.credential_name ? await readCredential(db as never, a.credential_name).catch(() => null) : null });
+      }
+    }
 
     // Which task finds a record the rules say may not exist.
     const { rows: [tables] } = s.into_workflow_id ? await db.query<{ tables: Array<{ sentences: string[];
@@ -258,11 +313,13 @@ async function authorOne(sessionId: string) {
       name: s.name,
       procedure: s.procedure,
       applicationId: s.application_id,
-      origin: originOf(s),
+      origin: originFor(s),
       startPath: s.start_path,
       inputs: s.inputs,
       ...(s.into_workflow_id ? { into: s.into_workflow_id } : {}),
       model: modelFromEnvironment(),
+      looking: connector.look,
+      ...(across.length > 1 ? { applications: across } : {}),
       onTurn: (t) => {
         console.log(`  turn ${t.turn} ${t.verdict}: ${t.why}`);
         appending = appending.then(() => pool.query(
@@ -452,20 +509,25 @@ async function runOne(runId: string) {
     ];
     const shaped = (values: Map<string, unknown> | Iterable<[string, unknown]>) => asObjects(Object.fromEntries(values), declared);
     const app = row.applications[0];
-    const origin = originOf(app.addresses[0]);
+    const origin = originFor(app);
 
     // Read from the version's own copy, never from the live application: a
     // version that could be made to run somewhere else by editing a row
     // afterwards would not be the fixed thing every run names.
-    const open = SURFACES[app.surface];
+    // Every application the version names, each through its connector
+    // (Orbit 2.2). One application runs exactly as it always has.
+    const apps = row.applications as Array<{ name: string; surface: string; addresses: Array<{ host: string; scheme?: string }>;
+      sign_in_as: string | null; terminal?: Record<string, string> | null }>;
+    const missing = apps.find((a) => !CONNECTORS[a.surface]?.run);
+    const open = missing ? undefined : CONNECTORS[app.surface]?.run;
     if (!open) {
       // Orbit does not guess what it is driving. A version that does not say
       // is refused rather than assumed to be a browser, because assuming is
       // how a terminal procedure would one day be run against a web page and
       // the record would say it went fine.
       const halt = { kind: 'pathReachesNothing' as const, step: 1,
-        describe: app.surface
-          ? `This version is registered against a ${app.surface} surface, which this worker cannot drive.`
+        describe: (missing ?? app).surface
+          ? `This version is registered against a ${(missing ?? app).surface} surface, which this worker cannot drive.`
           : 'This version does not record what kind of application it runs against, so it cannot be run.' };
       await db.query(`UPDATE run SET status = 'failed', error = $2, ended_at = now() WHERE id = $1`,
         [runId, JSON.stringify(halt)]);
@@ -491,8 +553,11 @@ async function runOne(runId: string) {
         [runId, JSON.stringify({ at: resume.at, handedBack: held!.handedBack })]);
     }
 
+    const surface: Surface = apps.length > 1
+      ? surfaceAcross(apps.map((a) => ({ name: a.name, origin: originFor(a), open: CONNECTORS[a.surface]!.run, signsInAs: a.sign_in_as ?? null })))
+      : await open(origin);
     const { halted, values, reached, handedOff, waiting } = await execute(
-      db, runId, steps, row.inputs, await open(origin), app.sign_in_as ?? null, resume);
+      db, runId, steps, row.inputs, surface, app.sign_in_as ?? null, resume);
 
     if (waiting) {
       // Paused, not finished: the values it has read are kept so it can carry
@@ -597,6 +662,21 @@ async function sweep() {
   }
 }
 await sweep();
+
+// What this worker can drive, said where publication can read it (C4): an
+// agent for a green screen is refused when no worker has the emulator, and
+// the refusal names the connector that is missing.
+async function reportConnectors() {
+  for (const [connector, c] of Object.entries(CONNECTORS)) {
+    const ok = await c!.ready();
+    await pool.query(
+      `INSERT INTO worker_connector (worker, connector, ready, why, reported_at) VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (worker, connector) DO UPDATE SET ready = $3, why = $4, reported_at = now()`,
+      [worker, connector, ok.ready, 'why' in ok ? ok.why : null]).catch(() => undefined);
+    if (!ok.ready) console.log(`  ${connector} connector not ready: ${'why' in ok ? ok.why : ''}`);
+  }
+}
+await reportConnectors();
 const sweeping = setInterval(() => { void sweep(); }, 30_000);
 sweeping.unref();
 

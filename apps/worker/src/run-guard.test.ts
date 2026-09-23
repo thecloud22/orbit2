@@ -45,16 +45,18 @@ const wontLoad = (): Surface => ({
   find: async () => ({ found: 'none', by: 'roleAndName' }),
 });
 
-test('a driver that throws reaches the caller rather than being swallowed', async () => {
-  // `execute` does not pretend to handle it — what matters is that it comes
-  // out as an exception the run loop can turn into a failed run, rather than
-  // an unhandled rejection that ends the process.
+test('a driver that throws halts the run at the step it was on, named, rather than escaping', async () => {
+  // It used to escape to the worker, which recorded it at "step 0" with the
+  // step's attempt left open for the lease sweep to find (pilot-readiness,
+  // "a driver that throws escapes the typed-error channel"). Orbit 2.2 halts
+  // it where it happened, with the kind the driver named or the message implies.
   const steps: Step[] = [
     { id: crypto.randomUUID(), kind: 'open', summary: 'open it', application: 'app', path: '/login',
       arrives: { describe: 'it is open' }, changesARecord: false },
     { id: crypto.randomUUID(), kind: 'end', summary: 'done', outcome: 'done', publishes: [] },
   ];
-  await assert.rejects(
-    () => execute(db as never, runId, steps, {}, wontLoad()),
-    /Timeout 30000ms exceeded/);
+  const { halted } = await execute(db as never, runId, steps, {}, wontLoad());
+  assert.equal(halted?.kind, 'timedOut');
+  assert.equal(halted?.step, 1);
+  assert.match(halted?.describe ?? '', /Timeout 30000ms exceeded/);
 });

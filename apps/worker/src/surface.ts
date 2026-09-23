@@ -72,7 +72,10 @@ export interface Found {
  */
 export type Sought =
   | { found: 'one'; it: Found }
-  | { found: 'none'; by: Strategy; why?: string }
+  | { found: 'none'; by: Strategy; why?: string;
+      /** Set only when "not found" is really a different failure: a green
+       *  screen showing another screen than the one mapped (Orbit 2.2). */
+      kind?: 'terminalScreenUnexpected' }
   | { found: 'many'; count: number; by: Strategy };
 
 export interface Surface {
@@ -81,7 +84,7 @@ export interface Surface {
 
   /** §14's `open`. The path is relative; the surface holds the origin, so a
    *  step cannot navigate somewhere the version did not approve. */
-  open(path: string): Promise<void>;
+  open(path: string, application?: string): Promise<void>;
 
   /** Wait until whatever an activation set off has finished. Separate from
    *  `activate` because `open` needs it too, and because a surface with no
@@ -101,6 +104,11 @@ export interface Surface {
   capture(): Promise<{ bytes: Buffer; mediaType: string }>;
 
   close(): Promise<void>;
+
+  /** Across applications (Orbit 2.2): which one has focus, and the account it
+   *  signs in as. A surface for one application has neither. */
+  application?(): string;
+  signsInAs?(): string | null;
 }
 
 /**

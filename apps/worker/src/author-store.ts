@@ -52,7 +52,7 @@ export async function authorAndStore(db: PoolClient, opts: {
    *  procedure was brought in to be understood (Orbit 2.1). */
   into?: string;
   /** The confirmed sentences, numbered, for a walk after a sort. */
-  sentences?: ReadonlyArray<{ number: string; text: string; waits?: boolean }>;
+  sentences?: ReadonlyArray<{ number: string; text: string; waits?: boolean; application?: string }>;
   mayBeAbsentAfter?: readonly string[];
   tables?: readonly import('@orbit/contract').RuleTable[];
   order?: readonly string[];
@@ -65,6 +65,10 @@ export async function authorAndStore(db: PoolClient, opts: {
   model: ModelProvider;
   /** Each turn as it lands, for whoever is watching the screen. */
   onTurn?: (turn: Turn) => void;
+  /** The application's connector, for the walk (Orbit 2.2). A browser when absent. */
+  looking?: import('./looking.ts').OpenLooking;
+  /** Every application the agent works across, when it is more than one (Orbit 2.2). */
+  applications?: readonly import('./author.ts').WalkApplication[];
 }): Promise<Stored | NotStored> {
   // The sign-in the registry holds: what the application calls its password,
   // and the account it signs in as. Both so a sign-in step can refer to what

@@ -18,7 +18,7 @@ sentences. Where a capability would make either less true, Orbit refuses the cap
 - `docs/slice-1-brief.md` — what is being built now, what is deliberately excluded, and the
   acceptance criteria for it.
 - `docs/ACTIVE_TASK.md` — the authoritative record of what has actually shipped. Keep this current.
-- `docs/decisions.md` — the architecture decisions, with reasoning. Seventeen are recorded and closed.
+- `docs/decisions.md` — the architecture decisions, with reasoning. Nineteen are recorded and closed.
   Read it before proposing anything structural; a change to one of these is a change to
   architecture and needs approval, not a commit.
 - `docs/decision-draft-model-driven-browser.md` — the draft that became Decision 6. It is
@@ -105,6 +105,8 @@ is right and this table is stale.
 | 13 | A judged step | Shape fixed, **not built in slice 1**. The model returns one of a list the workflow declared, judged against pinned policy, with a confidence floor below which it hands off. It never names a control, supplies an address or chooses an action. |
 | 16 | Prompt injection | Untrusted text fenced as data, instruction-like sentences flagged and kept out, a data-changing press only when the line it cites asks for it. |
 | 17 | The procedure is edited in place | An edit is a revision, numbers never shift in a draft, Orbit maps only what changed, a question is left rather than held, the chat is open until publication. |
+| 18 | Green screens | A connector owns what knows its screen; Orbit drives TN3270 through s3270, never decoding it; a binding is screen, label and address, refused on any disagreement; keys are named by their verb; a hidden field is never read. |
+| 19 | An agent across applications | Each line placed on an application; moving is an `open`; a value read on one is typed on another, through a code table where they differ; a part-way stop says what each system holds; nothing runs again blind. |
 
 Rules that follow from the product regardless of those choices:
 

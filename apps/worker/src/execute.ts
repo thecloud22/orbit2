@@ -17,7 +17,18 @@ import { capture } from './evidence.ts';
 import { decide } from './compare.ts';
 import type { Surface } from './surface.ts';
 
-export interface Halt { kind: ErrorKind; step: number; describe: string }
+/**
+ * What each application now holds, when a run stops part-way (Orbit 2.2, C14).
+ * `changed` is every press that changed a record and was seen through;
+ * `unknown` is one that was pressed and never answered — the system may hold
+ * its effect or may not, and a person must look before anything runs again (C15).
+ */
+export interface Partial {
+  changed: Array<{ application: string | null; step: number; control: string }>;
+  unknown?: { application: string | null; step: number; control: string };
+}
+
+export interface Halt { kind: ErrorKind; step: number; describe: string; partial?: Partial }
 
 interface Ctx {
   db: PoolClient;
@@ -37,7 +48,13 @@ interface Ctx {
   handedOff: { request: string; shown: Record<string, string | null> } | null;
   /** Set when the run stopped to wait for a person, and where it resumes. */
   waiting: { resumeAt: number; request: string; shown: Record<string, string | null> } | null;
+  /** Record-changing presses seen through, and the one in flight (C14). */
+  changed: Partial['changed'];
+  pressing: Partial['unknown'] | null;
 }
+
+/** The account of the application with focus: the version's one, or across applications, that one's. */
+const accountOf = (ctx: Ctx): string | null => (ctx.surface.signsInAs ? ctx.surface.signsInAs() : ctx.account);
 
 /**
  * One side of a comparison, as text or absence.
@@ -53,7 +70,7 @@ function resolveRef(ctx: Ctx, ref: { from: string; value?: string; literal?: unk
   // Never on either side of a comparison — the contract does not allow it
   // there — so this is only ever reached for an `enter`, where the account is
   // read off the version rather than off the run.
-  if (ref.from === 'account') return ctx.account;
+  if (ref.from === 'account') return accountOf(ctx);
   if (ref.from === 'literal') {
     const l = ref.literal as { type: string; text?: string; number?: number; date?: string; yesNo?: boolean };
     return l.type === 'text' ? l.text ?? null
@@ -135,18 +152,19 @@ async function runStep(ctx: Ctx, step: Step, position: number,
 
   const bind = async () => {
     const b = binding(step);
-    if (!b) return { refusal: 'this step names nothing on the page' } as const;
+    if (!b) return { refusal: 'this step names nothing on the page', many: false } as const;
     const found = await ctx.surface.find(b);
     if (found.found === 'one') return { it: found.it, by: found.it.by } as const;
     const label = step.kind === 'enter' ? step.into.label
       : step.kind === 'activate' ? step.control.label
       : step.kind === 'read' ? step.region.label : 'the control';
-    return { refusal: describeRefusal(label, found), many: found.found === 'many' } as const;
+    return { refusal: describeRefusal(label, found), many: found.found === 'many',
+      ...(found.found === 'none' && found.kind ? { kind: found.kind } : {}) } as const;
   };
 
   switch (step.kind) {
     case 'open': {
-      await ctx.surface.open(step.path);
+      await ctx.surface.open(step.path, step.application);
       await event(ctx, attemptId, 'navigated', { to: step.path });
       await screenshot(ctx, attemptId);
       await end('ok');
@@ -155,7 +173,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
     case 'enter': {
       const found = await bind();
       if ('refusal' in found) {
-        const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
+        const halt = { kind: ('kind' in found && found.kind) || (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
       const ref = step.value;
@@ -178,7 +196,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
           `A secret was entered at step ${position}. §2: a secret never appears in any artefact.`);
         await end('ok'); return 'ok';
       }
-      if (ref.from === 'account' && !ctx.account) {
+      if (ref.from === 'account' && !accountOf(ctx)) {
         // Said, not typed as nothing. The version names the registered
         // account and this deployment has none recorded, which is a sign-in
         // that cannot happen — and an empty user id would be entered, pressed
@@ -192,7 +210,18 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       // everything else — a number, a date, a yes/no — fell through to an
       // empty string, silently. The contract declares four kinds of literal
       // and three of them typed nothing.
-      const value = resolveRef(ctx, ref) ?? '';
+      let value = resolveRef(ctx, ref) ?? '';
+      // Spelled the way this system spells it (C13): the agent's table, and
+      // nothing typed at all for a value the table does not have.
+      if ('codes' in ref) {
+        const coded = codeFor(ref.codes, value);
+        if (coded === null) {
+          const halt = { kind: 'valueNotOfDeclaredType' as ErrorKind, step: position,
+            describe: `Step ${position} types ${ref.value} as this application's code for it, and "${value}" has no code in the agent's table.` };
+          await end('halted', halt); return halt;
+        }
+        value = coded;
+      }
       const intoBox = await found.it.where();
       await found.it.fill(value);
       await event(ctx, attemptId, 'entered', { into: step.into.label, by: found.by });
@@ -203,7 +232,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
     case 'activate': {
       const found = await bind();
       if ('refusal' in found) {
-        const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
+        const halt = { kind: ('kind' in found && found.kind) || (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
       // Two pictures, because one cannot do both jobs. The control is boxed on
@@ -214,8 +243,14 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       const controlBox = await found.it.where();
       await screenshot(ctx, attemptId,
         controlBox && { label: step.control.label, by: found.by, at: controlBox });
+      // A press that changes a record is known to be in flight until the
+      // application has answered it: if the run dies in between, nobody can
+      // say whether the record changed, and the run says exactly that (C14).
+      const pressing = { application: ctx.surface.application?.() ?? null, step: position, control: step.control.label };
+      if (step.changesARecord) ctx.pressing = pressing;
       await found.it.activate();
       await ctx.surface.settle();
+      if (step.changesARecord) { ctx.changed.push(pressing); ctx.pressing = null; }
       await event(ctx, attemptId, 'activated', { control: step.control.label, by: found.by });
       await screenshot(ctx, attemptId);
       await end('ok'); return 'ok';
@@ -232,7 +267,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
           await event(ctx, attemptId, 'read.absent', { value: name });
           await end('ok'); return 'ok';
         }
-        const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
+        const halt = { kind: ('kind' in found && found.kind) || (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
       const text = (await found.it.text()).trim();
@@ -327,6 +362,22 @@ async function runStep(ctx: Ctx, step: Step, position: number,
   }
 }
 
+/** A value's code in an agent's table, matched without regard to case or surrounding space. */
+export function codeFor(codes: Record<string, string>, value: string): string | null {
+  const wanted = value.trim().toLowerCase();
+  for (const [from, to] of Object.entries(codes)) if (from.trim().toLowerCase() === wanted) return to;
+  return null;
+}
+
+/** A driver's own failure, as the halt it is. Named kinds are kept; the rest read from the message. */
+const THROWN_KINDS = new Set<string>(['applicationUnavailable', 'timedOut', 'terminalKeyboardLocked', 'terminalScreenUnexpected']);
+function thrownAt(error: unknown, position: number): Halt {
+  const why = String((error as Error)?.message ?? error).split('\n')[0]!;
+  const named = (error as { kind?: string })?.kind;
+  const kind = (named && THROWN_KINDS.has(named) ? named : /Timeout|timed out/i.test(why) ? 'timedOut' : 'applicationUnavailable') as ErrorKind;
+  return { kind, step: position, describe: `The application did not answer: ${why}` };
+}
+
 /**
  * Runs a version's steps against a surface.
  *
@@ -340,7 +391,11 @@ export async function execute(db: PoolClient, runId: string, steps: Step[],
    *  had read before it, with whatever the person handed back. */
   resume?: { at: number; values: Record<string, string | null> }) {
   const ctx: Ctx = { db, runId, surface, values: new Map(Object.entries(resume?.values ?? {})), inputs, account,
-    reached: null, handedOff: null, waiting: null };
+    reached: null, handedOff: null, waiting: null, changed: [], pressing: null };
+  /** Said on a halt only when there is something to say about what each system holds. */
+  const partOf = (halt: Halt): Halt => (ctx.changed.length || ctx.pressing
+    ? { ...halt, partial: { changed: ctx.changed, ...(ctx.pressing ? { unknown: ctx.pressing } : {}) } }
+    : halt);
   const positionOf = new Map(steps.map((s, i) => [s.id, i + 1]));
   try {
     let position = resume?.at ?? 1;
@@ -360,8 +415,21 @@ export async function execute(db: PoolClient, runId: string, steps: Step[],
       }
 
       const step = steps[position - 1]!;
-      const outcome = await runStep(ctx, step, position, positionOf);
-      if (typeof outcome === 'object' && 'kind' in outcome) return { halted: outcome, values: ctx.values };
+      let outcome: Awaited<ReturnType<typeof runStep>>;
+      try {
+        outcome = await runStep(ctx, step, position, positionOf);
+      } catch (error) {
+        // The driver threw part-way through a step: a connection that dropped,
+        // a keyboard that locked, a page that never loaded. Halted at the step
+        // it happened on, with the attempt closed — it used to escape to the
+        // worker as "step 0" with the attempt left open for the lease to find.
+        const halt = thrownAt(error, position);
+        await db.query(`UPDATE step_attempt SET outcome = 'halted', error = $3, ended_at = now()
+                         WHERE run_id = $1 AND step_position = $2 AND ended_at IS NULL`,
+          [runId, position, JSON.stringify(halt)]).catch(() => undefined);
+        return { halted: partOf(halt), values: ctx.values };
+      }
+      if (typeof outcome === 'object' && 'kind' in outcome) return { halted: partOf(outcome), values: ctx.values };
       if (typeof outcome === 'object' && 'goto' in outcome) { position = outcome.goto; continue; }
       if (step.kind === 'end' || step.kind === 'handOff') break;
       position += 1;

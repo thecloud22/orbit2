@@ -94,7 +94,19 @@ export const accountRef = object({ from: z.literal('account') });
  * registered account is allowed. Both are the sign-in, and neither is a value
  * a run may be started with, compared against or made to publish.
  */
-export const enterValue = z.union([valueRef, secretRef, accountRef]);
+/**
+ * A value an earlier step read, typed where another system spells it
+ * differently (Orbit 2.2, C13): the web portal's *Conventional* is the green
+ * screen's `CONV`. The table is the agent's, asked once and kept; a value
+ * with no entry halts the run rather than being typed as it came.
+ */
+export const codedStepRef = object({
+  from: z.literal('step'),
+  value: name,
+  codes: z.record(z.string().min(1).max(120), z.string().min(1).max(120)),
+});
+
+export const enterValue = z.union([valueRef, codedStepRef, secretRef, accountRef]);
 export type EnterValue = z.infer<typeof enterValue>;
 
 const sides = { left: valueRef, right: valueRef };

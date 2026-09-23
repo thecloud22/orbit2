@@ -194,8 +194,18 @@ export function checkForPublication(
       : step.kind === 'read' ? step.region
       : step.kind === 'collect' ? step.table : null;
     if (target) {
-      const binding = target.binding as { strategy?: string; corroborate?: unknown } | null;
-      if (!binding?.strategy) {
+      const binding = target.binding as { strategy?: string; corroborate?: unknown; connector?: string;
+        screen?: string; what?: string; label?: string; key?: string; row?: number; column?: number } | null;
+      // A green screen's binding (Decision 18): the screen it was mapped on,
+      // what it is, its label or key, and where it sits. Complete when all are
+      // there; it has no rung that could return the wrong thing.
+      const green = binding?.connector === 'tn3270';
+      const greenComplete = green && Boolean(binding.screen) && ['field', 'value', 'key'].includes(binding.what ?? '')
+        && (binding.what === 'key' ? Boolean(binding.key) : true)
+        && Number.isInteger(binding.row) && Number.isInteger(binding.column);
+      if (green) {
+        if (!greenComplete) blockers.push({ kind: 'stepIncomplete', step: at(index), missing: ['how to find "' + target.label + '"'] });
+      } else if (!binding?.strategy) {
         blockers.push({ kind: 'stepIncomplete', step: at(index), missing: ['how to find "' + target.label + '"'] });
       } else if (CAN_LIE.has(binding.strategy) && !binding.corroborate) {
         blockers.push({ kind: 'bindingNeedsCorroboration', step: at(index),

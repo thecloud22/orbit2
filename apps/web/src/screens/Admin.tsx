@@ -6,6 +6,8 @@ import { send, useFetch } from '../fetching.ts';
 interface Application {
   id: string; name: string; surface: string; revision: number;
   addresses: Array<{ host: string; pathPrefix: string; scheme?: string }>; sign_in_as: string | null;
+  /** A green screen's settings (Orbit 2.2): absent for a web application. */
+  terminal?: { codePage?: string; model?: string; luName?: string } | null;
   credential_name: string | null; credential_set: boolean; retired_at: string | null;
 }
 
@@ -62,7 +64,7 @@ export function AdminScreen() {
                 <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
                   <div style={{ width: 180 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{a.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>{a.surface}, revision {a.revision}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>{a.surface === 'terminal' ? 'Terminal · TN3270' : 'Web browser'}, revision {a.revision}</div>
                     {a.retired_at && <div style={{ fontSize: 12, color: 'var(--attention-ink)' }}>retired</div>}
                   </div>
                   <span style={{ width: 260, fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink-2)',
@@ -171,6 +173,13 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
   const [addresses, setAddresses] = useState(
     application?.addresses.length ? application.addresses.map((a) => ({ ...a })) : [{ host: '', pathPrefix: '/' }]);
   const [signInAs, setSignInAs] = useState(application?.sign_in_as ?? '');
+  // A green screen (Orbit 2.2): TLS is carried by the scheme, the rest are
+  // how s3270 is told to speak to the host.
+  const [tls, setTls] = useState(application?.addresses[0]?.scheme === 'tn3270s');
+  const [codePage, setCodePage] = useState(application?.terminal?.codePage ?? 'cp037');
+  const [model, setModel] = useState(application?.terminal?.model ?? '3278-2');
+  const [luName, setLuName] = useState(application?.terminal?.luName ?? '');
+  const green = surface === 'terminal';
   const [credentialValue, setCredentialValue] = useState('');
   const [showCredentialValue, setShowCredentialValue] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -184,7 +193,10 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
     const body = {
       name: name.trim(),
       ...(mode === 'register' ? { surface } : {}),
-      addresses: usableAddresses.map((a) => ({ host: a.host.trim(), pathPrefix: a.pathPrefix.trim() || '/' })),
+      addresses: usableAddresses.map((a) => ({ host: a.host.trim(), pathPrefix: green ? '/' : a.pathPrefix.trim() || '/',
+        ...(green ? { scheme: tls ? 'tn3270s' : 'tn3270' } : {}) })),
+      ...(green ? { terminal: { codePage: codePage.trim() || 'cp037', model: model.trim() || '3278-2',
+        ...(luName.trim() ? { luName: luName.trim() } : {}) } } : {}),
       ...(signInAs.trim() ? { signInAs: signInAs.trim() } : {}),
       ...(credentialValue ? { credentialValue } : {}),
     };
@@ -206,12 +218,12 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
 
       {mode === 'register' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-          <span style={label}>Surface</span>
+          <span style={label}>Connector</span>
           <div style={{ display: 'flex', gap: 16 }}>
             {(['browser', 'terminal'] as const).map((s) => (
               <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                 <input type="radio" name="surface" checked={surface === s} onChange={() => setSurface(s)} />
-                {s}
+                {s === 'browser' ? 'Web browser' : 'Terminal · TN3270'}
               </label>
             ))}
           </div>
@@ -219,9 +231,9 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
       )}
       {mode === 'edit' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-          <span style={label}>Surface</span>
+          <span style={label}>Connector</span>
           <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>
-            {application!.surface} — fixed when it was registered
+            {application!.surface === 'terminal' ? 'Terminal · TN3270' : 'Web browser'} — fixed when it was registered
           </span>
         </div>
       )}
@@ -231,12 +243,14 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
         <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
           {addresses.map((a, i) => (
             <div key={i} style={{ display: 'flex', gap: 8 }}>
-              <input style={{ ...field, maxWidth: 220 }} value={a.host} placeholder="portal.example.internal:443"
+              <input style={{ ...field, maxWidth: 220 }} value={a.host} placeholder={green ? 'mainframe.example.internal:23' : 'portal.example.internal:443'}
                 aria-label={`Host ${i + 1}`}
                 onChange={(e) => setAddresses((v) => v.map((x, j) => j === i ? { ...x, host: e.target.value } : x))} />
-              <input style={{ ...field, maxWidth: 140 }} value={a.pathPrefix} placeholder="/"
-                aria-label={`Path prefix ${i + 1}`}
-                onChange={(e) => setAddresses((v) => v.map((x, j) => j === i ? { ...x, pathPrefix: e.target.value } : x))} />
+              {!green && (
+                <input style={{ ...field, maxWidth: 140 }} value={a.pathPrefix} placeholder="/"
+                  aria-label={`Path prefix ${i + 1}`}
+                  onChange={(e) => setAddresses((v) => v.map((x, j) => j === i ? { ...x, pathPrefix: e.target.value } : x))} />
+              )}
               {addresses.length > 1 && (
                 <button type="button" onClick={() => setAddresses((v) => v.filter((_, j) => j !== i))}
                   style={{ font: 'inherit', fontSize: 12, color: 'var(--ink-2)', background: 'transparent',
@@ -251,6 +265,36 @@ function ApplicationForm({ mode, application, onDone, onCancel }: {
           ))}
         </div>
       </div>
+
+      {green && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+            <span style={label}>Security</span>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+              <input type="checkbox" checked={tls} onChange={(e) => setTls(e.target.checked)} />
+              TLS — a real host has it; the practice host does not
+            </label>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+            <span style={label}>Code page</span>
+            <input style={{ ...field, maxWidth: 140 }} value={codePage} onChange={(e) => setCodePage(e.target.value)}
+              aria-label="Code page" placeholder="cp037" />
+            <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>how the host's EBCDIC becomes text</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+            <span style={label}>Screen</span>
+            <input style={{ ...field, maxWidth: 140 }} value={model} onChange={(e) => setModel(e.target.value)}
+              aria-label="Screen model" placeholder="3278-2" />
+            <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>3278-2 is 24 × 80</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+            <span style={label}>LU name</span>
+            <input style={{ ...field, maxWidth: 200 }} value={luName} onChange={(e) => setLuName(e.target.value)}
+              aria-label="LU name" placeholder="optional" />
+            <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>only for a TN3270E host that assigns one</span>
+          </div>
+        </>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
         <span style={label}>Signs in as</span>

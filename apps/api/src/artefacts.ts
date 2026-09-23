@@ -74,7 +74,9 @@ export async function serveScreen(digest: string, db: Queryable = pool): Promise
   catch { return { ok: false, kind: 'notFound', describe: 'The picture is recorded but its bytes are not in the store.' }; }
   const actual = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
   if (actual !== digest) return { ok: false, kind: 'integrityFailure', describe: 'The picture does not match its record.' };
-  return { ok: true, bytes, mediaType: 'image/png' };
+  // A web page's picture is a PNG; a green screen's is its text, drawn as SVG
+  // (Orbit 2.2). Said by the bytes, which is what the digest covers.
+  return { ok: true, bytes, mediaType: bytes.subarray(0, 5).toString() === '<svg ' ? 'image/svg+xml' : 'image/png' };
 }
 
 export async function serveArtefact(id: string, db: Queryable = pool): Promise<Served> {

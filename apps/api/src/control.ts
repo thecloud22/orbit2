@@ -24,7 +24,9 @@ interface RunRow {
   status: string;
   version_id: string;
   inputs: Record<string, string>;
-  error: { kind: ErrorKind; step?: number } | null;
+  error: { kind: ErrorKind; step?: number;
+    partial?: { changed: Array<{ application: string | null; step: number; control: string }>;
+                unknown?: { application: string | null; step: number; control: string } } } | null;
   cancel_requested_at: string | null;
   retries: number;
 }
@@ -39,6 +41,40 @@ const load = async (db: PoolClient, reference: string): Promise<RunRow | null> =
 const audit = (db: PoolClient, act: string, runId: string, changed: unknown) =>
   db.query(`INSERT INTO audit_entry (act, object_kind, object_id, changed) VALUES ($1, 'run', $2, $3)`,
     [act, runId, JSON.stringify(changed)]);
+
+/** Whether a person has said they looked at what a part-way run left behind (C15). */
+const checked = async (db: PoolClient, runId: string): Promise<boolean> => {
+  const { rows: [c] } = await db.query(`SELECT 1 FROM run_event WHERE run_id = $1 AND kind = 'run.checked' LIMIT 1`, [runId]);
+  return Boolean(c);
+};
+
+/** Said when a part-way run holds a retry or a re-run, in the terms of what each system holds. */
+const heldBecause = (p: NonNullable<NonNullable<RunRow['error']>['partial']>): string => {
+  const unknown = p.unknown
+    ? `${p.unknown.control} was pressed on ${p.unknown.application ?? 'the application'} and never answered, so it may hold its effect. `
+    : '';
+  const changed = p.changed.length
+    ? `${p.changed.map((c) => `${c.control} on ${c.application ?? 'the application'}`).join(' and ')} already went through. `
+    : '';
+  return `${unknown}${changed}Running it again before a person has looked could do it twice. Check, say so on the run page, then run it again.`;
+};
+
+/**
+ * A person has looked at what a part-way run left behind, in each system, and
+ * says so (Orbit 2.2, C15). Recorded as an event: the run itself is unchanged.
+ */
+export async function checkRun(db: PoolClient, reference: string): Promise<Control> {
+  const run = await load(db, reference);
+  if (!run) return { ok: false, because: 'There is no run with that reference.' };
+  if (run.status !== 'failed' || !run.error?.partial) {
+    return { ok: false, because: 'This run did not stop part-way, so there is nothing to check.' };
+  }
+  if (await checked(db, run.id)) return { ok: false, because: 'Somebody has already said this was checked.' };
+  await db.query(`INSERT INTO run_event (run_id, kind, detail) VALUES ($1, 'run.checked', $2)`,
+    [run.id, JSON.stringify({ unknown: run.error.partial.unknown ?? null, changed: run.error.partial.changed })]);
+  await audit(db, 'run checked', run.id, { reference });
+  return { ok: true, reference };
+}
 
 /**
  * Asks a queued or running run to stop.
@@ -98,6 +134,10 @@ export async function retryRun(db: PoolClient, reference: string): Promise<Contr
     return { ok: false, because:
       `A ${run.error.kind} failure will not come out differently on a second attempt. Repair the workflow, or start a fresh run.` };
   }
+  // A retry runs the version from the start, so it would press again what
+  // already went through, and what may have (C15).
+  const p = run.error.partial;
+  if (p && (p.unknown || p.changed.length) && !(await checked(db, run.id))) return { ok: false, because: heldBecause(p) };
 
   await db.query(
     `UPDATE run SET status = 'queued', retries = retries + 1, error = NULL,
@@ -125,6 +165,7 @@ export async function rerun(db: PoolClient, reference: string): Promise<Control>
   if (run.status === 'queued' || run.status === 'running') {
     return { ok: false, because: 'This run has not finished yet. Cancel it first, or wait for it.' };
   }
+  if (run.error?.partial?.unknown && !(await checked(db, run.id))) return { ok: false, because: heldBecause(run.error.partial) };
 
   // The version is the one this run used, not whichever is live now. A re-run
   // that quietly picked up a newer version would not be a re-run of anything.

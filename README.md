@@ -10,7 +10,9 @@ be sure it could not have done anything else.**
 
 ## Getting it running
 
-You need **Node 22.6 or newer** and **pnpm**. A PostgreSQL too — but if you
+You need **Node 22.6 or newer** and **pnpm**. For green screens, the **s3270**
+emulator (`brew install x3270`, or `apt install s3270`); without it every web
+agent works as before and a green-screen agent is refused at publication. A PostgreSQL too — but if you
 have not got one and Docker is running, setup starts the one in
 `docker-compose.yml`. No postgres client is needed either; Orbit creates and
 migrates its databases through the driver it already ships with.
@@ -138,13 +140,14 @@ Then:
 scripts/orbit start
 ```
 
-Five processes come up. `scripts/orbit status | stop | restart | logs <name>`.
+Six processes come up. `scripts/orbit status | stop | restart | logs <name>`.
 
 | | |
 |---|---|
 | `http://localhost:5173` | Orbit |
 | `http://localhost:4101` | Meridian Home Lending — the modern demo application |
 | `http://localhost:3040` | Northwind Service Desk — the legacy one, which is the hard case |
+| `tn3270://localhost:3271` | Loan Servicing — the mortgage portal's green-screen twin, the same nine files over TN3270 |
 | `http://localhost:4000` | the API |
 | — | the worker, which holds no port |
 
@@ -210,7 +213,7 @@ loan checked by what the run actually pressed:
 
 ```
 node scripts/scenarios.mjs demo     # scenarios 5 to 9, about 25 minutes
-pnpm test:scenarios                 # all nine
+pnpm test:scenarios                 # all twelve
 ```
 
 | # | Scenario | What it shows |
@@ -225,22 +228,59 @@ They call the model `ORBIT_MODEL` names, so they cost a few cents. What each
 procedure says and which loan should conclude how is in
 `docs/testing/scenarios/README.md`.
 
+## Green screens, and the swivel chair
+
+Orbit drives a TN3270 green screen as a second **connector**, beside the
+browser, and an agent can work across both — the swivel chair: read the web
+file, key it into the mainframe, bring the answer back.
+
+**Register it.** Admin → Register an application → Connector: *Terminal ·
+TN3270*. Host `localhost:3271`, no TLS, code page `cp037`, screen `3278-2`,
+signs in as `ADMIN`, any password. (A real host is TLS and may need an LU name.)
+
+**One procedure, two systems.** Bring `docs/testing/scenarios/09-live-edit.txt`
+in against *Loan Servicing* instead of the web portal. Orbit signs on, types the
+loan number, reads LTV off the loan-detail screen, and approves with the PF
+keys — the same steps in words, found by their label on the screen.
+
+**Across both.** Bring `12-board-the-loan.txt` in against the web portal, then
+*Add an application* on the agent's page and pick Loan Servicing. Orbit places
+each line on the system it happens on (change any like a label), and walks both:
+it reads the file on the web, boards the loan on the green screen — asking once
+how the web's *Conventional* is written there (`CONV`) — and saves the servicing
+account back on the web file. A run that stops part-way says what each system
+now holds, and is never run again blind.
+
+```
+node scripts/scenarios.mjs green    # scenarios 10 to 12
+```
+
+| # | Scenario | What it shows |
+|---|---|---|
+| 10 | Scenario 9's words, on the green screen | the same procedure and conclusions, through TN3270 |
+| 11 | Existing-loan check | a decision on the web from a borrower's loans on the green screen |
+| 12 | Board the approved loan | the swivel chair: web → green screen → web, with a code table |
+
+Orbit never decodes the 3270 stream itself: it drives the s3270 emulator, one
+per session. See Decisions 18 and 19.
+
 ## What is in here
 
 | | |
 |---|---|
 | `apps/api` | The HTTP surface and the migrations. Connects as `orbit_app`, which holds INSERT and SELECT on the immutable tables and nothing else. |
-| `apps/worker` | Drives the browser. Authors a draft by walking a procedure, and executes a published version. Only authoring talks to a model. |
+| `apps/worker` | Drives each application through its connector — a browser, or a green screen through s3270. Authors a draft by walking a procedure, and executes a published version. Only authoring talks to a model. |
 | `apps/web` | The interface. |
 | `packages/contract` | The closed sets, declared once: ten step kinds, five value types, the error and event vocabularies. Unknown keys are refused. |
 | `packages/credentials` | How a registered password is encrypted, shared so the API that writes one and the worker that reads it cannot drift. |
 | `demo/mortgage-portal` | Meridian Home Lending. A loan origination system with nine seeded files and a set of deliberately awkward pages. |
+| `demo/terminal-portal` | Two practice green screens over TN3270: a service desk on 3270, and Loan Servicing — the mortgage portal's twin — on 3271. |
 | `docs/` | The specification, the closed decisions, what has shipped, and what is knowingly not done. |
 
 ## Working on it
 
 ```
-pnpm test        # 387 tests: contract, model, procedure, api, worker
+pnpm test        # 404 tests: contract, model, procedure, api, worker, and the green-screen twin
 pnpm typecheck
 ```
 

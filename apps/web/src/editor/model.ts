@@ -16,6 +16,8 @@ export interface Sentence {
   givenBy: string | null; waits: boolean; suspicious?: string | null; startsBlock: boolean;
   /** Set once the author has changed it (Decision 17): what it said before. */
   was?: string | null; withdrawn?: boolean; revisedAt?: string | null; labelCurrent?: boolean;
+  /** Which application it happens on, when the agent works across several (Orbit 2.2). */
+  application?: { id: string; name: string; surface: string } | null;
 }
 
 /** Which object a value is a field of (R26): a loan's `ltv`. */
@@ -78,6 +80,8 @@ export interface Draft {
   /** Sentences changed since Orbit last mapped them (R18). */
   pending?: string[];
   mapping?: { status: string; describe?: string | null; session_id?: string | null } | null;
+  /** The applications the agent works on, the one it was brought in against first (Orbit 2.2). */
+  applications?: Array<{ id: string; name: string; surface: string; startPath: string; first: boolean }>;
 }
 
 /** Said the way an author thinks of it. Colour is not used for labels: a label is read, not scanned. */

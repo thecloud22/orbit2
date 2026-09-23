@@ -1,0 +1,16 @@
+Meridian Home Lending
+Existing Loan Check
+
+Purpose
+Before a file is decided, the underwriter checks whether the borrower already has a loan with us that is behind on its payments.
+
+Steps
+1. Sign in to Meridian Home Lending with any user ID and password.
+2. Open the loan file using the loan number from the processing queue.
+3. If there is no such file, say so. That is not an error.
+4. Read the borrower's name and the loan-to-value from the file.
+5. Sign in to Loan Servicing with the servicing user ID, and look up the borrower's existing loans by the borrower's name.
+6. Read the worst days past due.
+7. If the worst days past due is over 30, refer the file to a senior underwriter and stop.
+8. If the loan-to-value is over 80%, attach the condition requiring private mortgage insurance.
+9. Then approve the file.

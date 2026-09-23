@@ -107,6 +107,11 @@ export const blocker = z.discriminatedUnion('kind', [
   object({ kind: z.literal('applicationUnknown') }),
   /** A run resumes after a wait in a new session, so it must open the application again. */
   object({ kind: z.literal('waitNotFollowedByOpen'), step: z.number().int().positive() }),
+  /** No worker can drive this kind of application (Orbit 2.2, C4): the version
+   *  could be published and never run. */
+  object({ kind: z.literal('connectorUnavailable'), application: z.string(), connector: z.string(), why: z.string() }),
+  /** A step opens an application the version does not carry. */
+  object({ kind: z.literal('applicationNotCarried'), step: z.number().int().positive(), application: z.string() }),
 
   /** §4 and acceptance criterion 3: an outstanding question, assumption,
    *  exception or unacknowledged risk. */
@@ -158,6 +163,10 @@ export function describeBlocker(b: Blocker): string {
       return `Step ${b.step} would reach ${b.address}, which this workflow is not registered to reach.`;
     case 'waitNotFollowedByOpen':
       return `Step ${b.step} waits for a person, and the run carries on afterwards in a new session, so the step after it must open the application again.`;
+    case 'connectorUnavailable':
+      return `${b.application} is a ${b.connector === 'terminal' ? 'green-screen (TN3270)' : b.connector} application, and no worker here can drive one: ${b.why}.`;
+    case 'applicationNotCarried':
+      return `Step ${b.step} opens ${b.application}, which this agent is not attached to.`;
     case 'applicationUnknown':
       return 'Orbit does not know which application this was brought in against, so it cannot say which one a run may reach.';
     case 'endingHasNoExample':

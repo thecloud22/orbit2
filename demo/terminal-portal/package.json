@@ -14,7 +14,8 @@
   "scripts": {
     "dev": "tsx src/main.ts",
     "start": "tsx src/main.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/servicing.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
