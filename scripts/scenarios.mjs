@@ -82,7 +82,7 @@ const SCENARIOS = {
     example: 'ML-26-04513',
     loans: {
       'ML-26-04513': { status: 'succeeded', pressed: ['Require flood insurance', 'Approve file'] },
-      'ML-26-04561': { status: 'succeeded', pressed: ['Require private mortgage insurance', 'Approve file'] },
+      'ML-26-04561': { status: 'succeeded', pressed: ['Require flood insurance', 'Require private mortgage insurance', 'Approve file'] },
       'ML-26-04529': { status: 'succeeded', pressed: ['Require private mortgage insurance', 'Approve file'] },
       'ML-26-04547': { status: 'succeeded', pressed: ['Refer to senior underwriter'] },
       'ML-26-04471': { status: 'succeeded', pressed: ['Approve file'] },

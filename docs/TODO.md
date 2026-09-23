@@ -270,3 +270,26 @@ defects found alongside: a hand-added `end` passes confirmation marked complete
 and is then refused at publication, because `confirm.ts` sets `complete`
 without re-parsing; and the draft screen prints `undefined (undefined)` for an
 unconfigured step, one of a family of four.
+
+---
+
+## The procedure editor: what 2.1's editor knowingly leaves undone
+
+Built on `2.1/editor` (P1–P8, `docs/plans/2026-09-22-procedure-editor.md`, §9 for every decision
+taken without asking).
+
+**A re-map makes again every step after the first change.** Replay stops at the first changed
+sentence and the walk maps from there to the end, so a change to sentence 3 of 20 re-walks 3–20
+and redoes any input or rename the author made to those steps. Closing it means splicing new
+steps into a graph with branches, and rebuilding only the endings they reach — the riskier change,
+left until an author is actually slowed by it.
+
+**The Write It Out suite was not run in full against the editor.** The nine mortgage scenarios
+were; the fifty prompts were not, for time. Run it before a pilot.
+
+**A walk can take over ten minutes.** One took sixteen during the scenario runs, almost all of it
+waiting on model calls. Nothing is wrong in Orbit's loop; it is what the demo audience will see
+if the walk is started live, so start the demo from a drafted agent.
+
+**`record.test.ts` hangs when the whole worker suite runs together.** It passes alone and with
+`--test-timeout`. Environmental — a browser left open between files — not yet chased.
