@@ -19,54 +19,12 @@
 import { FENCED_IS_DATA, changingVerbOf, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
 import { compileTables } from './decide.ts';
 import type { ModelProvider } from '@orbit/model';
-import { chromium, type Locator, type Page } from 'playwright';
 import { asAssumption, asQuestion, type Note } from './note.ts';
 import { asNumber } from './compare.ts';
 import { capture } from './evidence.ts';
-import { asText, asValueName, calledIn, normaliseName, snapshot, type Seen } from './snapshot.ts';
-import { describeRefusal, resolve as resolveBinding } from './binder.ts';
-
-/**
- * What the walk types into a field, taken from the step it just built.
- *
- * It used to be `inputs[p.value] ?? ''` — the author's example values, looked
- * up by whatever the model called the value. Three of the four kinds of thing
- * a step can carry are not in that map and never could be, so all three typed
- * an empty string:
- *
- *   A password. There is no example for one and there must not be, so the
- *   sign-in typed nothing into a required field, the browser refused the
- *   submit, and the walk sat on the login page for every remaining turn —
- *   mapping the rest of the procedure against a page it had never left.
- *
- *   The registered account, for the same reason.
- *
- *   A literal. A procedure naming the record it works on — "open the file
- *   ML-26-04502" — was looked up as `inputs["ML-26-04502"]`, so the loan
- *   number was never typed and the walk never reached the file.
- *
- * The step already says where its value comes from, and a walk that types what
- * the run will type is the only kind whose bindings mean anything. The
- * password is used here and nowhere else: what the step carries is the
- * credential's name.
- */
-function toType(
-  value: Extract<Step, { kind: 'enter' }>['value'],
-  opts: { inputs: Record<string, string>; signsInAs?: string | null; signsInWith?: string | null },
-): string {
-  if (value.from === 'input') return opts.inputs[value.value] ?? '';
-  if (value.from === 'account') return opts.signsInAs ?? '';
-  if (value.from === 'secret') return opts.signsInWith ?? '';
-  if (value.from === 'literal') {
-    const l = value.literal;
-    return l.type === 'text' ? l.text
-      : l.type === 'number' ? String(l.number)
-      : l.type === 'date' ? l.date
-      : l.type === 'yesNo' ? (l.yesNo ? 'yes' : 'no')
-      : '';
-  }
-  return '';
-}
+import { asText, asValueName, calledIn, normaliseName, type Seen } from './snapshot.ts';
+import { toType, type Box, type OpenLooking } from './looking.ts';
+import { lookInBrowser } from './looking-browser.ts';
 
 /**
  * An ending's summary, from a label a model wrote. An ending with no summary,
@@ -83,26 +41,9 @@ export function endingSummary(label: string | null | undefined): string {
   return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 120)).trimEnd()}…`;
 }
 
-/**
- * Wait for the navigation a click causes, not for the document it is leaving.
- *
- * `waitForLoadState('domcontentloaded')` asks about the *current* document,
- * which has already loaded — so it returned at once, before the click's
- * navigation had begun, and the next turn mapped against the page the walk had
- * just left. On the portal's login page, whose submit handler assigns
- * `window.location.href`, that meant a turn read the brand block off `/login`
- * and called it "the pipeline has loaded": kept as a step, no question raised,
- * and a draft declaring a conclusion it had never reached.
- *
- * The ceiling is what tells a click that navigates apart from one that only
- * redraws. Nothing distinguishes them in advance, and waiting on an address
- * that will never change has to end somewhere. Two seconds is long enough for
- * a local application and short enough that a dozen turns do not stall on it.
- */
-export async function settleAfterActivating(page: Page, wasAt: string): Promise<void> {
-  await page.waitForURL((u) => u.toString() !== wasAt, { timeout: 2000 }).catch(() => undefined);
-  await page.waitForLoadState('domcontentloaded').catch(() => undefined);
-}
+/** Moved with the browser's walk into its connector; still reachable from here. */
+export { settleAfterActivating } from './looking-browser.ts';
+export type { Box } from './looking.ts';
 
 /**
  * Whether an act could possibly have meant this element.
@@ -334,7 +275,6 @@ export interface Turn {
  * made, on the page the picture shows; absent when the element could not be
  * found again or was off the picture.
  */
-export interface Box { x: number; y: number; w: number; h: number }
 
 export interface AuthoredDraft {
   steps: Step[];
@@ -451,6 +391,10 @@ export async function authorFromProcedure(opts: {
   /** Rule sentences whose presses come from the compiled tables: the walk may
    *  read what they name, and may not press on their behalf. */
   ruleSentences?: readonly string[];
+  /** How this application's screens are looked at and acted on while the
+   *  agent is built: its connector's walk session (Orbit 2.2). A browser when
+   *  nothing says otherwise, which is every agent built before connectors. */
+  looking?: OpenLooking;
 }): Promise<AuthoredDraft> {
   const { procedure, origin, startPath, inputs, model } = opts;
   // A ceiling, for the same reason `for each` has one: without it nobody can
@@ -497,8 +441,7 @@ export async function authorFromProcedure(opts: {
    *  controls are, wherever the walk happens to end. */
   let readPage: { seen: Seen[]; url: string } | null = null;
   const toldUndone = new Set<string>();
-  const browser = await chromium.launch();
-  const page: Page = await browser.newPage();
+  const looking = await (opts.looking ?? lookInBrowser)(origin);
   const steps: Step[] = [];
   /** Conditions the procedure puts on a step, kept aside until the conclusions
    *  are known — the path a failed condition takes is a conclusion, and those
@@ -519,15 +462,6 @@ export async function authorFromProcedure(opts: {
   let unchanged = 0;
   let lastFingerprint = '';
   let lastActMoved = false;
-  /**
-   * What has been typed since the last press, so a press never goes ahead on
-   * a form that has lost it. A run types and presses back to back; the walk
-   * waits on a model between them, and a page left for minutes can reload.
-   * Scenario 6: the loan number was in the box on one turn and gone on the
-   * next, so "Open file" said no file matches and the walk never opened the
-   * loan; scenario 8's sign-in did nothing the same way.
-   */
-  const typed: Array<{ field: Locator; value: string }> = [];
   /** Whether confirmed rule tables will be built into the steps: then they, not the walk, decide. */
   const tablesDecide = (opts.tables ?? []).some((t) => t.rows.some((r) => r.when.some((w) => w.is !== 'isAbsent')));
 
@@ -550,12 +484,12 @@ export async function authorFromProcedure(opts: {
   });
 
   try {
-    await page.goto(`${origin}${startPath}`, { waitUntil: 'domcontentloaded' });
+    await looking.open(startPath);
 
     // Mapping again: the steps before the first change are done as they are,
     // with no model, so the walk starts where the change is (Decision 17).
     for (const r of opts.replay?.steps ?? []) {
-      const done = await replayStep(page, r, origin, opts);
+      const done = await looking.replay(r, opts);
       if (!done.ok) {
         questions.push(asQuestion(`Orbit could not replay step ${steps.length + 1} (${r.summary}) to reach what changed: ${done.why} `
           + 'It mapped the procedure again from there.'));
@@ -565,7 +499,7 @@ export async function authorFromProcedure(opts: {
       replayed.push(r.id);
       const from = opts.replay!.provenance[r.id];
       if (from) provenance[r.id] = from;
-      if (r.kind === 'read') readPage = { seen: await snapshot(page), url: page.url() };
+      if (r.kind === 'read') readPage = { seen: await looking.look(), url: looking.place() };
     }
 
     let finished = false;
@@ -576,12 +510,14 @@ export async function authorFromProcedure(opts: {
     // the procedure's own lines need; a few are given back, and no more.
     let ruleRefusals = 0;
     for (let turn = 1; turn <= maxTurns + Math.min(ruleRefusals, 4); turn++) {
-      const seen = await snapshot(page);
+      const seen = await looking.look();
       // The picture of what the model is about to be asked about. Never of a
       // sign-in page: nothing of signing in is captured (Decision 4, item 13).
       let picture: NonNullable<Turn['screenshot']> = seen.some((x) => x.secret)
         ? { withheld: 'A sign-in page: nothing of signing in is captured.' }
-        : await page.screenshot({ type: 'png' }).then(async (bytes) => ({ digest: (await capture(bytes, 'image/png')).digest }))
+        : await looking.picture().then(async (shot): Promise<NonNullable<Turn['screenshot']>> => (shot
+          ? { digest: (await capture(shot.bytes, shot.mediaType)).digest }
+          : { withheld: 'The page could not be captured.' }))
           .catch(() => ({ withheld: 'The page could not be captured.' }));
       // Only an act that is *supposed* to move the page counts towards being
       // stuck. Typing into a field changes nothing visible, and holding that
@@ -591,8 +527,8 @@ export async function authorFromProcedure(opts: {
       // condition adds a line to a panel — was counted as a page that had not
       // changed, and two in a row ended the walk as "stuck" before the file
       // was ever approved.
-      const visible = String(await page.evaluate('document.body ? document.body.innerText : ""').catch(() => ''));
-      const fingerprint = `${page.url()}|${seen.map((s) => s.name).join('|')}|${visible}`;
+      const visible = await looking.visibleText();
+      const fingerprint = `${looking.place()}|${seen.map((s) => s.name).join('|')}|${visible}`;
       if (lastActMoved) {
         unchanged = fingerprint === lastFingerprint ? unchanged + 1 : 0;
         // Compared once, on the turn straight after the press. A turn that
@@ -655,7 +591,7 @@ export async function authorFromProcedure(opts: {
                   // an entry matching this becomes a reference to the
                   // registered account rather than a declared input.
                   `SIGNS IN AS: ${opts.signsInAs || 'nothing registered — do not invent an account'}`,
-                  '', `PAGE (${page.url()}):`, fence('PAGE', asText(withheld(seen.filter((s) => !forRulesOnly(s))))), '', asking].join('\n'),
+                  '', `PAGE (${looking.place()}):`, fence('PAGE', asText(withheld(seen.filter((s) => !forRulesOnly(s))))), '', asking].join('\n'),
         },
         proposal, shapeWith(numbers),
       );
@@ -666,7 +602,7 @@ export async function authorFromProcedure(opts: {
         lastRejection = verdict === 'kept' ? null : why;
         lastRejectionWasRule = false;
         return {
-          turn, shown: { page: page.url(), elements: seen.length, asking },
+          turn, shown: { page: looking.place(), elements: seen.length, asking },
           answered: answered.value, verdict, why,
           model: answered.model, provider: answered.provider,
           tokensIn: answered.tokensIn, tokensOut: answered.tokensOut,
@@ -772,8 +708,7 @@ export async function authorFromProcedure(opts: {
           id: crypto.randomUUID(), kind: 'open', summary: `Open ${startPath} again, after the wait`,
           application: 'app', path: startPath, arrives: { describe: 'the page is showing' }, changesARecord: false,
         });
-        await page.context().clearCookies();
-        await page.goto(`${origin}${startPath}`, { waitUntil: 'domcontentloaded' });
+        await looking.restart(startPath);
         lastActMoved = true;
         noteTurn(record('kept', `step ${steps.length - 1}: waits for a person (${wait.number}), then opens the application again`));
         continue;
@@ -975,7 +910,7 @@ export async function authorFromProcedure(opts: {
       // Where the element is on this turn's picture, so the step can be shown
       // boxed on the page Orbit found it on. Before the act, which may move on.
       if ('digest' in picture) {
-        const box = await boxOf(page, element);
+        const box = await looking.boxOf(element);
         if (box) picture = { ...picture, box };
       }
       steps.push(made);
@@ -984,7 +919,7 @@ export async function authorFromProcedure(opts: {
         if (of && !inputOf.has(made.value.value)) inputOf.set(made.value.value, of);
       }
       if (p.sentence && numbers.includes(p.sentence)) provenance[made.id] = p.sentence;
-      if (made.kind === 'read') readPage = { seen, url: page.url() };
+      if (made.kind === 'read') readPage = { seen, url: looking.place() };
       if (conditions.length > 0) guards.set(made.id, conditions.map((c) => ({ ...c, of: readSoFar.get(c.value)! })));
       noteTurn(record('kept', conditions.length > 0
         ? `step ${steps.length}: ${made.summary}, only if ${conditions.map((c) => `${c.value} ${c.is} ${c.than}`).join(' and ')}`
@@ -994,21 +929,9 @@ export async function authorFromProcedure(opts: {
       // Do it, so the next turn sees the page the next step would meet.
       lastActMoved = p.act === 'activate';
       if (p.act === 'enter' && made.kind === 'enter') {
-        const field = page.getByRole(element.role as 'textbox', { name: element.name, exact: true })
-          .or(page.locator(`[name="${element.binding.name ?? ''}"]`)).first();
-        const value = toType(made.value, opts);
-        await field.fill(value).catch(() => undefined);
-        typed.push({ field, value });
+        await looking.type(element, toType(made.value, opts));
       } else if (p.act === 'activate') {
-        for (const t of typed.splice(0)) {
-          if ((await t.field.inputValue({ timeout: 2000 }).catch(() => null)) !== t.value) {
-            await t.field.fill(t.value, { timeout: 5000 }).catch(() => undefined);
-          }
-        }
-        const wasAt = page.url();
-        await page.getByRole(element.role as 'button', { name: element.name, exact: true }).first()
-          .click().catch(() => undefined);
-        await settleAfterActivating(page, wasAt);
+        await looking.press(element);
       }
     }
 
@@ -1033,10 +956,9 @@ export async function authorFromProcedure(opts: {
     // The page a decision is made on, kept for compiling the rule tables
     // after the endings are settled; the browser does not outlive the walk.
     if (opts.tables?.length) {
-      decisionPage = { seen: await snapshot(page).catch(() => []), url: page.url() };
+      decisionPage = { seen: await looking.look().catch(() => []), url: looking.place() };
     }
-    await page.close();
-    await browser.close();
+    await looking.close();
   }
 
   // Every path has to reach an ending (§4), and the session has none: the
@@ -1337,45 +1259,6 @@ export async function authorFromProcedure(opts: {
     ...(inputOf.get(name) ? { of: inputOf.get(name)! } : {}) }));
 
   return { steps, turns, questions, declaredInputs, provenance, madeAt, replayed };
-}
-
-/** One step of the draft, carried out as it is, for a mapping that starts after it (Decision 17). */
-async function replayStep(page: Page, step: Step, origin: string,
-  typing: { inputs: Record<string, string>; signsInAs?: string | null; signsInWith?: string | null }): Promise<{ ok: true } | { ok: false; why: string }> {
-  if (step.kind === 'open') { await page.goto(`${origin}${step.path}`, { waitUntil: 'domcontentloaded' }); return { ok: true }; }
-  if (step.kind === 'handOff') { await page.context().clearCookies(); return { ok: true }; }
-  const target = step.kind === 'enter' ? step.into : step.kind === 'activate' ? step.control : step.kind === 'read' ? step.region : null;
-  if (!target) return { ok: false, why: `a ${step.kind} step is not replayed.` };
-  if (step.kind === 'activate' && step.changesARecord) return { ok: false, why: 'it changes a record, and replay never does.' };
-  const found = await resolveBinding(page, target.binding as never).catch(() => null);
-  if (!found || found.found !== 'one') {
-    if (step.kind === 'read' && !step.produces.required) return { ok: true };
-    return { ok: false, why: found ? describeRefusal(target.label, found) : `"${target.label}" could not be looked for.` };
-  }
-  if (step.kind === 'enter') await found.locator.fill(toType(step.value, typing));
-  if (step.kind === 'activate') {
-    const wasAt = page.url();
-    await found.locator.click();
-    await settleAfterActivating(page, wasAt);
-  }
-  return { ok: true };
-}
-
-/** Where an element is on the page's picture, as fractions of it (see `Box`). */
-async function boxOf(page: Page, element: Seen): Promise<Box | undefined> {
-  const viewport = page.viewportSize();
-  if (!viewport) return undefined;
-  const found = await resolveBinding(page, element.binding).catch(() => null);
-  const locator = found?.found === 'one' ? found.locator
-    : page.getByRole(element.role as 'button', { name: element.name, exact: true }).first();
-  const b = await locator.boundingBox({ timeout: 1000 }).catch(() => null);
-  if (!b) return undefined;
-  const x = Math.max(0, b.x), y = Math.max(0, b.y);
-  const right = Math.min(viewport.width, b.x + b.width), bottom = Math.min(viewport.height, b.y + b.height);
-  if (right <= x || bottom <= y) return undefined;   // off the picture
-  const round = (n: number) => Math.round(n * 10000) / 10000;
-  return { x: round(x / viewport.width), y: round(y / viewport.height),
-    w: round((right - x) / viewport.width), h: round((bottom - y) / viewport.height) };
 }
 
 /**

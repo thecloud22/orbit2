@@ -65,6 +65,8 @@ export async function authorAndStore(db: PoolClient, opts: {
   model: ModelProvider;
   /** Each turn as it lands, for whoever is watching the screen. */
   onTurn?: (turn: Turn) => void;
+  /** The application's connector, for the walk (Orbit 2.2). A browser when absent. */
+  looking?: import('./looking.ts').OpenLooking;
 }): Promise<Stored | NotStored> {
   // The sign-in the registry holds: what the application calls its password,
   // and the account it signs in as. Both so a sign-in step can refer to what

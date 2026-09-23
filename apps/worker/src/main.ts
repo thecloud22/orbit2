@@ -15,21 +15,7 @@ import { authorAndStore, storeDraft } from './author-store.ts';
 import { sortAndStore, tabulateAndStore } from './sort-store.ts';
 import { answerAndStore } from './chat-store.ts';
 import { record } from './record.ts';
-import { openBrowser } from './surface-browser.ts';
-import type { OpenSurface } from './surface.ts';
-
-/**
- * Which driver each surface is executed through.
- *
- * Decision 5 item 9: a step never names a surface, so the surface is chosen
- * here, at run time, from what the version copied about the application. A
- * table rather than a branch, so that adding the terminal is a line here and a
- * file beside `surface-browser.ts` — which is the whole of what Decision 2
- * asked for when it said a second surface must not reopen the first.
- */
-const SURFACES: Partial<Record<string, OpenSurface>> = {
-  browser: openBrowser,
-};
+import { CONNECTORS } from './connectors.ts';
 
 const pool = new Pool({
   connectionString: process.env['ORBIT_DATABASE_URL']
@@ -184,14 +170,27 @@ async function authorOne(sessionId: string) {
     const { rows: [s] } = await db.query<{
       name: string; procedure: string; application_id: string; start_path: string;
       inputs: Record<string, string>; host: string; into_workflow_id: string | null;
-      scope: string[] | null; hints: Array<{ sentence: string; answer: string }> | null;
+      scope: string[] | null; hints: Array<{ sentence: string; answer: string }> | null; surface: string;
     }>(`SELECT s.name, s.procedure, s.application_id, s.start_path, s.inputs, s.into_workflow_id, s.scope, s.hints,
-               (r.addresses->0->>'host') AS host, (r.addresses->0->>'scheme') AS scheme
+               (r.addresses->0->>'host') AS host, (r.addresses->0->>'scheme') AS scheme, a.surface
           FROM authoring_session s
+          JOIN application a ON a.id = s.application_id
           JOIN application_revision r ON r.application_id = s.application_id
          WHERE s.id = $1
          ORDER BY r.revision DESC LIMIT 1`, [sessionId]);
     if (!s) return;
+
+    // The application's connector (Orbit 2.2, C3–C4). An application this
+    // worker cannot drive is refused in words, never walked as a browser.
+    const connector = CONNECTORS[s.surface];
+    const ready = connector ? await connector.ready() : { ready: false as const, why: `this worker has no ${s.surface} connector` };
+    if (!connector || !ready.ready) {
+      const why = `This application is a ${s.surface} application, and ${'why' in ready ? ready.why : 'its connector is not ready'}.`;
+      await db.query(`UPDATE authoring_session SET status = 'refused', refused = $2, ended_at = now() WHERE id = $1`,
+        [sessionId, JSON.stringify({ describe: why })]);
+      console.log(`  not brought in: ${why}`);
+      return;
+    }
 
     console.log(`  bringing in "${s.name}" against http://${s.host}`);
     // One write at a time, in the order the turns happened — the same
@@ -263,6 +262,7 @@ async function authorOne(sessionId: string) {
       inputs: s.inputs,
       ...(s.into_workflow_id ? { into: s.into_workflow_id } : {}),
       model: modelFromEnvironment(),
+      looking: connector.look,
       onTurn: (t) => {
         console.log(`  turn ${t.turn} ${t.verdict}: ${t.why}`);
         appending = appending.then(() => pool.query(
@@ -457,7 +457,7 @@ async function runOne(runId: string) {
     // Read from the version's own copy, never from the live application: a
     // version that could be made to run somewhere else by editing a row
     // afterwards would not be the fixed thing every run names.
-    const open = SURFACES[app.surface];
+    const open = CONNECTORS[app.surface]?.run;
     if (!open) {
       // Orbit does not guess what it is driving. A version that does not say
       // is refused rather than assumed to be a browser, because assuming is
