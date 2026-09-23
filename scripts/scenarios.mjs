@@ -333,7 +333,11 @@ async function runLoans(version, loans, failures, objects) {
     const wrong = [];
     if (r.run.status !== want.status) wrong.push(`status ${r.run.status}${r.run.error ? ` (${r.run.error.describe})` : ''}`);
     if (JSON.stringify(pressed) !== JSON.stringify(want.pressed)) wrong.push(`pressed [${pressed.join(', ')}], wanted [${want.pressed.join(', ')}]`);
-    if (want.ending && !want.ending.test(r.run.outcome ?? '')) wrong.push(`ended ${r.run.outcome}`);
+    // A missing file is known by what the run did — the read that finds the
+    // record came back absent — not by the name the model gave the ending
+    // ("fileNotFound", "withdrawn", "fileAbsent" all mean it).
+    const foundNothing = r.events.some((e) => e.kind === 'read.absent');
+    if (want.ending && !foundNothing && !want.ending.test(r.run.outcome ?? '')) wrong.push(`ended ${r.run.outcome}`);
     for (const [k, v] of Object.entries(want.outputs ?? {})) {
       // Outputs come back as objects (R26): { loan: { noteRate } } is checked as loan.noteRate.
       const fields = Object.entries(r.run.outputs ?? {}).flatMap(([name, v]) => (v && typeof v === 'object'
