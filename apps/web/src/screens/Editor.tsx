@@ -14,6 +14,7 @@ import { send } from '../fetching.ts';
 import type { Route } from '../router.ts';
 import { Configure } from './Configure.tsx';
 import { Picture } from '../editor/Picture.tsx';
+import { AppChip, Applications } from '../editor/Applications.tsx';
 import { CONFIGURABLE, Confirm } from './Agent.tsx';
 import {
   actsOn, blocksOf, ruleIdsOf, valuesOf, LABEL_INK, LABEL_NAME,
@@ -220,6 +221,10 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
         ))}
       </div>
 
+      {(draft.applications?.length ?? 0) > 0 && (
+        <Applications apps={draft.applications!} busy={busy} closed={Boolean(confirmed)} onEdit={edit} />
+      )}
+
       {refused && <Refusal title="Nothing was changed" blockers={refused} />}
       {u?.walk === 'refused' && u.confirmed_at && (
         <Refusal tone="failed" title="The draft could not be made"
@@ -287,7 +292,7 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
               selectedValues={selectedValues} onChoose={() => choose(b)} onValue={pickValue}
               notes={outstanding.filter((n) => n.sentence && b.sentences.some((s) => s.number === n.sentence))}
               pending={pending} busy={busy} onAnswer={(body) => void edit('answer-question', body)}
-              wordsOpen={wordsOpen} onEdit={edit} />
+              wordsOpen={wordsOpen} onEdit={edit} apps={draft.applications ?? []} />
           ))}
         </article>
 
@@ -405,8 +410,10 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
 }
 
 /** One block of the author's document: the words, the margin, and what Orbit made of them (R2–R6). */
-function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending, busy, onAnswer, wordsOpen, onEdit }: {
+function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending, busy, onAnswer, wordsOpen, onEdit, apps }: {
   block: Block; on: boolean; ruleOf: (n: string | null | undefined) => string | null;
+  /** The agent's applications: a sentence of work shows which it happens on when there are several (Orbit 2.2). */
+  apps: NonNullable<Draft['applications']>;
   busy: boolean; onAnswer: (body: Record<string, unknown>) => void;
   wordsOpen: boolean; onEdit: (verb: string, body: unknown) => Promise<boolean>; selectedValues: Set<string>; onChoose: () => void; onValue: (name: string) => void;
   notes: Draft['notes']; pending: string[];
@@ -452,7 +459,7 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
               </span>
             ))}
           </div>
-          {editing && <WordsEditor sentences={sentences} busy={busy} onEdit={onEdit} onDone={() => setEditing(false)} />}
+          {editing && <WordsEditor sentences={sentences} busy={busy} onEdit={onEdit} onDone={() => setEditing(false)} apps={apps} />}
           {sentences.filter((s) => s.was).map((s) => (
             <div key={s.number} style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 3, lineHeight: 1.45 }}>
               <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{s.number} changed.</span> Was {'“'}{s.was}{'”'}</div>
@@ -479,6 +486,9 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
               {LABEL_NAME[lead.label]}{lead.waits ? ', the run waits' : ''}
               {lead.label === 'rule' && ruleOf(lead.number) && <span style={{ ...mono, color: 'var(--running-ink)' }}> {'\u00b7'} {ruleOf(lead.number)}</span>}</span>
           )}
+          {apps.length > 1 && acting && lead && (lead.application
+            ? <AppChip app={lead.application} quiet />
+            : <Chip state="attention">which application?</Chip>)}
           {changed && <Chip state="running">changed, not mapped</Chip>}
           {sentences.some((s) => s.label && s.labelCurrent === false) && <Chip state="running">sorting</Chip>}
           {noStep && !changed && <Chip state="attention">no step yet</Chip>}
@@ -505,8 +515,9 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
  * overwritten: every change is kept as a revision, and what it said before
  * stays on the record.
  */
-function WordsEditor({ sentences, busy, onEdit, onDone }: {
+function WordsEditor({ sentences, busy, onEdit, onDone, apps }: {
   sentences: Block['sentences']; busy: boolean; onEdit: (verb: string, body: unknown) => Promise<boolean>; onDone: () => void;
+  apps: NonNullable<Draft['applications']>;
 }) {
   const [texts, setTexts] = useState<Record<string, string>>(Object.fromEntries(sentences.map((s) => [s.number, s.text])));
   const [adding, setAdding] = useState('');
@@ -537,6 +548,15 @@ function WordsEditor({ sentences, busy, onEdit, onDone }: {
               {!s.label && <option value="">not placed yet</option>}
               {(['task', 'rule', 'forAPerson', 'background', 'wontDo'] as const).map((l) => <option key={l} value={l}>{LABEL_NAME[l]}</option>)}
             </select>
+            {apps.length > 1 && (s.label === 'task' || s.label === 'rule') && (<>
+              on
+              <select aria-label={`Which application ${s.number} happens on`} value={s.application?.id ?? ''} disabled={busy || s.withdrawn}
+                onChange={(e) => void onEdit('sentence-application', { sentence: s.number, applicationId: e.target.value })}
+                style={{ font: 'inherit', fontSize: 12.5, padding: '3px 5px', border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
+                {!s.application && <option value="">not said yet</option>}
+                {apps.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </>)}
             <span style={{ flexGrow: 1 }} />
             {!s.withdrawn && <button type="button" style={small} disabled={busy} onClick={() => void onEdit('withdraw-sentence', { sentence: s.number }).then((ok) => ok && onDone())}>Take it out</button>}
           </div>

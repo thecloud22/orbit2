@@ -78,7 +78,39 @@ function Enlarged({ artefact, onClose }: { artefact: ArtefactView; onClose: () =
  * anything — it is replaced by the reason, so the next thing the operator does
  * is the thing that would actually help.
  */
-function Controls({ run, again }: { run: RunView['run']; again: () => void }) {
+/** What each application now holds, when a run stopped part-way (Orbit 2.2, C14). */
+type HeldNow = {
+  changed: Array<{ application: string | null; step: number; control: string }>;
+  unknown?: { application: string | null; step: number; control: string };
+};
+
+function PartWay({ partial, checked }: { partial: HeldNow; checked: boolean }) {
+  const where = (a: string | null) => a ?? 'the application';
+  return (
+    <div style={{ border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel)', padding: '14px 18px', margin: '14px 0 0' }}>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>It stopped part-way. This is what each system now holds.</div>
+      <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 8 }}>
+        Nothing spans two systems as one transaction, so Orbit never guesses a reversal.
+      </div>
+      {partial.changed.map((c) => (
+        <div key={`${c.step}`} style={{ display: 'flex', gap: 10, padding: '6px 0', borderTop: '1px solid var(--rule)', fontSize: 13 }}>
+          <span style={{ width: 80, flexShrink: 0, color: 'var(--ink-2)' }}>Changed</span>
+          <span>{where(c.application)}: <b>{c.control}</b> (step {c.step}) was pressed and answered.</span>
+        </div>
+      ))}
+      {partial.unknown && (
+        <div style={{ display: 'flex', gap: 10, padding: '6px 0', borderTop: '1px solid var(--rule)', fontSize: 13 }}>
+          <span style={{ width: 80, flexShrink: 0, color: 'var(--failed-ink)', fontWeight: 600 }}>Unknown</span>
+          <span>{where(partial.unknown.application)}: <b>{partial.unknown.control}</b> (step {partial.unknown.step}) was pressed and no answer came back.
+            {' '}{where(partial.unknown.application)} may hold its effect.
+            {checked ? ' A person has checked it.' : ' A person checks it before this runs again.'}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Controls({ run, again, checked }: { run: RunView['run']; again: () => void; checked: boolean }) {
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
 
@@ -97,7 +129,11 @@ function Controls({ run, again }: { run: RunView['run']; again: () => void }) {
 
   const inFlight = run.status === 'queued' || run.status === 'running';
   const failure = run.error?.kind as ErrorKind | undefined;
-  const canRetry = run.status === 'failed' && failure !== undefined && isRetryable(failure);
+  // A press whose answer never came back holds retry and re-run until a
+  // person says they have looked (C15): running it blind could do it twice.
+  const unknown = (run.error as unknown as { partial?: HeldNow } | null)?.partial?.unknown;
+  const held = run.status === 'failed' && Boolean(unknown) && !checked;
+  const canRetry = run.status === 'failed' && failure !== undefined && isRetryable(failure) && !held;
 
   const button = (label: string, verb: string, kind: 'plain' | 'strong' = 'plain') => (
     <button type="button" disabled={busy} onClick={() => void control(verb)}
@@ -118,8 +154,15 @@ function Controls({ run, again }: { run: RunView['run']; again: () => void }) {
         </span>
       )}
 
+      {held && button(`I have checked ${unknown?.application ?? 'the application'}`, 'checked', 'strong')}
+      {held && (
+        <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+          {unknown!.control} was pressed on {unknown!.application ?? 'the application'} and never answered. Look there for this record first:
+          running it again before anyone has could do it twice.
+        </span>
+      )}
       {canRetry && button(`Retry step ${run.error?.step ?? ''}`.trim(), 'retry', 'strong')}
-      {run.status === 'failed' && !canRetry && (
+      {run.status === 'failed' && !canRetry && !held && (
         <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
           {/* A check that did not hold is not a fault, so "repair the
               workflow" is advice about something that is not broken — and
@@ -133,7 +176,7 @@ function Controls({ run, again }: { run: RunView['run']; again: () => void }) {
         </span>
       )}
 
-      {!inFlight && button('Run it again', 'rerun')}
+      {!inFlight && !held && button('Run it again', 'rerun')}
       {run.rerun_of_reference && (
         <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
           This run is a re-run of <a href={`/runs/${run.rerun_of_reference}`}
@@ -276,7 +319,10 @@ function LoadedRun({ data, again }: { data: RunView; again: () => void }) {
       </header>
       <div style={{ height: 2, background: 'var(--ink)' }} />
 
-      <Controls run={run} again={again} />
+      <Controls run={run} again={again} checked={events.some((e) => e.kind === 'run.checked')} />
+      {(run.error as unknown as { partial?: HeldNow } | null)?.partial && (
+        <PartWay partial={(run.error as unknown as { partial: HeldNow }).partial} checked={events.some((e) => e.kind === 'run.checked')} />
+      )}
 
       {run.status === 'waitingForAPerson' && (
         <WaitingForYou run={run} steps={steps as unknown as Array<Record<string, unknown>>} again={again} />

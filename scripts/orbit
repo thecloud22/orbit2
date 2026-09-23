@@ -35,6 +35,9 @@ SERVICES=(
   # aria-label and no name attribute. It was started by hand while that was
   # being fixed, which meant it was only ever running for whoever remembered.
   "legacy|3040|demo/legacy-portal|npx tsx src/main.ts"
+  # The green-screen twin of the mortgage portal, over TN3270 (Orbit 2.2):
+  # the same nine files, driven through the s3270 emulator.
+  "servicing|3271|demo/terminal-portal|npx tsx src/servicing-main.ts"
 )
 
 # Postgres is not in that list because it is not one of ours to own: it may be
@@ -171,7 +174,8 @@ status() {
         printf "  %-7s DOWN      see %s\n" "$name" "var/log/worker.log"
       fi
     elif listening "$port"; then
-      printf "  %-7s http://localhost:%s\n" "$name" "$port"
+      if [ "$name" = "servicing" ]; then scheme=tn3270; else scheme=http; fi
+      printf "  %-7s $scheme://localhost:%s\n" "$name" "$port"
     else
       printf "  %-7s DOWN      see var/log/%s.log\n" "$name" "$name"
     fi
