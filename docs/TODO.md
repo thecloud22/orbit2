@@ -373,3 +373,12 @@ programs depends on their text, repeatably. Whether the fault is the compiler's 
 build is unknown: Hercules could not run under x86 emulation on this Mac. The application is one
 small program per screen, and the build retries a few layouts.
 
+
+## Values named in the author's words are held on `2.5/values-in-your-words`, not on `main`
+
+Built 2026-09-23 (`docs/plans/2026-09-23-values-in-your-words.md` and Decision 20, both on the
+branch) and held for review: it adds a record (0032) and changes what the tables, the walk and the
+compile trust. **Without it, `main`** has no way for an author to say which value a phrase means.
+The column a rule compares is named by one model and linked to a read by another, and neither
+guess is shown anywhere. Asked for as "reference variable names in Rules… insert {BR1} here?".
+Tokens in the text and rule references were rejected there, with the reasons.
