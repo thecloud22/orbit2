@@ -37,12 +37,15 @@ class Tn3270Surface implements Surface {
         ...(found.unexpectedScreen ? { kind: 'terminalScreenUnexpected' as const } : {}) };
     }
     const session = this.#session;
+    // Where it was found, which on a screen written line by line is where the
+    // host has got to, not where the step was mapped.
+    const at = b.what === 'key' ? b : found.field;
     const it: Found = {
       by: 'structural',
-      fill: (value) => session.type(b, value),
+      fill: (value) => session.type(at, value),
       activate: async () => { if (found.key) await session.press(found.key); },
-      text: async () => (b.what === 'value' || b.what === 'field' ? session.read(b) : found.field.text.trim()),
-      where: async () => pixelsOf(screen, b),
+      text: async () => (b.what === 'value' || b.what === 'field' ? session.read(at) : found.field.text.trim()),
+      where: async () => pixelsOf(screen, at),
     };
     return { found: 'one', it };
   }

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --experimental-strip-types src/main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test --test-concurrency=1 src/*.test.ts"
+    "test": "node --experimental-strip-types --test --test-concurrency=1 src/*.test.ts src/tn3270/*.test.ts"
   },
   "dependencies": {
     "@orbit/contract": "file:../../packages/contract",

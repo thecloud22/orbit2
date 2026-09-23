@@ -74,3 +74,66 @@ test('an otherwise that presses nothing does not end a procedure that goes on af
   const pmi = kinds.indexOf('ATTACH PMI');
   assert.equal(kinds[pmi + 1], 'APPROVE', 'after attaching PMI the file is still approved');
 });
+
+test('a rule that asks for something to be done, and names nothing to press, is asked about, not built', async () => {
+  const { compileTables } = await import('./decide.ts');
+  const id = () => crypto.randomUUID();
+  const steps = [
+    { id: id(), kind: 'open', summary: 'open', application: 'app', path: '/', arrives: { describe: 'open' }, changesARecord: false },
+    { id: id(), kind: 'read', summary: 'LTV', region: { label: 'LTV', binding: {} },
+      produces: { name: 'loanToValue', label: 'LTV', type: 'number', required: true } },
+    { id: id(), kind: 'end', summary: 'approved', outcome: 'approved', publishes: [] },
+  ] as never[];
+  // Scenario 6: the model answered "attach PMI" with no control, both times.
+  const model = {
+    provider: 'test', model: 'test',
+    async propose() {
+      return { value: { columns: [{ column: 'loanToValue', value: 'loanToValue' }], words: [], why: 'x',
+        actions: [{ action: 'Attach the condition requiring private mortgage insurance.', controls: [], ends: false, outcome: null, label: null }] },
+        model: 'test', provider: 'test', tokensIn: 1, tokensOut: 1, tokensCached: 0, tokensCacheWritten: 0, costMicros: 1 };
+    },
+  };
+  const compiled = await compileTables({
+    tables: [{ question: 'What conditions do we attach?', columns: [{ name: 'loanToValue', label: 'LTV', readBy: '1.8' }],
+      rows: [{ when: [{ column: 'loanToValue', is: 'isMoreThan', value: '80' }], then: 'Attach the condition requiring private mortgage insurance.', sentence: '1.9' }],
+      otherwise: null, sentences: ['1.9'] }],
+    steps, provenance: {}, order: ['1.8', '1.9'],
+    seen: [{ index: 1, what: 'button', role: 'button', name: 'Require private mortgage insurance', binding: {} as never }],
+    pageUrl: '/loan', model: model as never, firstTurn: 1,
+  });
+  assert.ok(!compiled.steps.some((x) => x.kind === 'branch'), 'no row that matches and does nothing');
+  assert.ok(compiled.questions.some((q) => /names nothing to press/.test(q.body)), JSON.stringify(compiled.questions.map((q) => q.body)));
+});
+
+test('an action a step of the walk already does may press nothing (scenario 11)', async () => {
+  const { compileTables } = await import('./decide.ts');
+  const id = () => crypto.randomUUID();
+  const steps = [
+    { id: id(), kind: 'open', summary: 'open', application: 'app', path: '/', arrives: { describe: 'open' }, changesARecord: false },
+    { id: id(), kind: 'read', summary: 'LTV', region: { label: 'LTV', binding: {} },
+      produces: { name: 'loanToValue', label: 'LTV', type: 'number', required: true } },
+    { id: id(), kind: 'activate', summary: 'Approve file', control: { label: 'Approve file', binding: {} }, then: { describe: 'x' }, changesARecord: true },
+    { id: id(), kind: 'end', summary: 'approved', outcome: 'approved', publishes: [] },
+  ] as never[];
+  const model = {
+    provider: 'test', model: 'test',
+    async propose() {
+      return { value: { columns: [{ column: 'loanToValue', value: 'loanToValue' }], words: [], why: 'x',
+        actions: [
+          { action: 'Attach the condition requiring private mortgage insurance.', controls: ['Require private mortgage insurance'], ends: false, outcome: null, label: null },
+          { action: 'Approve the file.', controls: [], ends: false, outcome: null, label: null },
+        ] }, model: 'test', provider: 'test', tokensIn: 1, tokensOut: 1, tokensCached: 0, tokensCacheWritten: 0, costMicros: 1 };
+    },
+  };
+  const compiled = await compileTables({
+    tables: [{ question: 'What happens to the file?', columns: [{ name: 'loanToValue', label: 'LTV', readBy: '1.8' }],
+      rows: [{ when: [{ column: 'loanToValue', is: 'isMoreThan', value: '80' }], then: 'Attach the condition requiring private mortgage insurance.', sentence: '1.9' }],
+      otherwise: { then: 'Approve the file.', sentence: '1.10' }, sentences: ['1.9', '1.10'] }],
+    steps, provenance: {}, order: ['1.8', '1.9', '1.10'],
+    seen: [{ index: 1, what: 'button', role: 'button', name: 'Require private mortgage insurance', binding: {} as never }],
+    pageUrl: '/loan', model: model as never, firstTurn: 1,
+  });
+  assert.ok(compiled.steps.some((x) => x.kind === 'branch'), 'the table is built');
+  assert.equal(compiled.steps.filter((x) => x.kind === 'activate' && x.summary === 'Approve file').length, 1, 'approved once, by the walk\'s step');
+  assert.ok(!compiled.questions.some((q) => /names nothing to press/.test(q.body)));
+});

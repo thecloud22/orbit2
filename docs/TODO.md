@@ -305,11 +305,8 @@ does this; the tables screen shows the comparison, so a person can see it.
 
 Built on `2.2/connectors` (`docs/plans/2026-09-23-green-screen-connector.md`, Decisions 18 and 19).
 
-**No real mainframe has been driven.** The connector is proved against the repo's own loan-servicing
-twin, through the independent s3270 emulator. The next check is Hercules running MVS 3.8j (TK5) in
-Docker, with KICKS for CICS-style screens: real VTAM sign-on, real keyboard-lock behaviour, real
-EBCDIC. TN3270E LU names, code pages and TLS are carried to s3270 but only TN3270 without TLS has
-been exercised.
+**~~No real mainframe has been driven.~~** Done in 2.3. See the next section. TN3270E LU names, code
+pages other than 037, and TLS are still carried to s3270 without having been exercised.
 
 **A rule's action is presses only.** "Attach PMI" on a green screen that wants PF9, then S beside
 the condition, then Enter cannot be compiled from a table; the twin attaches a condition with one
@@ -331,3 +328,45 @@ the fix, and belongs with pilot-readiness item 6 (once-only semantics).
 
 **5250 (IBM i) and character terminals** are out of scope (Decision 18); they would be further
 connectors behind the same six parts.
+
+## The faithful host: what 2.3 knowingly leaves undone
+
+Built on `2.3/faithful-host` (`docs/plans/2026-09-23-faithful-host.md`, `demo/mvs/README.md`).
+
+**A run does not check that the application accepted a record-changing press.** This is the one
+that matters, and it is a design question, not a fix. Scenario 13's first run reported ML-26-04488
+*approved*, and the scenario passed. But the host had answered ATTACH PMI and APPROVE with
+`LSV206E LOAN ALREADY N UNDERWRITING` (the loan file was corrupt; see the plan), and the loan was
+unchanged on MVS. The run's pictures show it: APPROVE's before and after pictures are the same
+image. The twin always accepted, so this never surfaced. The spec (§ the connector table) says a
+terminal connector asserts expected screens after keys. Even that would not catch a refusal made on
+the same screen. The mainframe convention would: a message ID ending in `E` (`LSV206E`, `IKJ56420I`
+is informational) after a record-changing press. The web connector has the same gap: a Save that
+the page answers with an error. The scenario runner now reads the loan file on MVS after the runs
+(`readLoans()`), so a refusal fails the test. Orbit itself still reports success.
+
+**~~Authoring changes records.~~** Decided (Karthik, 2026-09-23): agents are built and tested in
+UAT, then moved to production, so the walk's presses land in UAT. The walk still presses every key
+it maps, APPROVE included, and on a real host that stays: scenario 13's walk approved its example
+loan.
+
+**Signing off.** Orbit has no sign-off sequence: a run's connection simply closes. On this host
+that ends the TSO session, because VTAM is told and TSO ends a dropped session (RECONLIM=0). A z/OS
+site that holds dropped sessions for a reconnect would refuse the next run's sign-on as IN USE
+until the hold ran out. A CICS region signs a dropped terminal off itself.
+
+**Text written before a `***` pause is never shown to the walk.** The connector passes TSO's pauses
+itself, so a message TSO writes and then pauses on (an error during sign-on, say) scrolls past.
+It is in the run's evidence only if a picture was taken on the paused screen, and none is.
+
+**A screen that never goes quiet** (KICKS's dynamic good-morning screen, a clock) makes each press
+wait the full 15-second ceiling before it is treated as settled.
+
+**TN3270E, TLS, LU names, code pages other than 037, RACF, CICS TS:** none of these is on this
+host. They need a z/OS system (IBM zD&T or Wazi, or a partner's test LPAR).
+
+**The COBOL compiler abends S0C4 on some programs** (IKFCBL01, page-translation exception). Which
+programs depends on their text, repeatably. Whether the fault is the compiler's or Hercules's ARM
+build is unknown: Hercules could not run under x86 emulation on this Mac. The application is one
+small program per screen, and the build retries a few layouts.
+

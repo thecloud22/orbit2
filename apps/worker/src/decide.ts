@@ -18,7 +18,7 @@
  *    and carries on to the next row;
  *  - `otherwise` runs after the rows, unless a row ended the procedure.
  */
-import { FENCED_IS_DATA, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
+import { FENCED_IS_DATA, changingVerbOf, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
 import { comparisonFor, couldMean, endingSummary, readable, withheld, type Turn } from './author.ts';
 import { asAssumption, asQuestion, type Note } from './note.ts';
@@ -213,6 +213,18 @@ export async function compileTables(opts: {
             // Pressing a control that carries out a rule's action is taken to
             // commit something: approving, declining and referring all do.
             changesARecord: true });
+        }
+        // An action that asks for something to be done on the page must press
+        // something, unless a step the walk already made does it. Scenario 6:
+        // "attach the condition requiring private mortgage insurance" came
+        // back naming no control, and was built as a row that matched every
+        // condominium over 80% and did nothing to it. Scenario 11's "otherwise,
+        // approve the file" names nothing, rightly: the walk's own "Approve
+        // file" step follows the table, and pressing it here as well left that
+        // step unreachable.
+        const doneByAStep = steps.some((x) => x.kind === 'activate' && changingVerbOf(x.summary) && lineAsksFor(x.summary, action));
+        if (a.controls.length === 0 && changingVerbOf(action) && !doneByAStep) {
+          problems.push(`"${action}" asks for something to be done on the page, and names nothing to press`);
         }
         const outcome = a.outcome && /^[a-z][a-zA-Z0-9]*$/.test(a.outcome) ? a.outcome : null;
         if (a.ends && !outcome) problems.push(`"${action}" ends the procedure and has no name for that conclusion`);
