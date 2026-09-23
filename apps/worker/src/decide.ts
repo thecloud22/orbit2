@@ -20,7 +20,7 @@
  */
 import { FENCED_IS_DATA, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
 import type { ModelProvider } from '@orbit/model';
-import { comparisonFor, couldMean, readable, withheld, type Turn } from './author.ts';
+import { comparisonFor, couldMean, endingSummary, readable, withheld, type Turn } from './author.ts';
 import { asAssumption, asQuestion, type Note } from './note.ts';
 import { asText, calledIn, normaliseName, type Seen } from './snapshot.ts';
 
@@ -209,7 +209,7 @@ export async function compileTables(opts: {
         }
         const outcome = a.outcome && /^[a-z][a-zA-Z0-9]*$/.test(a.outcome) ? a.outcome : null;
         if (a.ends && !outcome) problems.push(`"${action}" ends the procedure and has no name for that conclusion`);
-        acts.set(action, { steps: made, ends: a.ends, outcome: outcome ?? '', label: a.label?.trim() || action });
+        acts.set(action, { steps: made, ends: a.ends, outcome: outcome ?? '', label: endingSummary(a.label?.trim() || action) });
       }
 
       // Every condition must become a comparison Orbit can carry out.

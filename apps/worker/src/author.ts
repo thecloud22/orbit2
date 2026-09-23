@@ -69,6 +69,21 @@ function toType(
 }
 
 /**
+ * An ending's summary, from a label a model wrote. An ending with no summary,
+ * or one past the 200 characters a step's summary takes, sank the whole draft:
+ * scenario 7 was refused outright ("The end at step 20: Orbit did not work out
+ * its summary"). The person names the conclusion when they confirm, so a
+ * missing label says so and a long one is cut at a word.
+ */
+export function endingSummary(label: string | null | undefined): string {
+  const said = (label ?? '').replace(/\s+/g, ' ').trim();
+  if (!said) return 'Finish — this conclusion has no name yet';
+  if (said.length <= 200) return said;
+  const cut = said.slice(0, 199);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 120)).trimEnd()}…`;
+}
+
+/**
  * Wait for the navigation a click causes, not for the document it is leaving.
  *
  * `waitForLoadState('domcontentloaded')` asks about the *current* document,
@@ -1193,7 +1208,7 @@ export async function authorFromProcedure(opts: {
       const guarded = steps.slice(guardedAt);
 
       const passEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
+        summary: endingSummary(said?.whenFound.label),
         outcome: found || 'unnamed', publishes: published };
       // The path that leaves before the guarded steps can only report what
       // was read before them.
@@ -1207,7 +1222,7 @@ export async function authorFromProcedure(opts: {
       // all, and the author was sent to fix something Orbit had built.
       const beforeGuard = new Set(prefix.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : [])));
       const failEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said?.whenAbsent?.label || 'Finish — this conclusion has no name yet',
+        summary: endingSummary(said?.whenAbsent?.label),
         outcome: absent || 'unnamedOtherwise',
         publishes: published.filter((v) => beforeGuard.has(v)) };
 
@@ -1264,7 +1279,7 @@ export async function authorFromProcedure(opts: {
       // second did not hold — and a rejected answer still leaves a workflow
       // that works, with a question against it.
       steps.push({ id: crypto.randomUUID(), kind: 'end',
-        summary: said?.whenFound.label || 'Finish — this conclusion has no name yet',
+        summary: endingSummary(said?.whenFound.label),
         outcome: found || 'unnamed', publishes: published });
       if (refusal) {
         noteTurn(record('rejected', refusal));
@@ -1280,9 +1295,9 @@ export async function authorFromProcedure(opts: {
       // was there. Orbit writes the branch and both endings; the model supplied
       // four words and pointed at a value.
       const foundEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said.whenFound.label, outcome: found, publishes: published };
+        summary: endingSummary(said.whenFound.label), outcome: found, publishes: published };
       const absentEnd: Step = { id: crypto.randomUUID(), kind: 'end',
-        summary: said.whenAbsent.label, outcome: absent,
+        summary: endingSummary(said.whenAbsent.label), outcome: absent,
         // Only what was read before the value that was not there: the rest was
         // never reached on this path, and publication refuses an ending that
         // claims a value its path never produced.

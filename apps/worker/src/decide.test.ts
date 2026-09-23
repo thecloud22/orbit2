@@ -30,3 +30,12 @@ test('only a yes/no field is compared as the page writes it', async () => {
   assert.deepEqual(asThePageWritesIt('first-time buyer', 'first time', 'Yes'), { word: 'first-time buyer', taken: false, unsure: true },
     'an answer the field cannot give is not taken, and is asked');
 });
+
+test('an ending is always named within what a step summary takes', async () => {
+  const { endingSummary } = await import('./author.ts');
+  assert.equal(endingSummary(''), 'Finish — this conclusion has no name yet');
+  assert.equal(endingSummary(null), 'Finish — this conclusion has no name yet');
+  assert.equal(endingSummary('  Referred to a senior underwriter  '), 'Referred to a senior underwriter');
+  const long = endingSummary('The file was referred to a senior underwriter because '.repeat(6));
+  assert.ok(long.length <= 200 && long.endsWith('…'), long);
+});
