@@ -25,7 +25,9 @@ const API = process.env.ORBIT_API ?? 'http://localhost:4000';
 const DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'testing', 'scenarios');
 
 const DECISIONS = ['Require private mortgage insurance', 'Require additional reserves', 'Require flood insurance',
-  'Require two years of tax returns', 'Approve file', 'Refer to senior underwriter', 'Decline file'];
+  'Require two years of tax returns', 'Approve file', 'Refer to senior underwriter', 'Decline file',
+  // The same decisions on the loan-servicing green screen (Orbit 2.2), and the swivel chair's two record-changing acts.
+  'APPROVE', 'REFER', 'ATTACH PMI', 'ATTACH RESERVES', 'ATTACH FLOOD INS', 'ATTACH TAX RETURNS', 'SUBMIT', 'Save'];
 
 const SCENARIOS = {
   1: {
@@ -112,6 +114,19 @@ const SCENARIOS = {
       'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
     },
   },
+  // Orbit 2.2: scenario 9's own words, attached to the loan-servicing green
+  // screen. The same written procedure, the same conclusions, through TN3270.
+  10: {
+    name: 'Scenario 10: scenario 9, on the green screen',
+    procedure: readFileSync(join(DIR, '09-live-edit.txt'), 'utf8'),
+    example: 'ML-26-04561',
+    on: 'servicing',
+    loans: {
+      'ML-26-04561': { status: 'succeeded', pressed: ['ATTACH PMI', 'APPROVE'] },
+      'ML-26-04471': { status: 'succeeded', pressed: ['APPROVE'] },
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+    },
+  },
   // Published, run, then changed on the page: the threshold is edited in
   // place, Orbit maps only that sentence, and version 2 decides differently.
   9: {
@@ -146,6 +161,21 @@ const SCENARIOS = {
   },
 };
 
+/**
+ * The loan-servicing green screen, registered the way a person registers it in
+ * Admin if it is not already (Orbit 2.2): TN3270 to the practice twin.
+ */
+async function servicing(apps) {
+  const known = apps.find((a) => !a.retired_at && a.surface === 'terminal' && a.addresses.some((x) => x.host === 'localhost:3271'));
+  if (known) return known;
+  const made = await call('/api/applications', { name: 'Meridian Home Lending — Loan Servicing', surface: 'terminal',
+    addresses: [{ host: 'tn3270://localhost:3271' }], signInAs: 'ADMIN', credentialValue: 'practice',
+    terminal: { codePage: 'cp037', model: '3278-2' } });
+  if (!made.body.id) throw new Error(`the green screen could not be registered: ${made.body.why ?? made.status}`);
+  const again = (await call('/api/applications')).body.applications ?? [];
+  return again.find((a) => a.id === made.body.id);
+}
+
 async function call(path, body) {
   const res = await fetch(API + path, body === undefined ? {}
     : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -169,18 +199,31 @@ async function run(key) {
   const apps = (await call('/api/applications')).body.applications ?? [];
   // The portal, registered with an account to sign in as: a procedure that
   // signs in cannot be walked against a registration without one.
-  const app = apps.find((a) => !a.retired_at && a.sign_in_as && a.addresses.some((x) => x.host === 'localhost:4101'));
-  if (!app) throw new Error('no application at localhost:4101 registered with an account to sign in as');
+  const portal = apps.find((a) => !a.retired_at && a.sign_in_as && a.addresses.some((x) => x.host === 'localhost:4101'));
+  if (!portal) throw new Error('no application at localhost:4101 registered with an account to sign in as');
+  const app = s.on === 'servicing' ? await servicing(apps) : portal;
   console.log(`  against "${app.name}", signing in as ${app.sign_in_as}`);
 
   const brought = await call('/api/understanding', {
-    name: `${s.name} (${new Date().toISOString().slice(0, 16)})`, applicationId: app.id, startPath: '/login',
+    name: `${s.name} (${new Date().toISOString().slice(0, 16)})`, applicationId: app.id, startPath: s.on === 'servicing' ? '/' : '/login',
     inputs: { loanNumber: s.example },
     ...(s.pdf ? { pdf: readFileSync(s.pdf).toString('base64') } : { procedure: s.procedure }),
   });
   if (brought.status !== 202) throw new Error(`bring-in refused: ${brought.body.why}`);
   const W = brought.body.id;
   await until(() => call(`/api/workflows/${W}/understanding`).then((r) => r.body), (u) => u.status === 'sorted' || u.status === 'refused', 'the sort');
+
+  // The swivel chair (Orbit 2.2): the agent works on the green screen too, as
+  // an author adds it on the page; the sort then places each line of work.
+  if (s.attach === 'servicing') {
+    const green = await servicing(apps);
+    const attached = await call(`/api/workflows/${W}/attach-application`, { applicationId: green.id, startPath: '/' });
+    if (attached.status !== 200) return [`attaching ${green.name} was refused: ${attached.body.why}`];
+    await until(() => call(`/api/workflows/${W}/understanding`).then((r) => r.body), (u) => u.status === 'sorted' || u.status === 'refused', 'the placing');
+    const doc = (await call(`/api/workflows/${W}`)).body.document ?? [];
+    const work = doc.filter((x) => !x.withdrawn && (x.label === 'task' || x.label === 'rule'));
+    console.log(`  placed: ${work.map((x) => `${x.number} ${x.application?.name === green.name ? 'green screen' : x.application ? 'web' : '?'}`).join(', ')}`);
+  }
 
   const confirmed = await call(`/api/workflows/${W}/understood`, {});
   const fail = (why) => { console.log(`  FAIL  ${why}`); return [why]; };
@@ -282,7 +325,8 @@ async function runLoans(version, loans, failures, objects) {
 
 // `node scripts/scenarios.mjs 5 6 7` runs those; `demo` runs the demo set, 5 to 9.
 const asked = process.argv.slice(2);
-const which = asked[0] === 'demo' ? ['5', '6', '7', '8', '9'] : asked.length ? asked : Object.keys(SCENARIOS);
+const which = asked[0] === 'demo' ? ['5', '6', '7', '8', '9'] : asked[0] === 'green' ? ['10', '11', '12']
+  : asked.length ? asked : Object.keys(SCENARIOS);
 let failed = 0;
 for (const k of which) failed += (await run(k)).length;
 console.log(failed ? `\n${failed} FAILED` : '\nall passed');
