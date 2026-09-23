@@ -171,6 +171,9 @@ function Controls({ run, again, checked }: { run: RunView['run']; again: () => v
           {failure === 'checkFailed'
             ? 'Retrying would compare the same values and stop in the same place, which is what the check is for. '
               + 'Run it again with a different record, or change the check.'
+            : failure === 'changeRefused'
+            ? 'The application said no, and asking again asks the same question, so there is no retry. '
+              + 'Look at what it answered: run it again once the record allows it, or with a different record.'
             : `A ${failure ?? 'failure'} will not come out differently on a second attempt, so there is no retry. `
               + 'Repair the workflow, or run it again from the start.'}
         </span>

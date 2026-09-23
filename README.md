@@ -260,7 +260,7 @@ node scripts/scenarios.mjs green    # scenarios 10 to 12
 | 10 | Scenario 9's words, on the green screen | the same procedure and conclusions, through TN3270 |
 | 11 | Existing-loan check | a decision on the web from a borrower's loans on the green screen |
 | 12 | Board the approved loan | the swivel chair: web → green screen → web, with a code table |
-| 13 | Scenario 9's words, on a real mainframe | MVS 3.8j on Hercules: VTAM and TSO sign-on, CICS screens under KICKS, loans in VSAM, each loan's result read back from MVS |
+| 13 | Scenario 9's words, on a real mainframe | MVS 3.8j on Hercules: VTAM and TSO sign-on, CICS screens under KICKS, loans in VSAM, each loan's result read back from MVS; run again, the host refuses what is done and each run stops there |
 
 Orbit never decodes the 3270 stream itself: it drives the s3270 emulator, one
 per session. See Decisions 18 and 19.
@@ -288,7 +288,7 @@ proves and what still needs a z/OS system are set out in `demo/mvs/README.md`.
 ## Working on it
 
 ```
-pnpm test        # 416 tests: contract, model, procedure, api, worker, and the green-screen twin
+pnpm test        # 425 tests: contract, model, procedure, api, worker, and the green-screen twin
 pnpm typecheck
 ```
 

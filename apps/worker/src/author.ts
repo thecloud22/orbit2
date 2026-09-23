@@ -1107,7 +1107,22 @@ export async function authorFromProcedure(opts: {
       if (p.act === 'enter' && made.kind === 'enter') {
         await looking.type(element, toType(made.value, typing()));
       } else if (p.act === 'activate') {
-        await looking.press(element);
+        const answer = await looking.press(element);
+        // What the application answered a record-changing press (Orbit 2.4).
+        // Accepted, its words are what the step expects once done. Refused,
+        // the rest of the walk is being mapped on the screen the refusal left
+        // — an example already approved, a condition already attached — and a
+        // person is asked before anything is published from it.
+        if (answer && made.kind === 'activate' && made.changesARecord) {
+          if (answer.accepted && answer.said) made.then = { describe: `the application answers "${answer.said}"`.slice(0, 200) };
+          if (!answer.accepted) {
+            questions.push({ ...asQuestion(`Orbit pressed ${made.control.label} while building this agent, and the application did not do it: `
+              + (answer.why === 'refused' ? `it answered "${answer.said}".` : 'the screen did not change.')
+              + ' The steps after it were mapped on the screen that refusal left. Check that the example is a record this can be'
+              + ' done to, then map it again. A run stops here the same way.'),
+              sentence: p.sentence, atTurn: turn, stepId: made.id });
+          }
+        }
       }
     }
 

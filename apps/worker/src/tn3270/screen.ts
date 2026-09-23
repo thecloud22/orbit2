@@ -7,6 +7,7 @@
  * binding a published step finds its field by again.
  */
 import type { Seen } from '../snapshot.ts';
+import type { Answered } from '../surface.ts';
 
 export interface Field {
   /** Where the field's attribute byte sits. */
@@ -337,6 +338,56 @@ export function locate(screen: Screen, b: TerminalBinding): Located {
     return { found: 'none', why: `"${b.label}" has moved: it was at row ${b.row + 1}, column ${b.column + 1}, and is now at row ${x.row + 1}, column ${x.column + 1}.` };
   }
   return { found: 'one', field, ...(b.key ? { key: b.key } : {}) };
+}
+
+/**
+ * A message as IBM's systems write them: a component prefix, a number, and a
+ * letter saying how severe it is (Orbit 2.4). `LSV206E LOAN ALREADY APPROVED`,
+ * `IKJ56700A ENTER USERID -`, `IEF236I ALLOC. FOR …`. A CICS message with no
+ * letter (`DFHAC2206`) says nothing about severity and is not one.
+ */
+const MESSAGE = /^([A-Z@#$]{3}[A-Z0-9@#$]{0,5}?\d{3,5})([IWESTAD])(?=\s|$)/;
+/**
+ * The letters that mean the host did not do it: an error, a severe or
+ * terminating one, or a request for action or a decision first. I (for
+ * information) and W (a warning, and it carried on) mean it did.
+ */
+const NOT_DONE = new Set(['E', 'S', 'T', 'A', 'D']);
+
+/** Every message on the screen, where its field begins with one. */
+function messagesOf(screen: Screen): Array<{ at: string; text: string; severity: string }> {
+  return screen.fields.flatMap((f) => {
+    const text = f.text.trim();
+    const m = MESSAGE.exec(text);
+    return m ? [{ at: `${f.row}:${f.column}`, text: text.replace(/\s+/g, ' '), severity: m[2]! }] : [];
+  });
+}
+
+/**
+ * Whether the host did what a key asked (Orbit 2.4), from the screen before
+ * it and the screen after. No model: the host's own words, by the convention
+ * every IBM message follows.
+ *
+ * - A message written by this answer, or else any still on the screen, whose
+ *   letter says it was not done: refused, in the host's words.
+ * - Nothing on the screen changed at all: the host answered the key and did
+ *   nothing with it.
+ * - Otherwise it was accepted, and what it said, if anything, is kept.
+ *
+ * An application whose messages carry no such letter is judged only by
+ * whether its screen changed. Used only for a key that changes a record: a
+ * key that looks something up may be answered "not found", and that is a
+ * path, not a refusal.
+ */
+export function answerOf(before: Screen, after: Screen): Answered {
+  const earlier = new Set(messagesOf(before).map((m) => `${m.at}|${m.text}`));
+  const all = messagesOf(after);
+  const fresh = all.filter((m) => !earlier.has(`${m.at}|${m.text}`));
+  const latest = fresh.length ? fresh : all;
+  const refusal = latest.find((m) => NOT_DONE.has(m.severity));
+  if (refusal) return { accepted: false, why: 'refused', said: refusal.text };
+  if (before.lines.join('\n') === after.lines.join('\n')) return { accepted: false, why: 'unchanged' };
+  return fresh[0] ? { accepted: true, said: fresh[0].text } : { accepted: true };
 }
 
 /** The s3270 command a key is pressed with. */

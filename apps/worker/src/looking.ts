@@ -12,6 +12,7 @@
  */
 import type { Step } from '@orbit/contract';
 import type { Seen } from './snapshot.ts';
+import type { Answered } from './surface.ts';
 
 /** Where an element sits on a picture, as fractions of its width and height. */
 export interface Box { x: number; y: number; w: number; h: number }
@@ -42,8 +43,9 @@ export interface Looking {
    *  walk carries on and the next look shows what happened. */
   type(element: Seen, value: string): Promise<void>;
   /** Press it and wait until the screen has settled. Anything typed since the
-   *  last press that the screen has lost is typed again first. */
-  press(element: Seen): Promise<void>;
+   *  last press that the screen has lost is typed again first. What the
+   *  application answered, where the connector can tell (Orbit 2.4). */
+  press(element: Seen): Promise<Answered | void>;
   /** After a wait for a person: a new session, opened at this path. */
   restart(path: string): Promise<void>;
   /** A step of an earlier draft, carried out as it is (Decision 17). */

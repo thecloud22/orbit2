@@ -43,7 +43,7 @@ class Tn3270Surface implements Surface {
     const it: Found = {
       by: 'structural',
       fill: (value) => session.type(at, value),
-      activate: async () => { if (found.key) await session.press(found.key); },
+      activate: async () => (found.key ? session.press(found.key) : undefined),
       text: async () => (b.what === 'value' || b.what === 'field' ? session.read(at) : found.field.text.trim()),
       where: async () => pixelsOf(screen, at),
     };

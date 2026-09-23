@@ -9,7 +9,7 @@ import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { locate, parseBuffer, seenOf, type Screen, type TerminalBinding } from './screen.ts';
+import { answerOf, locate, parseBuffer, seenOf, type Screen, type TerminalBinding } from './screen.ts';
 
 const screen = (name: string): Screen => {
   const { rows, cursor } = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', `${name}.json`), 'utf8'));
@@ -79,4 +79,33 @@ test('dot leaders are a label, as on CUA panels', () => {
   const row = `SF(c0=e0) ${hex('Loan number . . .')} SF(c0=c0) ${hex('            ')} SF(c0=e0) ${hex(' '.repeat(80 - 31))}`;
   const s = parseBuffer([row, `SF(c0=e0) ${hex(' '.repeat(79))}`], { row: 0, column: 18 });
   assert.deepEqual(fields(s), ['Loan number']);
+});
+
+// Orbit 2.4: whether the host did what a record-changing key asked, from its
+// own words. LSV20 under KICKS, before PF5, after it, and after it again.
+
+test('an approval the host accepted: the message it wrote, which says it was done', () => {
+  const answer = answerOf(screen('tk5-lsv20-detail'), screen('tk5-lsv20-approved'));
+  assert.deepEqual(answer, { accepted: true, said: 'LSV205I LOAN APPROVED' });
+});
+
+test('an approval the host refused: an E message, though the screen is otherwise the same', () => {
+  const answer = answerOf(screen('tk5-lsv20-approved'), screen('tk5-lsv20-refused'));
+  assert.deepEqual(answer, { accepted: false, why: 'refused', said: 'LSV206E LOAN ALREADY APPROVED' });
+});
+
+test('refused again, with the screen unchanged: still the refusal, in its words', () => {
+  const answer = answerOf(screen('tk5-lsv20-refused'), screen('tk5-lsv20-refused'));
+  assert.deepEqual(answer, { accepted: false, why: 'refused', said: 'LSV206E LOAN ALREADY APPROVED' });
+});
+
+test('a key the host answered and did nothing with: unchanged, and a message left from before is not an answer', () => {
+  assert.deepEqual(answerOf(screen('tk5-lsv20-detail'), screen('tk5-lsv20-detail')), { accepted: false, why: 'unchanged' });
+  assert.deepEqual(answerOf(screen('tk5-lsv20-approved'), screen('tk5-lsv20-approved')), { accepted: false, why: 'unchanged' });
+});
+
+test('a screen that moved on with no message is accepted; a screen code and a loan number are not messages', () => {
+  // VTAM's logon screen to LSV20: another screen, and nothing on it reads as
+  // a message — not LSV20, not ML-26-04502, not "MVS 3.8j Level 8505".
+  assert.deepEqual(answerOf(screen('tk5-vtam-logon'), screen('tk5-lsv20-detail')), { accepted: true });
 });

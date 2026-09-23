@@ -333,17 +333,20 @@ connectors behind the same six parts.
 
 Built on `2.3/faithful-host` (`docs/plans/2026-09-23-faithful-host.md`, `demo/mvs/README.md`).
 
-**A run does not check that the application accepted a record-changing press.** This is the one
-that matters, and it is a design question, not a fix. Scenario 13's first run reported ML-26-04488
-*approved*, and the scenario passed. But the host had answered ATTACH PMI and APPROVE with
-`LSV206E LOAN ALREADY N UNDERWRITING` (the loan file was corrupt; see the plan), and the loan was
-unchanged on MVS. The run's pictures show it: APPROVE's before and after pictures are the same
-image. The twin always accepted, so this never surfaced. The spec (§ the connector table) says a
-terminal connector asserts expected screens after keys. Even that would not catch a refusal made on
-the same screen. The mainframe convention would: a message ID ending in `E` (`LSV206E`, `IKJ56420I`
-is informational) after a record-changing press. The web connector has the same gap: a Save that
-the page answers with an error. The scenario runner now reads the loan file on MVS after the runs
-(`readLoans()`), so a refusal fails the test. Orbit itself still reports success.
+**A run does not check that the application accepted a record-changing press.** ~~On a green
+screen~~: done in 2.4 (`docs/plans/2026-09-23-answer-check.md`). The host's answer is read from its
+message IDs (`LSV206E` refused, `LSV205I` done) or from an unchanged screen, and a refused change
+stops the run as `changeRefused`, in the host's words. Scenario 13's first run on 2.3 had reported
+ML-26-04488 *approved* while MVS refused it. It now runs its loans twice, and the second round
+stops at the refusal. Still open:
+- **The web**, item 2, being designed: a Save that the page answers with an error still counts as
+  done. The design discussed: a record-changing press with no later read that a condition or an
+  output uses raises a note, and the author's own check line ("check the status reads Approved")
+  becomes a read and a branch, with no model at run time.
+- **A green-screen application whose messages carry no severity letter** is judged only by whether
+  its screen changed.
+- **A refusal the procedure expects** ("if it is already approved, say so") cannot be branched on:
+  the run stops at the press.
 
 **~~Authoring changes records.~~** Decided (Karthik, 2026-09-23): agents are built and tested in
 UAT, then moved to production, so the walk's presses land in UAT. The walk still presses every key

@@ -4,7 +4,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { withoutUnit } from './decide.ts';
+import { withoutArticle, withoutUnit } from './decide.ts';
 
 test('a number written with its unit is compared as the number', () => {
   assert.equal(withoutUnit('6 months', 'number'), '6');
@@ -13,6 +13,15 @@ test('a number written with its unit is compared as the number', () => {
   assert.equal(withoutUnit('43%', 'number'), '43%');
   assert.equal(withoutUnit('6 months', 'text'), '6 months', 'text is compared as written');
   assert.equal(withoutUnit('X', 'number'), 'X', 'nothing numeric, nothing changed');
+});
+
+test('a kind of thing named with "a" or "an" is compared as the page writes the kind', () => {
+  assert.equal(withoutArticle('a condominium', 'text'), 'condominium');
+  assert.equal(withoutArticle('An ARM', 'text'), 'ARM');
+  assert.equal(withoutArticle('The Villages', 'text'), 'The Villages', 'a name is kept');
+  assert.equal(withoutArticle('A', 'text'), 'A', 'a grade is a value');
+  assert.equal(withoutArticle('Adjustable', 'text'), 'Adjustable');
+  assert.equal(withoutArticle('a 30-year term', 'number'), 'a 30-year term', 'only text');
 });
 
 test('only a yes/no field is compared as the page writes it', async () => {

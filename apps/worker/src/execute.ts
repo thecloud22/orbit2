@@ -248,11 +248,31 @@ async function runStep(ctx: Ctx, step: Step, position: number,
       // say whether the record changed, and the run says exactly that (C14).
       const pressing = { application: ctx.surface.application?.() ?? null, step: position, control: step.control.label };
       if (step.changesARecord) ctx.pressing = pressing;
-      await found.it.activate();
+      const answer = await found.it.activate();
       await ctx.surface.settle();
-      if (step.changesARecord) { ctx.changed.push(pressing); ctx.pressing = null; }
-      await event(ctx, attemptId, 'activated', { control: step.control.label, by: found.by });
+      // Whether the application did it (Orbit 2.4). A run used to count a
+      // press as a change the moment the screen settled, so a mainframe that
+      // refused both decisions — LSV206E LOAN ALREADY APPROVED — ran as
+      // approved. Where the surface can tell, a record-changing press it
+      // refused stops the run in the application's own words; it changed
+      // nothing, so it is neither a change nor unknown. Only such a press: a
+      // lookup answered "not found" is a path the procedure takes.
+      const refused = step.changesARecord && answer && !answer.accepted ? answer : null;
+      if (step.changesARecord) {
+        ctx.pressing = null;
+        if (!refused) ctx.changed.push(pressing);
+      }
+      await event(ctx, attemptId, 'activated', { control: step.control.label, by: found.by,
+        ...(answer ? { answer: answer.accepted ? 'accepted' : answer.why, ...(answer.said ? { said: answer.said } : {}) } : {}) });
       await screenshot(ctx, attemptId);
+      if (refused) {
+        const where = pressing.application ?? 'The application';
+        const halt: Halt = { kind: 'changeRefused', step: position,
+          describe: refused.why === 'refused'
+            ? `${where} did not accept ${step.control.label}: it answered "${refused.said}". Nothing was changed by this step.`
+            : `${where} answered ${step.control.label} without changing anything on the screen, so it did not do it.` };
+        await end('halted', halt); return halt;
+      }
       await end('ok'); return 'ok';
     }
     case 'read': {
