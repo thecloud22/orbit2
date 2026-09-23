@@ -1,7 +1,7 @@
 # Orbit 2.4: a refused change is said
 
 **Status:** asked for on 2026-09-23. Karthik: "1 is fine", then "item 1 proceed". Built on the
-branch `2.4/answer-check`. Main is not touched until Karthik says so. §9 logs every decision taken
+branch `2.4/answer-check` and merged to main on 2026-09-23 ("commit and merge"). §9 logs every decision taken
 while building.
 
 ## 1. Why
