@@ -12,3 +12,5 @@ export {
   NOT_FOUND_MESSAGE,
   type ServiceRequest,
 } from './screens';
+export { SERVICE_DESK, type HostedApplication } from './host';
+export { LOAN_SERVICING, accountFor, findLoan, PROGRAM_CODES, type ServicingState } from './servicing';

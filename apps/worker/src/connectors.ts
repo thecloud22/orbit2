@@ -13,7 +13,10 @@
  */
 import type { OpenLooking } from './looking.ts';
 import { lookInBrowser } from './looking-browser.ts';
+import { lookAtGreenScreen } from './looking-tn3270.ts';
 import { openBrowser } from './surface-browser.ts';
+import { openGreenScreen } from './surface-tn3270.ts';
+import { s3270Ready } from './tn3270/s3270.ts';
 import type { OpenSurface } from './surface.ts';
 
 export interface Connector {
@@ -27,4 +30,7 @@ export interface Connector {
 
 export const CONNECTORS: Partial<Record<string, Connector>> = {
   browser: { run: openBrowser, look: lookInBrowser, ready: async () => ({ ready: true }) },
+  // A green screen over TN3270, through the s3270 emulator (C5). A worker
+  // without s3270 says so, and drives every web agent exactly as before (C4).
+  terminal: { run: openGreenScreen, look: lookAtGreenScreen, ready: async () => s3270Ready() },
 };

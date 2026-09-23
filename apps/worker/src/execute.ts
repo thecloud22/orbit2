@@ -135,13 +135,14 @@ async function runStep(ctx: Ctx, step: Step, position: number,
 
   const bind = async () => {
     const b = binding(step);
-    if (!b) return { refusal: 'this step names nothing on the page' } as const;
+    if (!b) return { refusal: 'this step names nothing on the page', many: false } as const;
     const found = await ctx.surface.find(b);
     if (found.found === 'one') return { it: found.it, by: found.it.by } as const;
     const label = step.kind === 'enter' ? step.into.label
       : step.kind === 'activate' ? step.control.label
       : step.kind === 'read' ? step.region.label : 'the control';
-    return { refusal: describeRefusal(label, found), many: found.found === 'many' } as const;
+    return { refusal: describeRefusal(label, found), many: found.found === 'many',
+      ...(found.found === 'none' && found.kind ? { kind: found.kind } : {}) } as const;
   };
 
   switch (step.kind) {
@@ -155,7 +156,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
     case 'enter': {
       const found = await bind();
       if ('refusal' in found) {
-        const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
+        const halt = { kind: ('kind' in found && found.kind) || (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
       const ref = step.value;
@@ -203,7 +204,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
     case 'activate': {
       const found = await bind();
       if ('refusal' in found) {
-        const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
+        const halt = { kind: ('kind' in found && found.kind) || (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
       // Two pictures, because one cannot do both jobs. The control is boxed on
@@ -232,7 +233,7 @@ async function runStep(ctx: Ctx, step: Step, position: number,
           await event(ctx, attemptId, 'read.absent', { value: name });
           await end('ok'); return 'ok';
         }
-        const halt = { kind: (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
+        const halt = { kind: ('kind' in found && found.kind) || (found.many ? 'controlAmbiguous' : 'controlNotFound') as ErrorKind, step: position, describe: found.refusal };
         await end('halted', halt); return halt;
       }
       const text = (await found.it.text()).trim();

@@ -1,7 +1,29 @@
 import { createServer, type Server, type Socket } from 'node:net';
 
 import { AID, encodeScreen, parseInbound, type ScreenDefinition } from './datastream';
-import { advance, lookupScreen, render, type SessionScreen } from './screens';
+import { advance, render, type SessionScreen } from './screens';
+
+/**
+ * What a practice host serves: a state machine over screens.
+ *
+ * The service desk was the only one, wired in. The loan-servicing twin
+ * (Orbit 2.2) is a second, so the host takes the application it serves; the
+ * telnet and 3270 handling below is shared and unchanged.
+ */
+export interface HostedApplication<S> {
+  /** The state a new session opens on. */
+  start(): S;
+  render(state: S): ScreenDefinition;
+  /** The next state, given the key pressed (its AID byte) and the fields sent. */
+  advance(state: S, aid: number, fields: ReadonlyMap<string, string>): S;
+}
+
+/** The service desk, as it always was. */
+export const SERVICE_DESK: HostedApplication<SessionScreen> = {
+  start: () => ({ kind: 'lookup' }),
+  render,
+  advance: (state, aid, fields) => advance(state, keyOf(aid), fields),
+};
 
 /**
  * A TN3270 host, in the narrow slice this portal needs to be automatable.
@@ -49,6 +71,8 @@ export interface PortalOptions {
   readonly host?: string;
   /** Diagnostics. Silent by default so a test suite stays readable. */
   readonly log?: (message: string) => void;
+  /** What it serves. The service desk unless told otherwise. */
+  readonly application?: HostedApplication<unknown>;
 }
 
 /** Doubles every 0xFF, which is how a data byte of 0xFF travels under telnet. */
@@ -81,9 +105,9 @@ function keyOf(aid: number): 'enter' | 'pf3' | 'other' {
  * record until `IAC EOR` closes it. Splitting the two would mean buffering a
  * command that arrived mid-record, which is exactly the case that breaks hosts.
  */
-function serve(socket: Socket, log: (message: string) => void): void {
-  let showing: SessionScreen = { kind: 'lookup' };
-  let sent: ScreenDefinition = lookupScreen();
+function serve<S>(socket: Socket, log: (message: string) => void, application: HostedApplication<S>): void {
+  let showing: S = application.start();
+  let sent: ScreenDefinition = application.render(showing);
   let record: number[] = [];
 
   const send = (bytes: readonly number[]): void => {
@@ -91,7 +115,7 @@ function serve(socket: Socket, log: (message: string) => void): void {
   };
 
   const sendScreen = (): void => {
-    sent = render(showing);
+    sent = application.render(showing);
     send([...escape(encodeScreen(sent)), IAC, EOR]);
     log(`sent ${sent.name}`);
   };
@@ -129,10 +153,9 @@ function serve(socket: Socket, log: (message: string) => void): void {
 
   const handleRecord = (bytes: readonly number[]): void => {
     const read = parseInbound(Uint8Array.from(bytes), sent);
-    const key = keyOf(read.aid);
-    const next = advance(showing, key, read.fields);
+    const next = application.advance(showing, read.aid, read.fields);
 
-    log(`received ${key} -> ${next.kind}`);
+    log(`received ${read.aid.toString(16)} -> ${application.render(next).name}`);
     showing = next;
     sendScreen();
   };
@@ -221,7 +244,7 @@ export function startTerminalPortal(options: PortalOptions = {}): Promise<Termin
     // Asking for the terminal type is how a 3270 negotiation starts, and the
     // host is the one that asks.
     socket.write(Buffer.from([IAC, DO, OPT_TERMINAL_TYPE]));
-    serve(socket, log);
+    serve(socket, log, (options.application ?? SERVICE_DESK) as HostedApplication<unknown>);
   });
 
   return new Promise((resolve, reject) => {

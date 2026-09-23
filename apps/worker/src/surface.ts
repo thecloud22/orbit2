@@ -72,7 +72,10 @@ export interface Found {
  */
 export type Sought =
   | { found: 'one'; it: Found }
-  | { found: 'none'; by: Strategy; why?: string }
+  | { found: 'none'; by: Strategy; why?: string;
+      /** Set only when "not found" is really a different failure: a green
+       *  screen showing another screen than the one mapped (Orbit 2.2). */
+      kind?: 'terminalScreenUnexpected' }
   | { found: 'many'; count: number; by: Strategy };
 
 export interface Surface {
