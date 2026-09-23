@@ -7,7 +7,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
-  checkLabelling, checkRuleTables, coverage, nextPartKey, sentenceNumber, unreadColumns, type SentenceLabel,
+  checkLabelling, checkRuleTables, coverage, nextPartKey, numberTables, sentenceNumber, unreadColumns, type RuleTable, type SentenceLabel,
 } from './procedure.ts';
 
 const entry = (sentence: string, label = 'task') => ({ sentence, label, reason: 'says to do it', basis: 'stated' });
@@ -100,4 +100,34 @@ test('every problem with a set of tables is named', () => {
     'table 1 row 1 compares "age" with nothing',
     'rule sentence 1.5 is in no table',
   ]);
+});
+
+// The M1 draft on 23 Sep: its tables made again after 1.10, 1.12 and 1.14 were
+// removed. Counted by place, BR2 meant three different things in eight minutes.
+const made = (question: string, sentences: string[]) => ({ ...aTable({ question, sentences }) }) as RuleTable;
+
+test('a rule keeps its number when the tables are made again, and a gone number is not reused', () => {
+  const first = numberTables([made('What credit floor applies?', ['1.11']),
+    made('What action is taken on the file?', ['1.12', '1.13', '1.14', '1.15', '1.16', '1.20'])], [], 0);
+  assert.deepEqual(first.map((t) => t.id), [1, 2]);
+
+  const second = numberTables([made('What is the credit floor for FHA files?', ['1.11']),
+    made('When should a flood-insurance condition be attached?', ['1.13', '1.15']),
+    made('What is the file decision?', ['1.14', '1.16', '1.20'])], first, 2);
+  // The file decision shares three sentences with BR2, the flood rule two: the file decision keeps it.
+  assert.deepEqual(second.map((t) => t.id), [1, 3, 2]);
+
+  const third = numberTables([made('What credit floor applies?', ['1.11']),
+    made('What action is taken on the file?', ['1.13', '1.15', '1.16', '1.20'])], second, 3);
+  // Two sentences shared with BR2 and two with BR3: the lower number, on a tie.
+  assert.deepEqual(third.map((t) => t.id), [1, 2]);
+
+  const fourth = numberTables([made('What credit floor applies?', ['1.11']),
+    made('What action is taken on the file?', ['1.13', '1.15', '1.16', '1.20']),
+    made('Who reviews a jumbo file?', ['A.1'])], third, 3);
+  assert.deepEqual(fourth.map((t) => t.id), [1, 2, 4], 'BR3 went at the third making and is not given again');
+});
+
+test('a set kept before numbers were stored is numbered by place', () => {
+  assert.deepEqual(unreadColumns([aTable() as RuleTable, { ...aTable(), id: 7 } as RuleTable & { id: number }]).map((c) => c.table), [1, 7]);
 });

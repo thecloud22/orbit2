@@ -44,6 +44,8 @@ export interface Note {
 }
 
 export interface RuleTable {
+  /** The number it is known by, kept when the tables are made again. Absent on a set kept before numbers were. */
+  id?: number;
   question: string;
   columns: Array<{ name: string; label: string; readBy: string | null }>;
   rows: Array<{ when: Array<{ column: string; is: string; value: string | null }>; then: string; sentence: string }>;
@@ -258,13 +260,13 @@ export const words = (n: string) => {
 
 /**
  * An identifier for every business rule (BR1, BR2…), and for each of its rows
- * (BR1.1, BR1.2…), in the order the tables stand. Derived from the confirmed
- * tables each time, and frozen in a version with them.
+ * (BR1.1, BR1.2…). The table's number is kept with it when the tables are
+ * made again; a set kept before that is numbered by place.
  */
 export function ruleIdsOf(tables: RuleTable[] | null) {
   const ofSentence = new Map<string, string>();
   (tables ?? []).forEach((t, i) => {
-    const table = `BR${i + 1}`;
+    const table = `BR${t.id ?? i + 1}`;
     for (const n of t.sentences) if (!ofSentence.has(n)) ofSentence.set(n, table);
     t.rows.forEach((r, j) => {
       const shared = t.rows.filter((x) => x.sentence === r.sentence).length > 1;

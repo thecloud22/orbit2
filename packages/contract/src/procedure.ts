@@ -197,11 +197,47 @@ export function checkRuleTables(
   return problems.length ? { ok: false, problems } : { ok: true, tables: parsed.data };
 }
 
+/** A rule table as kept, with the number it is known by: BR1, and BR1.1 for its first row. */
+export type NumberedRuleTable = RuleTable & { id: number };
+
+/** A kept table's number. Sets kept before numbers were stored are numbered by their place. */
+export const tableNumber = (t: RuleTable & { id?: number }, i: number): number => t.id ?? i + 1;
+
+/**
+ * Numbers a set of tables just made so that a rule keeps its number when the
+ * tables are made again. They are made again after every sort and relabel,
+ * and a number counted from a table's place moved with every removed
+ * sentence: in one draft, BR2 was the file decision, then the flood rule a
+ * minute later, then the file decision again.
+ *
+ * A table takes the number of the earlier table it shares the most rule
+ * sentences with, the lower number on a tie, and each number goes to one
+ * table. A table that shares none takes the next number never given, so a
+ * number that has gone is never reused for a different rule.
+ */
+export function numberTables(
+  tables: readonly RuleTable[], before: ReadonlyArray<{ id: number; sentences: readonly string[] }>, highest: number,
+): NumberedRuleTable[] {
+  const pairs = tables.flatMap((t, i) => before.map((b) => ({
+    i, id: b.id, shared: t.sentences.filter((n) => b.sentences.includes(n)).length,
+  }))).filter((p) => p.shared > 0)
+    .sort((a, b) => b.shared - a.shared || a.id - b.id || a.i - b.i);
+  const given = new Map<number, number>();
+  const taken = new Set<number>();
+  for (const p of pairs) {
+    if (given.has(p.i) || taken.has(p.id)) continue;
+    given.set(p.i, p.id);
+    taken.add(p.id);
+  }
+  let next = Math.max(highest, ...before.map((b) => b.id), 0);
+  return tables.map((t, i) => ({ ...t, id: given.get(i) ?? ++next }));
+}
+
 /** Columns no task reads: each one blocks confirmation until it is resolved. */
-export function unreadColumns(tables: readonly RuleTable[]):
+export function unreadColumns(tables: ReadonlyArray<RuleTable & { id?: number }>):
   Array<{ table: number; question: string; label: string; sentences: string[] }> {
   return tables.flatMap((t, i) => t.columns.filter((c) => c.readBy === null)
-    .map((c) => ({ table: i + 1, question: t.question, label: c.label, sentences: t.sentences })));
+    .map((c) => ({ table: tableNumber(t, i), question: t.question, label: c.label, sentences: t.sentences })));
 }
 
 /**
