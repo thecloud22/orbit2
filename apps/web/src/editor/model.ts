@@ -38,7 +38,7 @@ export interface Step {
 export interface Note {
   id: string; step_id?: string | null; kind: string; body: string; answer: string | null; resolved_at: string | null;
   sentence?: string | null; at_turn?: number | null; picture?: Shot | null;
-  candidates?: Array<{ name: string; what: string }> | null; action?: string | null;
+  candidates?: Array<{ name: string; what: string; label?: string }> | null; action?: string | null;
 }
 
 export interface RuleTable {

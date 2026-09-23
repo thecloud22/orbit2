@@ -63,6 +63,7 @@ createServer(async (req, res) => {
         if (verb === 'move-step')   { const r = await actions.moveStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'delete-step') { const r = await actions.deleteStep(id, body); return json(res, r.status, r.body); }
         if (verb === 'insert-step') { const r = await actions.insertStep(id, body); return json(res, r.status, r.body); }
+        if (verb === 'answer-question') { const r = await actions.answerQuestion(id, body); return json(res, r.status, r.body); }
         if (verb && ['declare-input', 'change-input', 'remove-input', 'set-step-value', 'rename-value',
           'set-value-object', 'set-publishes'].includes(verb)) {
           const r = await actions.valueEdit(verb, id, body); return json(res, r.status, r.body);

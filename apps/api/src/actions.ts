@@ -19,6 +19,7 @@ import { backToDraft, discardDraft, deleteStep, editStep, insertStep, moveStep }
 import { editApplication, registerApplication } from './applications.ts';
 import { describeBlocker } from '@orbit/contract';
 import { sendMessage, takeOffer } from './chat.ts';
+import { answerQuestion } from './questions.ts';
 import { changeInput, declareInput, removeInput, renameValue, setPublishes, setStepValue, setValueObject } from './values.ts';
 import { addNextPart, bringInToUnderstand, confirmUnderstanding, relabel, setMoreToCome } from './understanding.ts';
 
@@ -35,6 +36,11 @@ const inTransaction = async <T>(work: (db: never) => Promise<T>): Promise<T> => 
 };
 
 export const actions = {
+  async answerQuestion(workflowId: string, body: unknown) {
+    const result = await inTransaction((db) => answerQuestion(db, workflowId, body));
+    return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
+  },
+
   /** The editor's value edits (plan R8–R13, R26): each a refusal with its reason, or done. */
   async valueEdit(verb: string, workflowId: string, body: unknown) {
     const edits = { 'declare-input': declareInput, 'change-input': changeInput, 'remove-input': removeInput,

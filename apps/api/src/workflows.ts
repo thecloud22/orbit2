@@ -70,8 +70,10 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
     return { ...r, missing: 'incomplete' in parsed ? parsed.missing : [] };
   });
   const { rows: notes } = await db.query(
-    `SELECT id, step_id, kind, body, answer, resolved_at FROM workflow_note
-      WHERE workflow_id = $1 ORDER BY created_at`, [id]);
+    `SELECT n.id, n.step_id, n.kind, n.body, n.answer, n.resolved_at, n.sentence, n.at_turn, n.candidates, n.action,
+            c.screenshot AS picture
+       FROM workflow_note n LEFT JOIN model_call c ON c.workflow_id = n.workflow_id AND c.turn = n.at_turn
+      WHERE n.workflow_id = $1 ORDER BY n.created_at`, [id]);
   const { rows: turns } = await db.query(
     `SELECT turn, provider, model, shown, answered, verdict, why, tokens_in, tokens_out, cost_micros, screenshot
        FROM model_call WHERE workflow_id = $1 ORDER BY turn`, [id]);

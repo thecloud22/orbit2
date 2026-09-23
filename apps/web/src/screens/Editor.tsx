@@ -13,6 +13,7 @@ import { Chip, EmptyState, Row, type Emptiness } from '../ui.tsx';
 import { send } from '../fetching.ts';
 import type { Route } from '../router.ts';
 import { Configure } from './Configure.tsx';
+import { Picture } from '../editor/Picture.tsx';
 import { CONFIGURABLE, Confirm } from './Agent.tsx';
 import {
   actsOn, blocksOf, ruleIdsOf, valuesOf, LABEL_INK, LABEL_NAME,
@@ -230,7 +231,7 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
             <DocumentBlock key={b.id} block={b} on={tab === 'steps' && !allSteps && block?.id === b.id} ruleOf={rules.ofSentence}
               selectedValues={selectedValues} onChoose={() => choose(b)} onValue={pickValue}
               notes={outstanding.filter((n) => n.sentence && b.sentences.some((s) => s.number === n.sentence))}
-              pending={pending} />
+              pending={pending} busy={busy} onAnswer={(body) => void edit('answer-question', body)} />
           ))}
         </article>
 
@@ -347,8 +348,9 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
 }
 
 /** One block of the author's document: the words, the margin, and what Orbit made of them (R2–R6). */
-function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending }: {
-  block: Block; on: boolean; ruleOf: (n: string | null | undefined) => string | null; selectedValues: Set<string>; onChoose: () => void; onValue: (name: string) => void;
+function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending, busy, onAnswer }: {
+  block: Block; on: boolean; ruleOf: (n: string | null | undefined) => string | null;
+  busy: boolean; onAnswer: (body: Record<string, unknown>) => void; selectedValues: Set<string>; onChoose: () => void; onValue: (name: string) => void;
   notes: Draft['notes']; pending: string[];
 }) {
   const { sentences, lead, steps } = block;
@@ -409,7 +411,7 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
           {sentences.some((s) => s.suspicious) && (
             <div style={{ fontSize: 12, color: 'var(--failed-ink)', marginTop: 4 }}>Reads like instructions to a machine. Orbit treats it as text and does not follow it.</div>
           )}
-          {notes.map((n) => <InlineQuestion key={n.id} note={n} />)}
+          {notes.map((n) => <InlineQuestion key={n.id} note={n} busy={busy} onAnswer={onAnswer} />)}
         </div>
         <div style={{ width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, paddingTop: 3 }}>
           {lead && lead.label && lead.label !== 'background' && (
@@ -432,12 +434,60 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
   );
 }
 
-/** A question about this sentence, on the page under it (R6, R19). */
-function InlineQuestion({ note }: { note: Draft['notes'][number] }) {
+/** A question about this sentence, on the page under it, with the picture Orbit was looking at (R6, R19). */
+function InlineQuestion({ note, busy, onAnswer }: {
+  note: Draft['notes'][number]; busy: boolean; onAnswer: (body: Record<string, unknown>) => void;
+}) {
+  const [words, setWords] = useState('');
+  const button: React.CSSProperties = { font: 'inherit', fontSize: 12.5, textAlign: 'left', borderRadius: 3, padding: '5px 9px',
+    background: 'var(--panel)', border: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink)' };
+  const answer = (body: Record<string, unknown>) => onAnswer({ noteId: note.id, ...body });
   return (
-    <div style={{ marginTop: 8, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)', borderRadius: 5, padding: '10px 13px' }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--attention-ink)', marginBottom: 3 }}>Orbit is asking</div>
-      <div style={{ fontSize: 13, lineHeight: 1.5 }}>{note.body}</div>
+    <div onClick={(e) => e.stopPropagation()}
+      style={{ marginTop: 9, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)', borderRadius: 5, padding: '11px 13px',
+        display: 'flex', gap: 14, alignItems: 'flex-start', cursor: 'default' }}>
+      <div style={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--attention-ink)' }}>Orbit is asking</div>
+        <div style={{ fontSize: 13, lineHeight: 1.5 }}>{note.body}</div>
+        {note.action === 'pickElement' && (note.candidates ?? []).length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {(note.candidates ?? []).map((c, i) => (
+              <button key={c.name + i} type="button" style={button} disabled={busy} onClick={() => answer({ candidate: c.name })}>
+                <span style={{ fontWeight: 700 }}>{i + 1}</span> {'\u00b7'} the {c.what} {c.label ? `labelled \u201c${c.label}\u201d, showing ` : 'named '}{'\u201c'}{c.name}{'\u201d'}
+              </button>
+            ))}
+          </div>
+        )}
+        {note.action === 'pickElement' && (
+          <button type="button" style={{ ...button, borderStyle: 'dashed', background: 'transparent' }} disabled={busy}
+            onClick={() => answer({ notOnPage: true })}>It is not on this page</button>
+        )}
+        {note.action === 'useInput' && (
+          <div><button type="button" style={button} disabled={busy} onClick={() => answer({})}>Make it an input, with this value as its example</button></div>
+        )}
+        {note.action === 'giveExample' && (
+          <form onSubmit={(e) => { e.preventDefault(); if (words.trim()) answer({ example: words }); }} style={{ display: 'flex', gap: 6 }}>
+            <input aria-label="An example value" value={words} onChange={(e) => setWords(e.target.value)} placeholder="ML-26-04471"
+              style={{ font: 'inherit', fontSize: 13, padding: '5px 8px', border: '1px solid var(--rule-2)', borderRadius: 3, flexGrow: 1 }} />
+            <button type="submit" style={button} disabled={busy || !words.trim()}>Use this example</button>
+          </form>
+        )}
+        {note.action !== 'useInput' && note.action !== 'giveExample' && (
+          <form onSubmit={(e) => { e.preventDefault(); if (words.trim()) answer({ answer: words }); }} style={{ display: 'flex', gap: 6 }}>
+            <input aria-label="Your answer" value={words} onChange={(e) => setWords(e.target.value)}
+              placeholder={note.action === 'pickElement' ? 'Or say what it is' : 'Your answer'}
+              style={{ font: 'inherit', fontSize: 13, padding: '5px 8px', border: '1px solid var(--rule-2)', borderRadius: 3, flexGrow: 1 }} />
+            <button type="submit" style={button} disabled={busy || !words.trim()}>Answer</button>
+          </form>
+        )}
+        {note.action === 'pickElement' && <div style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>Orbit maps this sentence again with your answer when you press Map changes.</div>}
+      </div>
+      {note.picture && (
+        <div style={{ width: 210, flexShrink: 0 }}>
+          <Picture shot={note.picture} size="large" alt={`The page Orbit was looking at for ${note.sentence ?? 'this question'}`} />
+          <div style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 4 }}>The page Orbit was looking at, turn {note.at_turn}</div>
+        </div>
+      )}
     </div>
   );
 }
