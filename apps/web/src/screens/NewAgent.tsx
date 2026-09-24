@@ -8,9 +8,9 @@
  * procedure — written, pasted, a PDF, or shown once. The name may wait.
  *
  * Nothing is saved until there is something to keep, so a page opened and
- * left leaves no empty agent behind. A procedure that arrives whole is sorted
- * and drafted straight away, with nothing to confirm; one written by hand is
- * drafted when its author says.
+ * left leaves no empty agent behind. Whichever way it arrives — written here
+ * and kept, pasted, or a PDF — it is sorted and drafted straight away, with
+ * nothing to confirm.
  */
 import { useState } from 'react';
 import { Page, Refusal } from '../Page.tsx';
@@ -151,7 +151,8 @@ export function NewAgent({ go }: { go: (to: Route) => void }) {
                 disabled={noneYet} placeholder={'Write it the way you would to somebody starting Monday.\n\n1. Sign in to the portal.\n2. Open the loan file using the loan number.'}
                 style={box} />
               <Go disabled={!ready || text.trim().length < 5} onClick={() => void bringIn({ blank: true, firstWords: text })}>Keep these words</Go>
-              <Note>Orbit sorts each sentence as you write. It drafts when you press Draft it, so you can write as much as you like first.</Note>
+              <Note>When you keep them, Orbit sorts your words and drafts them straight away, as it does a paste. Anything you add
+                afterwards is mapped when you press Map changes.</Note>
             </>)}
 
             {(way === 'paste' || way === 'pdf') && (<>
@@ -209,7 +210,7 @@ export function NewAgent({ go }: { go: (to: Route) => void }) {
             Once it has words, this is the agent's page for its whole life: your procedure on the left with Orbit's numbers in the
             margin, and what Orbit made of it beside it.</p>
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.6, borderTop: '1px solid var(--rule)', paddingTop: 12 }}>
-            A procedure pasted or read from a PDF is sorted and drafted without stopping. It stops, and says why, only when you have said
+            A procedure written here, pasted or read from a PDF is sorted and drafted without stopping. It stops, and says why, only when you have said
             more is to come, or when nothing in it is Orbit's to do.</p>
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.6 }}>
             Confirming before anything is published stays exactly as it is.</p>

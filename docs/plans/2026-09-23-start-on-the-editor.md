@@ -18,7 +18,7 @@ Two decisions arrive together here:
 |---|---|
 | E1 | **New agent opens the editor.** `/agents/new`. Bring In's address leads there. Nothing is saved, and nothing is listed, until there is something to keep: the first words, a paste, a PDF, or a recording. |
 | E2 | **The systems are picked first, on the page.** Every registered system in service is offered, and any number can be picked: the swivel chair picks two. The first picked is the one the agent was brought in against; the rest are attached as Decision 19 already allows. Orbit never suggests or adds a system (Karthik, 2026-09-23). |
-| E3 | **Then: write it, paste it, drop a PDF, or show it once.** Writing by hand drafts when the author presses *Draft it*. A paste or a PDF drafts as soon as it is sorted. |
+| E3 | **Then: write it, paste it, drop a PDF, or show it once.** Words written on the new page and kept, a paste and a PDF all draft as soon as they are sorted. (Built first as "writing by hand waits for *Draft it*": that brought the sort page back for anyone who pasted into the Write box, the tab already selected. Changed the same day.) *Draft it* remains for a draft that stopped and said why. |
 | E4 | **The name is typed in place, and may wait.** Left empty, the agent takes its first heading, or "Untitled agent"; it can be renamed on the page. |
 | E5 | **No sort page, no "Confirm and draft it".** After the sort, Orbit confirms it and drafts. The record says Orbit confirmed it (`understanding confirmed`, `by: orbit`). |
 | E6 | **It stops, with a plain reason, in two cases only**: the author said more is to come, or nothing in the procedure is Orbit's to do. The reason is kept on the understanding (`not_drafted`) and shown at the top of the procedure. |

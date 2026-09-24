@@ -52,7 +52,7 @@ const TOPICS: Array<{ topic: string; answers: Array<{ q: string; a: string }> }>
     { q: 'My agent is stuck on one record. How do I make it work on any?',
       a: 'Open the Inputs tab and press "Make it an input" beside the fixed value: it becomes something every run is given, with the value you wrote as its example. Orbit also asks this as a question under the sentence, and answering it does the same. You can add, change and remove inputs there too; one a step still uses cannot be removed, and it says which step.' },
     { q: 'Can I start without a document?',
-      a: 'Yes. Start a new agent, pick its systems and choose "Write it". Every sentence is sorted as it arrives, and nothing is drafted until you press "Draft it".' },
+      a: 'Yes. Start a new agent, pick its systems and choose "Write it". When you keep your words, Orbit sorts and drafts them straight away, as it does a paste. What you add afterwards is mapped when you press Map changes.' },
     { q: 'I pasted a procedure. Where do I confirm the sort?',
       a: 'There is nothing to confirm. Orbit sorts every sentence, drafts straight away and shows you as it goes. What it needs from you is asked afterwards, on the sentence it concerns: a line that reads like instructions to Orbit is a risk, a rule comparing something no step reads is a question on that rule, and a sentence for a person asks whether the run waits there. A wrong label is changed on the sentence, then Map changes. It stops before drafting only when you said more is to come, or when nothing in it is Orbit\'s to do, and it says which.' },
     { q: 'Orbit stopped and asked for an example',
