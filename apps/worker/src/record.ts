@@ -28,6 +28,7 @@
 import type { Step } from '@orbit/contract';
 import { chromium, type Page } from 'playwright';
 import { asQuestion, asRisk, type Note } from './note.ts';
+import { settlePage, watchRequests } from './looking-browser.ts';
 import { asValueName, COLLECT, nameControls, shape, type Raw, type Seen } from './snapshot.ts';
 
 export interface Touched {
@@ -47,9 +48,27 @@ export interface Recording {
 }
 
 /**
+ * How long a press is held while Orbit names the page it is on. A ceiling:
+ * naming takes a fraction of it, and if it ever takes longer the press goes
+ * ahead regardless — losing a step is bad, a page somebody cannot click is
+ * worse. Orbit 1 held for the same reason.
+ */
+export const HOLD_MS = 4000;
+
+/**
  * Marks the element the person acted on, so Orbit can find it in its own
  * snapshot rather than trusting a description the page computed. A page can
  * say anything about itself; the marker is only a pointer.
+ *
+ * What it does not do is name anything. Names come from Playwright
+ * (`nameControls`), and an element only appears in the collection once it has
+ * one — so an element that was not on the page when it was last named was not
+ * in the collection at all, and a press of it was reported as something Orbit
+ * "could not name". That was every field on an application that draws its
+ * screen after the document arrives. So when the page has changed since it was
+ * named, or the element has no name, the act is held, the page is named again,
+ * and only then collected; a press is re-issued once that is done. That is how
+ * Orbit 1 recorded, and it recorded these applications.
  */
 export const WATCH = `
 (() => {
@@ -63,28 +82,125 @@ export const WATCH = `
   window.__orbitWatching = true;
 
   const collect = () => ${COLLECT};
-  const report = (kind, el, value, sensitive) => {
-    document.querySelectorAll('[data-orbit-touched]').forEach((e) => e.removeAttribute('data-orbit-touched'));
+
+  // What pressing something means. It was buttons, links and role=button, so
+  // a span or a div with a click handler — which is how most of the
+  // applications Orbit is for build their buttons — was never reported at all:
+  // not as a step, not as a question. Now anything the page marks as
+  // pressable, and failing that the element where the pointer cursor starts,
+  // which is how a page shows a person that something can be clicked.
+  const PRESSABLE = 'button, a, summary, input[type=submit], input[type=button], input[type=image],'
+    + ' input[type=reset], [role=button], [role=link], [role=tab],'
+    + ' [role=menuitem], [role=option], [role=checkbox], [role=radio], [role=switch], [onclick]';
+  // The path through any shadow roots, innermost first. event.target stops at
+  // the outside of a web component, and closest() cannot see into one.
+  const path = (e) => (e.composedPath ? e.composedPath() : [e.target]).filter((n) => n && n.nodeType === 1);
+  const pressed = (e) => {
+    const through = path(e);
+    const marked = through.find((el) => el.matches(PRESSABLE));
+    if (marked) return marked;
+    let pointer = null;
+    for (const el of through) {
+      if (el === document.body || el === document.documentElement) break;
+      if (getComputedStyle(el).cursor !== 'pointer') { if (pointer) break; continue; }
+      pointer = el;
+    }
+    return pointer;
+  };
+
+  // Whether the page has changed since it was last named. Attributes are not
+  // watched: naming writes them, and would count as a change to itself.
+  let changed = true;
+  new MutationObserver(() => { changed = true; })
+    .observe(document, { childList: true, subtree: true, characterData: true });
+  const name = async () => {
+    changed = false;
+    if (typeof window.__orbitName === 'function') await window.__orbitName();
+  };
+  window.__orbitRename = name;
+
+  let marked = null;
+  const mark = (el) => {
+    if (marked && marked !== el) marked.removeAttribute('data-orbit-touched');
+    // An earlier document's marker, left by a page that kept its elements.
+    document.querySelectorAll('[data-orbit-touched]').forEach((e) => { if (e !== el) e.removeAttribute('data-orbit-touched'); });
     el.setAttribute('data-orbit-touched', '1');
-    // Orbit's own view of the page, taken here rather than a moment later.
-    // An application that navigates when you touch it — which is most of them
-    // — has already replaced this document by the time an asynchronous
-    // evaluate arrives, and every action was being lost to "execution context
-    // was destroyed". The collector is the same one; only the moment differs.
+    marked = el;
+  };
+  const clean = (el) => !changed && el.hasAttribute('data-orbit-role');
+
+  // Everything reported, in order. A press waits on it, so the field filled
+  // before it is named before the press can navigate away with it.
+  let outstanding = 0;
+  let pending = Promise.resolve();
+  const enqueue = (work) => {
+    outstanding += 1;
+    const run = pending.then(work).catch(() => undefined).finally(() => { outstanding -= 1; });
+    pending = run;
+    return run;
+  };
+  const bounded = (promise) => new Promise((done) => {
+    promise.then(done, done);
+    setTimeout(done, ${HOLD_MS});
+  });
+
+  // Orbit's own view of the page, taken here rather than a moment later. An
+  // application that navigates when you touch it — which is most of them — has
+  // already replaced this document by the time an asynchronous evaluate
+  // arrives, and every action was being lost to "execution context was
+  // destroyed". Synchronous when the page is already named; otherwise after
+  // naming, with the act held so the document is still this one.
+  const act = (kind, el, value, sensitive) => async () => {
+    mark(el);
+    if (!clean(el)) await name();
     window.__orbitTouched({ kind, value, sensitive, seen: collect() });
   };
+
+  let replaying = false;
   document.addEventListener('click', (e) => {
-    const el = e.target.closest('button, a, input[type=submit], input[type=button], [role=button]');
-    if (el) report('click', el, null, false);
+    if (replaying) return;
+    const el = pressed(e);
+    if (!el) return;
+    const work = act('click', el, null, false);
+    if (outstanding === 0 && clean(el)) { work(); return; }
+
+    // Held, not cancelled, and re-issued once the page is named.
+    const target = path(e)[0] || el;
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    bounded(enqueue(work)).then(() => {
+      replaying = true;
+      try {
+        if (typeof target.click === 'function') target.click();
+        else target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: window }));
+      } finally { replaying = false; }
+    });
   }, true);
+
   document.addEventListener('change', (e) => {
-    const el = e.target;
-    if (!el.matches || !el.matches('input, select, textarea')) return;
+    const el = path(e)[0];
+    if (!el || !el.matches('input, select, textarea')) return;
     // A password is a keystroke like any other, and this is the only place it
     // could have been kept. It is not kept.
     const sensitive = el.type === 'password' || el.autocomplete === 'current-password'
       || el.autocomplete === 'new-password';
-    report('change', el, sensitive ? null : el.value, sensitive);
+    const work = act('change', el, sensitive ? null : el.value, sensitive);
+    if (outstanding === 0 && clean(el)) work(); else enqueue(work);
+  }, true);
+
+  // Pressing Enter in a field submits without a click, so a field still being
+  // named would be lost to the navigation the form causes. Held only then.
+  let resubmitting = false;
+  document.addEventListener('submit', (e) => {
+    if (resubmitting || outstanding === 0) return;
+    const form = e.target;
+    const by = e.submitter;
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    bounded(pending).then(() => {
+      resubmitting = true;
+      try {
+        try { form.requestSubmit(by || undefined); } catch { form.requestSubmit(); }
+      } finally { resubmitting = false; }
+    });
   }, true);
 })()
 `;
@@ -101,7 +217,9 @@ export type OpenForPerson = () => Promise<{ page: Page; close: () => Promise<voi
 
 const aWindowTheyCanSee: OpenForPerson = async () => {
   const browser = await chromium.launch({ headless: false });
-  return { page: await browser.newPage(), close: () => browser.close() };
+  const page = await browser.newPage();
+  watchRequests(page);
+  return { page, close: () => browser.close() };
 };
 
 export async function record(opts: {
@@ -171,28 +289,39 @@ export async function record(opts: {
     }
   });
 
+  // One naming at a time. Two passes interleaved would number the same
+  // elements twice and stamp each with the other's answers.
+  let naming: Promise<number> = Promise.resolve(0);
+  const nameEverything = () => (naming = naming.then(() => nameControls(page)).catch(() => 0));
+  await page.exposeFunction('__orbitName', () => nameEverything());
+
   await page.addInitScript(WATCH);
   await page.goto(`${opts.origin}${opts.startPath}`, { waitUntil: 'domcontentloaded' });
+  await settlePage(page);
   await page.evaluate(WATCH);
 
   /**
    * Ask Playwright what everything is called, before anybody touches it.
    *
-   * It cannot be asked afterwards. A click on this kind of application
-   * navigates, and by the time anything asynchronous runs the document is the
-   * next one — asking then times out, which was measured rather than assumed.
-   * So the names are on the elements before the person acts, and the click
-   * handler reads them off the element it marked, synchronously, in the same
-   * breath as marking it.
+   * It cannot be asked after a click has gone through. A click on this kind
+   * of application navigates, and by the time anything asynchronous runs the
+   * document is the next one — asking then times out, which was measured
+   * rather than assumed. So the names are on the elements before the person
+   * acts, and the click handler reads them off the element it marked,
+   * synchronously, in the same breath as marking it. Where the page has
+   * changed since, the click is held while it is named again (WATCH).
    */
-  const nameEverything = () => nameControls(page).catch(() => 0);
-  await nameEverything();
+  const rename = () => page.evaluate('window.__orbitRename && window.__orbitRename()').catch(() => undefined);
+  await rename();
 
-  // Re-arm after every navigation: a server-rendered application replaces the
-  // document on every submit, and a listener bound to the old one is gone —
-  // and so are the names, which belonged to elements that no longer exist.
-  page.on('framenavigated', () => {
-    void page.evaluate(WATCH).then(nameEverything).catch(() => undefined);
+  // Re-arm after every navigation of the page itself: a server-rendered
+  // application replaces the document on every submit, and a listener bound to
+  // the old one is gone — and so are the names, which belonged to elements that
+  // no longer exist. Not for a frame inside it: an analytics or sign-in iframe
+  // navigating is not the page moving, and renamed the whole page each time.
+  page.on('framenavigated', (frame) => {
+    if (frame !== page.mainFrame()) return;
+    void settlePage(page).then(() => page.evaluate(WATCH)).then(rename).catch(() => undefined);
   });
 
   try { await opts.until; } finally { await close().catch(() => undefined); }

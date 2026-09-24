@@ -415,3 +415,24 @@ presses Map changes.
 and asks (E8), rather than walking the rest with the field empty. Answering maps from that sentence
 on. Orbit cannot ask before the walk, because which values a procedure is given is only known when
 the walk names them. Knowing it earlier would mean the sort naming the inputs, which it does not.
+
+---
+
+## The password a walk types has no sentinel
+
+**What.** The walk's instruction (`apps/worker/src/author.ts`, the sign-in rule) tells the model to
+give *any value* for a password field, and relies on `Seen.secret` being right to discard it and
+refer to the registered credential instead. When the page is misread, that arbitrary word becomes
+a declared input and is published as one.
+
+**Why it matters.** It is how a draft broke on the corporate machine (2026-09-24): Microsoft's
+password screen offered its heading, *Enter password*, as a typeable field; the model chose it over
+the real box, the heading carried no `secret`, and "any" was kept as an input with a blocking
+question. The misreading is fixed (`snapshot.ts` now classifies by role, and a heading is not a
+field); the protocol that turned a misreading into a published input is not.
+
+**What closing it takes.** A sentinel the model is told to give for a password — a fixed token
+Orbit recognises — so a password proposal that lands on a field Orbit does not think is secret is
+refused and asked about, rather than kept as a literal. Reported by the corporate machine's Claude;
+deliberately not bundled with the capture fixes.
+

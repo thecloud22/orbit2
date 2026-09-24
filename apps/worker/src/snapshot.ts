@@ -60,6 +60,27 @@ export interface Seen {
 }
 
 /**
+ * `document.querySelectorAll`, reaching into open shadow roots as well.
+ *
+ * The applications Orbit is for increasingly build their controls as web
+ * components — Salesforce Lightning, ServiceNow, most design systems — and a
+ * button inside one is invisible to a query on the document. It was invisible
+ * here: a page showing "Submit claim" offered the model no such control, and
+ * clicking it while recording produced nothing at all. Playwright's own CSS
+ * already pierces open shadow roots, which is why only the in-page half needed
+ * this. A closed shadow root is closed to everyone, this included.
+ */
+const ALL = `((selector) => {
+  const found = [];
+  const walk = (root) => {
+    for (const el of root.querySelectorAll(selector)) found.push(el);
+    for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+  };
+  walk(document);
+  return found;
+})`;
+
+/**
  * `data-testid` is deliberately absent from everything below. These portals
  * carry them for their own test suites; an application a customer runs will
  * not, and binding to one would make the binder look solved.
@@ -67,6 +88,7 @@ export interface Seen {
 export const COLLECT = `
 (() => {
   const out = [];
+  const all = ${ALL};
   const text = (el) => (el.textContent || '').trim().replace(/\\s+/g, ' ');
   const visible = (el) => {
     const r = el.getBoundingClientRect();
@@ -81,14 +103,30 @@ export const COLLECT = `
   // labels, titles and placeholders in an order that did not match the
   // specification. An element with no stamp is one Playwright did not
   // recognise as a control, or one that appeared after the page was named.
-  for (const el of document.querySelectorAll('[data-orbit-role]')) {
+  //
+  // Only a control's role makes it one. Every role that was not a link or a
+  // button was offered as a field, so a heading built from a div was "field —
+  // Sign in" on Microsoft's sign-in page, beside the real email box, and after
+  // Next the password screen offered "Enter password" (its heading) beside
+  // "Enter the password" (its box). A region, an image and a grid's rows were
+  // fields too. A heading is a heading and a grid cell is a value; anything
+  // else is not something a step acts on, unless somebody just acted on it.
+  const FIELDS = ['textbox', 'searchbox', 'combobox', 'spinbutton', 'slider', 'listbox', 'checkbox', 'radio'];
+  const BUTTONS = ['button', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'switch', 'treeitem', 'generic'];
+  const VALUES = ['cell', 'gridcell'];
+  for (const el of all('[data-orbit-role]')) {
     const acted = el.hasAttribute('data-orbit-touched');
     if (!visible(el) && !acted) continue;
     const tag = el.tagName.toLowerCase();
     if (tag === 'input' && el.type === 'hidden' && !acted) continue;
 
     const role = el.getAttribute('data-orbit-role');
-    const name = el.getAttribute('data-orbit-name') || '';
+    const what = role === 'link' ? 'link' : BUTTONS.includes(role) ? 'button' : FIELDS.includes(role) ? 'field'
+      : role === 'heading' ? 'heading' : VALUES.includes(role) ? 'value' : acted ? 'field' : null;
+    if (!what) continue;
+    // A generic has no accessible name to give; what it says is what a person
+    // calls it.
+    const name = el.getAttribute('data-orbit-name') || (role === 'generic' ? text(el) : '');
 
     // The label in the cell beside it, which is what an old two-column form
     // gives you and often the only name a person would use.
@@ -112,9 +150,7 @@ export const COLLECT = `
       type: el.type || null,
       secret: el.type === 'password'
         || el.autocomplete === 'current-password' || el.autocomplete === 'new-password',
-      what: role === 'link' ? 'link'
-        : ['button', 'tab', 'menuitem', 'option', 'switch'].includes(role) ? 'button'
-        : 'field',
+      what,
       role,
       name: called,
       formName: el.getAttribute('name') || null,
@@ -124,7 +160,7 @@ export const COLLECT = `
   }
 
   // Values a workflow could read: a labelled figure, and a grid cell.
-  for (const el of document.querySelectorAll('td, dd')) {
+  for (const el of all('td, dd')) {
     if (!visible(el)) continue;
     if (el.querySelector('input, select, textarea, button, a')) continue;
     const value = text(el);
@@ -132,6 +168,29 @@ export const COLLECT = `
 
     const table = el.closest('table');
     let row = null, column = null;
+    // A table of labels and their values — a label cell, then its value, a
+    // row at a time, and no header cells — is how old applications lay out a
+    // record, and it is not a grid. Read as one, its first row was taken for
+    // column headings: on a claim showing Status | Open over Adjuster |
+    // R. Okafor, "Status" named three things — the label, its value, and the
+    // Adjuster label under it — so a read of the status was refused as
+    // ambiguous on every turn. Here the label is not a value, and the value is
+    // named by the label beside it, which is how a read binds anyway.
+    const labelsValues = table && !table.querySelector('th')
+      && Array.from(table.rows).every((r) => r.cells.length <= 2);
+    if (labelsValues && el.tagName === 'TD') {
+      const next = el.nextElementSibling;
+      if (next && next.tagName === 'TD' && !el.hasAttribute('data-orbit-touched')) continue;
+      const before = el.previousElementSibling;
+      out.push({
+        touched: el.hasAttribute('data-orbit-touched'),
+        tag: 'td', type: null, what: 'value', role: 'cell',
+        name: value, formName: null,
+        labelledBy: before && !before.querySelector('input,button,a') ? text(before) || null : null,
+        row: null, column: null,
+      });
+      continue;
+    }
     if (table) {
       const tr = el.closest('tr');
       const position = Array.from(tr.children).indexOf(el);
@@ -151,7 +210,7 @@ export const COLLECT = `
   }
 
   // A labelled figure that is not in a table: <div>label</div><div>value</div>.
-  for (const el of document.querySelectorAll('div, span, p')) {
+  for (const el of all('div, span, p')) {
     if (!visible(el)) continue;
     if (el.children.length > 0) continue;
     const before = el.previousElementSibling;
@@ -199,7 +258,7 @@ export const COLLECT = `
       name: value, formName: null, labelledBy: label, row: null, column: null });
   }
 
-  for (const el of document.querySelectorAll('h1, h2, h3')) {
+  for (const el of all('h1, h2, h3')) {
     if (!visible(el)) continue;
     out.push({
       touched: el.hasAttribute('data-orbit-touched'), tag: el.tagName.toLowerCase(), type: null, what: 'heading',
@@ -242,7 +301,10 @@ function bindingFor(raw: Raw, seenNames: Map<string, number>): Binding {
   // and the read resolved to nothing — at run time, after publication, which
   // is the whole class of failure the publish gate exists to prevent. It now
   // falls to `structural`, which is the rung a labelled figure belongs on.
-  const resolvable = raw.role && raw.role !== 'text';
+  //
+  // `generic` likewise: it is what the accessibility tree calls an element it
+  // has no role for, and a clickable span is found again by what it says.
+  const resolvable = raw.role && raw.role !== 'text' && raw.role !== 'generic';
 
   if (raw.name && resolvable && unique(`${raw.role}|${raw.name}`)) {
     return { strategy: 'roleAndName' as Strategy, role: raw.role, name: raw.name };
@@ -302,9 +364,15 @@ export async function nameControls(page: Page | Frame): Promise<number> {
   // Passed as source rather than as a function, like COLLECT above it and for
   // the same reason: this package is not compiled against the DOM, because the
   // only code here that touches one runs somewhere else.
+  //
+  // Numbers from an earlier pass are cleared first. The recorder names the
+  // page again whenever it changes, and an element that has stopped matching
+  // would otherwise keep a number the new pass has given to something else.
   const count = await page.evaluate(`((controls) => {
+    const all = ${ALL};
+    for (const el of all('[data-orbit-i]')) el.removeAttribute('data-orbit-i');
     let i = 0;
-    for (const el of document.querySelectorAll(controls)) el.setAttribute('data-orbit-i', String(i++));
+    for (const el of all(controls)) el.setAttribute('data-orbit-i', String(i++));
     return i;
   })(${JSON.stringify(CONTROLS)})`) as number;
 
@@ -312,21 +380,40 @@ export async function nameControls(page: Page | Frame): Promise<number> {
   for (let i = 0; i < count; i += 1) {
     // One call per control, measured at about 3ms — 17 controls on a real
     // page in 49ms, beside an authoring turn that spends seconds in a model.
+    //
+    // Depth 0: only the element's own line is read, and that is all this
+    // wants. Without it a grid, a navigation or a main region was snapshotted
+    // whole for every one of them — on a page shaped like a claims system,
+    // 1,259 controls took 1.6 seconds, and the recorder does this on every
+    // change. Orbit 1 asked at depth 0 throughout.
     const said = await page.locator(`[data-orbit-i="${i}"]`).first()
-      .ariaSnapshot({ timeout: 2000 }).catch(() => '');
+      .ariaSnapshot({ timeout: 2000, depth: 0 }).catch(() => '');
     const m = said.trim().match(FIRST_LINE);
     // `generic` is the accessibility tree saying this element is not a
-    // control. Left unstamped, so COLLECT falls back rather than binding a
-    // step to a role that resolves to nothing.
-    if (!m || !m[1] || m[1] === 'generic' || m[1] === 'none') continue;
+    // control, and `none` that it is decoration. Left unstamped, so COLLECT
+    // falls back rather than binding a step to a role that resolves to
+    // nothing — except a generic the page has made clickable, or one somebody
+    // just clicked: a span with a click handler is a button on the
+    // applications Orbit is for, and the recorder was dropping every press of
+    // one. It is stamped as what it is, and found again by what it says.
+    if (!m || !m[1] || m[1] === 'none') continue;
     named.push([i, m[1], (m[2] ?? '').replace(/\\(.)/g, '$1')]);
   }
 
   await page.evaluate(`((named) => {
+    const all = ${ALL};
+    const byIndex = new Map(all('[data-orbit-i]').map((el) => [el.getAttribute('data-orbit-i'), el]));
     for (const entry of named) {
-      const el = document.querySelector('[data-orbit-i="' + entry[0] + '"]');
+      const el = byIndex.get(String(entry[0]));
       if (!el) continue;
-      el.setAttribute('data-orbit-role', entry[1]);
+      // Playwright calls an element with no role \`generic\`, or \`text\` when
+      // all it holds is words — a span with a click handler is the latter.
+      let role = entry[1];
+      if (role === 'generic' || role === 'text') {
+        if (el.matches('[onclick], [data-orbit-touched]')) role = 'generic';
+        else if (role === 'generic') continue;
+      }
+      el.setAttribute('data-orbit-role', role);
       el.setAttribute('data-orbit-name', entry[2]);
     }
   })(${JSON.stringify(named)})`);

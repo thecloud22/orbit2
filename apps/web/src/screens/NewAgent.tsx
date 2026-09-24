@@ -16,7 +16,8 @@ import { useState } from 'react';
 import { Page, Refusal } from '../Page.tsx';
 import { send, useFetch } from '../fetching.ts';
 import { EmptyState } from '../ui.tsx';
-import type { Route } from '../router.ts';
+import { useLinkProps, type Route } from '../router.ts';
+import { DO, DONT, WATCH, type Advice } from '../writing-guide.ts';
 import { AppChip, connectorName } from '../editor/Applications.tsx';
 import { PdfPicker } from './BringIn.tsx';
 
@@ -214,9 +215,40 @@ export function NewAgent({ go }: { go: (to: Route) => void }) {
             more is to come, or when nothing in it is Orbit's to do.</p>
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.6 }}>
             Confirming before anything is published stays exactly as it is.</p>
+          <WritingGuide go={go} />
         </aside>
       </div>
     </Page>
+  );
+}
+
+/**
+ * What to write and what not to, beside the box it is written in. The short
+ * form of each point; the examples are one step away, in Help.
+ */
+function WritingGuide({ go }: { go: (to: Route) => void }) {
+  const help = useLinkProps({ at: 'help' }, go);
+  const list = (items: Advice[], mark: string, colour: string) => (
+    <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {items.map((i) => (
+        <li key={i.say} style={{ display: 'flex', gap: 8, fontSize: 12.5, lineHeight: 1.5 }}>
+          <span aria-hidden style={{ color: colour, fontWeight: 700, width: 12, flexShrink: 0 }}>{mark}</span>
+          <span>{i.say}</span>
+        </li>
+      ))}
+    </ul>
+  );
+  return (
+    <section aria-labelledby="writing-guide" style={{ borderTop: '1px solid var(--rule)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div id="writing-guide" style={{ fontSize: 13.5, fontWeight: 700 }}>Writing it so it works</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-2)' }}>Do</div>
+      {list(DO, '✓', 'var(--ink)')}
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-2)' }}>Don't</div>
+      {list(DONT, '✕', 'var(--ink)')}
+      <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: 'var(--ink-2)' }}>
+        <strong style={{ color: 'var(--ink)' }}>Watch for:</strong> {WATCH.say} {WATCH.like}</p>
+      <a {...help} style={{ fontSize: 12.5, color: 'var(--ink)' }}>Examples of each, in Help</a>
+    </section>
   );
 }
 

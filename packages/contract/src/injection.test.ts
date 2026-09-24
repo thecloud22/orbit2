@@ -4,7 +4,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { changingVerbOf, fence, lineAsksFor, looksLikeInstructions } from './injection.ts';
+import { asksToSignIn, changingVerbOf, fence, lineAsksFor, looksLikeInstructions, submitsASignIn } from './injection.ts';
 
 test('text that addresses a model is flagged; a procedure is not', () => {
   for (const s of [
@@ -38,4 +38,27 @@ test('a control that changes data must be asked for by the line it cites', () =>
   assert.equal(lineAsksFor('Run automated underwriting', 'Make sure the file has been through automated underwriting.'), false);
   assert.equal(lineAsksFor('Delete file', 'Open the loan file using the loan number.'), false);
   assert.equal(lineAsksFor('Open file', 'anything at all'), true, 'nothing changes, nothing to ask for');
+});
+
+test('a sign-in form sent with Submit is the sign-in, and nothing else is', () => {
+  // WebSEAL's own login button is called Submit, and "submit" is a changing
+  // verb: "log in to the application" was refused its only way to finish.
+  assert.equal(submitsASignIn('Submit', 'Log in to the claims application.', true), true);
+  assert.equal(submitsASignIn('Confirm', 'Sign on to the portal.', true), true);
+  // Not on a page that takes no password, not for a line that is not a
+  // sign-in, and not for a verb that is a change in its own right.
+  assert.equal(submitsASignIn('Submit', 'Log in to the claims application.', false), false);
+  assert.equal(submitsASignIn('Submit', 'Search for the claim.', true), false);
+  assert.equal(submitsASignIn('Delete account', 'Log in to the claims application.', true), false);
+  assert.equal(submitsASignIn('Approve', 'Log in and approve the file.', true), false);
+});
+
+test('the ways a procedure says to sign in', () => {
+  for (const line of ['Log in to the app', 'Login with your ID', 'logon to CICS', 'Sign in as the service account',
+    'sign-on to TSO', 'Authenticate with your credentials', 'After logging in, open the file']) {
+    assert.equal(asksToSignIn(line), true, line);
+  }
+  for (const line of ['Open the loan file', 'Sign the form', 'Log the result in the notes']) {
+    assert.equal(asksToSignIn(line), false, line);
+  }
 });
