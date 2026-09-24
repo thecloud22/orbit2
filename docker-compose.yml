@@ -22,7 +22,10 @@ services:
       # ORBIT_*DATABASE_URL lines at it.
       - "${ORBIT_PG_PORT:-5432}:5432"
     volumes:
-      - orbit-pgdata:/var/lib/postgresql/data
+      # One level above data/: from 18 the image keeps its files in a
+      # directory named for the major version (/var/lib/postgresql/18/docker)
+      # and refuses to start if anything is mounted at the old .../data.
+      - orbit-pgdata:/var/lib/postgresql
     healthcheck:
       # Started is not the same as accepting connections. Without this, setup
       # runs against a server still replaying its write-ahead log and fails on

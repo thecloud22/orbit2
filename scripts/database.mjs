@@ -34,6 +34,23 @@ const answering = (host, port) => new Promise((resolve) => {
   socket.on('timeout', () => done(false));
 });
 
+/**
+ * Asked again every second until it answers or the time is up. Docker
+ * Desktop takes a while to wake, and on macOS a container's port is forwarded
+ * a moment after the container says it is healthy: one look was a false "no".
+ * ORBIT_DB_WAIT in .env sets how long, in seconds.
+ */
+const waitFor = async (check, what) => {
+  const seconds = Number(process.env['ORBIT_DB_WAIT'] ?? 60);
+  for (let i = 0; i < seconds; i++) {
+    if (await check()) return true;
+    if (i === 0) note(`waiting for ${what} (up to ${seconds}s)…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return check();
+};
+const dockerAnswers = () => spawnSync('docker', ['info'], { encoding: 'utf8' }).status === 0;
+
 const env = join(ROOT, '.env');
 if (!existsSync(env)) { no('.env is not here yet — run `pnpm run setup` first'); process.exit(1); }
 process.loadEnvFile(env);
@@ -58,12 +75,12 @@ if (await answering(host, Number(port || 5432))) {
 // the CLI alone and says yes on a machine where Docker is installed and not
 // running, which sent the failure down the wrong path entirely — it reported
 // a port conflict at somebody whose daemon was asleep.
-const docker = spawnSync('docker', ['info'], { encoding: 'utf8' });
-if (docker.status !== 0) {
-  const installed = spawnSync('docker', ['--version'], { encoding: 'utf8' }).status === 0;
+const installed = spawnSync('docker', ['--version'], { encoding: 'utf8' }).status === 0;
+// Installed but not answering yet is usually Docker Desktop still starting: wait for it.
+if (!(installed ? await waitFor(dockerAnswers, 'Docker to start') : false)) {
   no(`nothing is listening at ${at}`);
   if (installed) {
-    note('Docker is installed but not running — start Docker Desktop, then run this again.');
+    note('Docker is installed but did not answer — start Docker Desktop, then run this again.');
   } else {
     note('Start your own postgres, or install Docker and run this again.');
   }
@@ -86,7 +103,7 @@ if (up.status !== 0) {
 // --wait honours the healthcheck, which is pg_isready rather than "the
 // container started". Confirmed from out here anyway, because the thing that
 // matters is whether *this* process can reach it.
-if (!(await answering(host, Number(port || 5432)))) {
+if (!(await waitFor(() => answering(host, Number(port || 5432)), `postgres to answer at ${at}`))) {
   no(`the container started but nothing is answering at ${at}`);
   process.exit(1);
 }
