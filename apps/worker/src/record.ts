@@ -26,10 +26,10 @@
  *   recorded binding is re-resolved as that account before publication.
  */
 import type { Step } from '@orbit/contract';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Frame, type Page } from 'playwright';
 import { asQuestion, asRisk, type Note } from './note.ts';
 import { settlePage, watchRequests } from './looking-browser.ts';
-import { asValueName, COLLECT, nameControls, shape, type Raw, type Seen } from './snapshot.ts';
+import { asValueName, COLLECT, frameOf, nameControls, shape, type Raw, type Seen } from './snapshot.ts';
 
 export interface Touched {
   kind: 'click' | 'change';
@@ -253,12 +253,15 @@ export async function record(opts: {
     arrives: { describe: 'the page is showing' }, changesARecord: false,
   });
 
-  await page.exposeFunction('__orbitTouched', async (event: Touched) => {
+  // A binding rather than a function, so Orbit knows which frame the act came
+  // from: an application inside an iframe is found again inside that frame.
+  await page.exposeBinding('__orbitTouched', async ({ frame }, event: Touched) => {
     touched += 1;
     try {
     // Orbit derives the binding from its own view of the page. What the page
     // reported is a pointer to an element, never a description to be trusted.
-    const seen = shape(event.seen ?? []);
+    const inFrame = frameOf(frame);
+    const seen = shape((event.seen ?? []).map((r) => (inFrame ? { ...r, frame: inFrame } : r)));
 
     // The marked element, found by the marker rather than by a name computed
     // from it. Matching by name was the bug: the name of a field that has just
@@ -292,8 +295,9 @@ export async function record(opts: {
   // One naming at a time. Two passes interleaved would number the same
   // elements twice and stamp each with the other's answers.
   let naming: Promise<number> = Promise.resolve(0);
-  const nameEverything = () => (naming = naming.then(() => nameControls(page)).catch(() => 0));
-  await page.exposeFunction('__orbitName', () => nameEverything());
+  const nameEverything = (frame: Page | Frame = page) => (naming = naming.then(() => nameControls(frame)).catch(() => 0));
+  // Named where the act happened: a frame's controls are named in that frame.
+  await page.exposeBinding('__orbitName', ({ frame }) => nameEverything(frame));
 
   await page.addInitScript(WATCH);
   await page.goto(`${opts.origin}${opts.startPath}`, { waitUntil: 'domcontentloaded' });

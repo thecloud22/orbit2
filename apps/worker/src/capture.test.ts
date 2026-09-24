@@ -38,6 +38,10 @@ customElements.define('corp-button', class extends HTMLElement {
 });
 </script>`;
 
+/** The screen an older system shows inside a portal's iframe. */
+const INNER = '<label for="c">Claim number</label><input id="c" name="claim">'
+  + '<button type="button" onclick="document.getElementById(\'r\').textContent = \'Status: Open\'">Search</button><p id="r"></p>';
+
 let server: Server;
 let origin: string;
 let browser: Browser;
@@ -46,6 +50,10 @@ before(async () => {
   server = createServer((req, res) => {
     res.setHeader('content-type', 'text/html');
     if (req.url === '/screen') setTimeout(() => res.end(SCREEN), 3000);
+    else if (req.url?.startsWith('/inner')) res.end(INNER);
+    else if (req.url === '/framed') res.end('<h1>Portal</h1><iframe name="TargetContent" src="/inner" width="600" height="300"></iframe>'
+      + '<iframe src="/tracker" width="0" height="0"></iframe>');
+    else if (req.url === '/unnamed') res.end('<h1>Portal</h1><iframe src="/inner/claims?session=abc123" width="600" height="300"></iframe>');
     else res.end(req.url === '/built' ? BUILT : SLOW);
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -184,5 +192,107 @@ test('the WebSEAL login form is two fields and a Submit, and nothing else to rea
     const seen = await snapshot(page);
     assert.deepEqual(seen.filter((s) => s.what !== 'heading').map((s) => `${s.what} ${s.name}`),
       ['field Username', 'field Password', 'button Submit']);
+  } finally { await page.close(); }
+});
+
+// ── what the snapshot could not see ──────────────────────────────────────
+
+test('a screen inside an iframe is seen, and its bindings look in that frame', async () => {
+  const looking = await lookInBrowser(origin);
+  try {
+    await looking.open('/framed');
+    const seen = await looking.look();
+    const field = seen.find((s) => s.what === 'field' && s.name === 'Claim number');
+    assert.ok(field, `the form in the frame: ${seen.map((s) => s.name).join(', ')}`);
+    assert.deepEqual(field.binding.within, { frame: 'TargetContent' });
+    // Typed and pressed where it is, not looked for in the portal around it.
+    await looking.type(field, 'CL-1001');
+    await looking.press(seen.find((s) => s.name === 'Search')!);
+  } finally { await looking.close(); }
+
+  // A run, in a new session, finds it again by the same binding.
+  const surface = await openBrowser(origin);
+  try {
+    await surface.open('/framed');
+    const found = await surface.find({ strategy: 'formName', name: 'claim', within: { frame: 'TargetContent' } });
+    assert.equal(found.found, 'one');
+    const nowhere = await surface.find({ strategy: 'formName', name: 'claim', within: { frame: 'NoSuchFrame' } });
+    assert.equal(nowhere.found, 'none', 'a frame that is not there is not looked for in the page instead');
+  } finally { await surface.close(); }
+});
+
+test('a frame with no name is found by the path it loads, without its session token', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${origin}/unnamed`);
+    await page.frameLocator('iframe').locator('input').waitFor();
+    const field = (await snapshot(page)).find((s) => s.name === 'Claim number');
+    assert.deepEqual(field?.binding.within, { frameUrl: '/inner/claims' });
+  } finally { await page.close(); }
+});
+
+test('a recording inside an iframe makes steps that look in that frame', async () => {
+  const page = await browser.newPage();
+  let stop: () => void = () => undefined;
+  const until = new Promise<void>((r) => { stop = r; });
+  const recording = record({ origin, startPath: '/framed', until,
+    open: async () => ({ page, close: async () => undefined }) });
+  const inner = page.frameLocator('iframe[name=TargetContent]');
+  await inner.locator('input').waitFor();
+  await page.waitForTimeout(300);
+  await inner.locator('input').fill('CL-1001');
+  await inner.locator('input').blur();
+  await inner.getByRole('button', { name: 'Search' }).click();
+  await page.waitForTimeout(500);
+  stop();
+  const result = await recording;
+  await page.close();
+
+  const acts = result.steps.filter((s) => s.kind === 'enter' || s.kind === 'activate');
+  assert.deepEqual(acts.map((s) => s.summary), ['A value, into Claim number', 'Search']);
+  for (const s of acts) {
+    const target = s.kind === 'enter' ? s.into : s.kind === 'activate' ? s.control : null;
+    assert.equal((target?.binding as { within?: { frame?: string } }).within?.frame, 'TargetContent');
+  }
+});
+
+test('a box labelled by the div beside it is called what the label says', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`<div><div>Policy number</div><div><input name="x1"></div></div>
+      <div><div>Surname</div><div><input name="x2"></div></div>`);
+    const fields = (await snapshot(page)).filter((s) => s.what === 'field');
+    assert.deepEqual(fields.map((s) => s.name), ['Policy number', 'Surname']);
+    // Still found by its form name, which is the sturdier rung.
+    assert.deepEqual(fields[0]!.binding, { strategy: 'formName', name: 'x1' });
+  } finally { await page.close(); }
+});
+
+test('a box nobody can see is not offered, a styled checkbox still is', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`<input aria-label="Old search" style="visibility:hidden">
+      <input aria-label="Ghost" style="opacity:0"><input aria-label="Real search">
+      <label><input type="checkbox" aria-label="Urgent" style="opacity:0">Urgent</label>`);
+    const names = (await snapshot(page)).filter((s) => s.what === 'field').map((s) => s.name);
+    assert.deepEqual(names, ['Real search', 'Urgent']);
+  } finally { await page.close(); }
+});
+
+test('what the application says went wrong is on the page the model reads', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent('<div role="alert">Incorrect user ID or password.</div><input aria-label="User ID">');
+    const alert = (await snapshot(page)).find((s) => s.name === 'Incorrect user ID or password.');
+    assert.equal(alert?.what, 'value');
+    assert.equal(alert.binding.strategy, 'text', 'found again by its own words');
+  } finally { await page.close(); }
+});
+
+test('a button with a long label is still a button', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent('<button>Continue to the next step of the application after reviewing all of the terms and conditions shown</button>');
+    assert.equal((await snapshot(page)).filter((s) => s.what === 'button').length, 1);
   } finally { await page.close(); }
 });
