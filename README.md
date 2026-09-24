@@ -32,7 +32,11 @@ works too.)
 
 Setup checks what is installed, writes `.env` from `.env.example`,
 installs the workspace and Chromium, creates `orbit2_dev` and `orbit2_test`,
-and runs the migrations on both. It is safe to run twice.
+and runs the migrations on both. It is safe to run twice. It also makes sure
+`orbit_app` signs in with the password in `ORBIT_DATABASE_URL`: a server that
+already had an `orbit_app` keeps its old password otherwise, and the API fails
+with "password authentication failed for user orbit_app". If you see that,
+run setup again.
 
 Both commands make sure something is listening where `.env` says the database
 is. A server that already answers is left alone — a local PostgreSQL, or one

@@ -177,6 +177,26 @@ for (const variable of ['ORBIT_OWNER_DATABASE_URL', 'ORBIT_TEST_DATABASE_URL']) 
   }
 }
 
+// Migration 0001 creates orbit_app only where no role by that name exists, so
+// a server that already had one keeps its old password and the API is refused
+// at the first request. The password in ORBIT_DATABASE_URL is made the one
+// that works; a role that already signs in with it is left alone.
+const appUrl = process.env['ORBIT_DATABASE_URL'];
+if (!appUrl) {
+  no('ORBIT_DATABASE_URL is not set in .env — the API has nothing to connect as');
+  die();
+}
+const role = run(process.execPath, ['--experimental-strip-types', 'src/app-role.ts', process.env['ORBIT_OWNER_DATABASE_URL'], appUrl], { cwd: api });
+const appRole = decodeURIComponent(new URL(appUrl).username) || 'the application role';
+if (role.status === 0) {
+  const outcome = role.stdout.trim();
+  ok(`${appRole} — ${outcome === 'password set' ? 'password set to the one in ORBIT_DATABASE_URL' : outcome}`);
+} else {
+  no(`${appRole} cannot sign in with the password in ORBIT_DATABASE_URL, and setup could not set it`);
+  for (const line of `${role.stderr}`.trim().split('\n').slice(-3)) note(`  ${line}`);
+  die();
+}
+
 mkdirSync(join(ROOT, 'data', 'evidence'), { recursive: true });
 mkdirSync(join(ROOT, 'var', 'log'), { recursive: true });
 ok('evidence store and logs ready');
