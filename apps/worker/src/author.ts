@@ -344,6 +344,19 @@ const INSTRUCTION = [
   '  because it happens to be on the page.',
 ].join('\n');
 
+/**
+ * Said when no example has been given. Without it the model was told "none",
+ * took that to mean the procedure is given nothing, and opened whichever loan
+ * the list showed first: a draft that works on one loan for ever, with nothing
+ * for a run to supply.
+ */
+const NO_INPUTS_YET = [
+  'DECLARED INPUTS: none named yet.',
+  'The procedure is given the record it works on (the number to look up, the name to search for): that is an',
+  'input. Type it with act=enter, value=a short camelCase name for it (e.g. loanNumber). Never pick a record from',
+  'a list or a page in its place. Orbit asks the author for an example when you do.',
+].join('\n');
+
 /** Said only when the agent works across several applications (Orbit 2.2, C11–C12). */
 const ACROSS = [
   '',
@@ -556,6 +569,8 @@ export async function authorFromProcedure(opts: {
     if (!known) { lookings.set(name, looking); await looking.open(app.startPath); }
   };
 
+  /** The input the walk stopped for, having no example of it to type (E8). */
+  let stoppedFor: string | null = null;
   try {
     await looking.open(firstPath);
 
@@ -660,7 +675,10 @@ export async function authorFromProcedure(opts: {
           purpose: 'propose the next step',
           instruction: across ? INSTRUCTION + ACROSS : INSTRUCTION,
           shown: ['PROCEDURE:', fence('PROCEDURE', shownProcedure), '',
-                  `DECLARED INPUTS: ${Object.keys(inputs).join(', ') || 'none'}`,
+                  // No example given yet (2.6: a new agent is not asked for one before it is
+                  // drafted). What the procedure is given is still an input, and Orbit stops
+                  // at the step that types it and asks the author for an example (E8).
+                  Object.keys(inputs).length ? `DECLARED INPUTS: ${Object.keys(inputs).join(', ')}` : NO_INPUTS_YET,
                   // The registry's answer to "who is this agent". Withholding
                   // it meant a procedure that says "sign in with any user ID"
                   // had no user ID to give: the walk typed an empty string
@@ -1059,14 +1077,20 @@ export async function authorFromProcedure(opts: {
       // Orbit cannot know which inputs a procedure will declare until the
       // model names them, so it cannot ask beforehand. It can say so at the
       // moment it happens, which is the step the rest of the walk hangs off.
+      //
+      // It stops there (2.6, E8). Walking on with the field empty mapped every
+      // later step on whatever page an empty search left, and all of them had
+      // to be mapped again once the example came; stopping keeps what is
+      // right, and the answer maps from this sentence on.
       if (made.kind === 'enter' && made.value.from === 'input'
           && !(made.value.value in inputs)) {
         questions.push({ ...asQuestion(
-          `"${made.value.value}" is supplied when a run starts, and no example was given for it, so Orbit`
-          + ' walked the rest of this procedure with that field left empty. The steps after it are whatever'
-          + ' the application did with nothing in that box. Give an example, then map it again.'),
+          `Orbit needs an example of "${made.value.value}" to go on: a run is given one when it starts, and`
+          + ' there is none to try this with. Give one that exists in the application now, and Orbit carries on'
+          + ' from here.'),
           sentence: p.sentence, atTurn: turn, stepId: made.id, action: 'giveExample',
           candidates: [{ name: made.value.value, what: 'input' }] });
+        stoppedFor = made.value.value;
       }
 
       // A value read on one system, typed into a green-screen field that shows
@@ -1107,6 +1131,7 @@ export async function authorFromProcedure(opts: {
         : `step ${steps.length}: ${made.summary}`));
       madeAt[made.id] = turn;
       if (codesTurn) noteTurn(codesTurn);
+      if (stoppedFor) { finished = true; break; }
 
       // Do it, so the next turn sees the page the next step would meet.
       lastActMoved = p.act === 'activate';
@@ -1162,6 +1187,12 @@ export async function authorFromProcedure(opts: {
     }
     if (across) { for (const l of lookings.values()) await l.close().catch(() => undefined); }
     else await looking.close();
+  }
+
+  // Stopped for an example: what is mapped so far is kept, and nothing is
+  // concluded from it. The answer maps from that sentence on.
+  if (stoppedFor) {
+    return { steps, turns, questions, declaredInputs: inputsOf(steps, inputOf), provenance, madeAt, replayed };
   }
 
   // Every path has to reach an ending (§4), and the session has none: the
@@ -1489,12 +1520,15 @@ export async function authorFromProcedure(opts: {
       + `Map it again, or say what "${v.phrase}" means.`), sentence: v.sentence, action: 'mapAgain' as const });
   }
 
-  const declaredInputs = [...new Set(
+  return { steps, turns, questions, declaredInputs: inputsOf(steps, inputOf), provenance, madeAt, replayed };
+}
+
+/** The inputs a run is given: every value an `enter` step takes from one, once. */
+function inputsOf(steps: readonly Step[], inputOf: ReadonlyMap<string, { object: string; field: string }>) {
+  return [...new Set(
     steps.flatMap((s) => (s.kind === 'enter' && s.value.from === 'input' ? [s.value.value] : [])),
   )].map((name) => ({ name, label: name, type: 'text' as const, required: true as const,
     ...(inputOf.get(name) ? { of: inputOf.get(name)! } : {}) }));
-
-  return { steps, turns, questions, declaredInputs, provenance, madeAt, replayed };
 }
 
 /**

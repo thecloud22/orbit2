@@ -75,9 +75,15 @@ export interface Draft {
   understanding: {
     status: string; confirmed_at: string | null; examples: Record<string, string>; application: string;
     walk: string | null; session_id: string | null; more_to_come: boolean; refused: string | null; walk_refused: string | null;
+    /** Drafted by Orbit as soon as it is sorted: a procedure that arrived whole (2.6, E5). */
+    draft_when_sorted?: boolean;
+    /** Why Orbit did not draft it, in words (E6). */
+    not_drafted?: string | null;
   } | null;
-  /** A rule comparing something no task reads, said as advice; it blocks drafting. */
+  /** A rule comparing something no task reads, said as advice; it holds confirmation. */
   unread?: string | null;
+  /** Each such rule, to ask on its sentences (2.6, E7). */
+  unreadRules?: Array<{ table: number; question: string; label: string; sentences: string[] }>;
   document: Sentence[] | null;
   rules: RuleTable[] | null;
   chat: ChatMessage[];

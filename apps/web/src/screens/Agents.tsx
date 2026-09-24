@@ -37,7 +37,7 @@ export function Agents({ go }: { go: (to: Route) => void }) {
         Each shows one status, worked out from what the system already holds so it cannot disagree with
         itself. Beside it is the single next thing to do.
       </p>}
-      actions={<Action onClick={() => go({ at: 'bringIn' })}>Bring in a procedure</Action>}>
+      actions={<Action onClick={() => go({ at: 'newAgent' })}>New agent</Action>}>
       <Section title="All agents" note={agents.state === 'loaded' ? String(agents.value.length) : undefined}>
         {agents.state === 'empty'
           ? <div style={{ border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel)' }}>
@@ -45,8 +45,8 @@ export function Agents({ go }: { go: (to: Route) => void }) {
           : agents.value.length === 0
             ? <div style={{ border: '1px solid var(--rule)', borderRadius: 6, background: 'var(--panel)' }}>
                 <EmptyState of={{ kind: 'nothingYet',
-                  invite: 'Bring in a procedure somebody already follows by hand, and it will appear here.',
-                  action: <Action onClick={() => go({ at: 'bringIn' })}>Bring in a procedure</Action> }} /></div>
+                  invite: 'Start a new agent from a procedure somebody already follows by hand, and it will appear here.',
+                  action: <Action onClick={() => go({ at: 'newAgent' })}>New agent</Action> }} /></div>
             : <div style={{ borderTop: '1px solid var(--ink)' }}>
                 <div style={{ borderBottom: '1px solid var(--rule)', padding: '9px 0', display: 'flex',
                   gap: 18, fontSize: 12.5, fontWeight: 600, color: 'var(--ink-2)' }}>

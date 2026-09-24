@@ -12,7 +12,7 @@
  * is cleared by an edit rather than kept.
  */
 import type { PoolClient } from 'pg';
-import { object, z, type Blocker, describeBlocker } from '@orbit/contract';
+import { object, unreadAdvice, unreadColumns, z, type Blocker, type RuleTable, describeBlocker } from '@orbit/contract';
 import { asDraftStep } from './publish.ts';
 
 /**
@@ -80,6 +80,14 @@ export async function confirm(db: PoolClient, workflowId: string, c: Confirmatio
       blockers.push({ kind: 'outstanding', note: note.kind as 'question', body: note.body });
     }
   }
+
+  // A rule comparing something no step reads is a question on that rule
+  // (2.6, E7), derived from the tables rather than stored, so it cannot go
+  // stale: it is answered by changing the procedure so that a step reads it.
+  const { rows: [latest] } = await db.query<{ tables: RuleTable[] | null }>(
+    `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [workflowId]);
+  const unread = unreadColumns(latest?.tables ?? []);
+  if (unread.length) blockers.push({ kind: 'outstanding', note: 'question', body: unreadAdvice(unread) });
 
   // §4: confirmation attests that this is the procedure, and a procedure that
   // reaches no conclusion is not one. Caught here as well as at publication,

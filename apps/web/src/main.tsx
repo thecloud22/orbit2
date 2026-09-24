@@ -6,7 +6,8 @@ import { useRoute } from './router.ts';
 import { Home } from './screens/Home.tsx';
 import { Editor } from './screens/Editor.tsx';
 import { Agents } from './screens/Agents.tsx';
-import { BringIn, Demonstrating } from './screens/BringIn.tsx';
+import { Demonstrating } from './screens/BringIn.tsx';
+import { NewAgent } from './screens/NewAgent.tsx';
 import { Runs } from './screens/Runs.tsx';
 import { RunPage } from './RunPage.tsx';
 import { StartRun } from './screens/StartRun.tsx';
@@ -22,11 +23,11 @@ function App() {
       {route.at === 'home' && <Home go={go} />}
       {route.at === 'agents' && <Agents go={go} />}
       {route.at === 'agent' && <Editor id={route.id} go={go} />}
-      {route.at === 'bringIn' && <BringIn go={go} />}
+      {route.at === 'newAgent' && <NewAgent go={go} />}
       {/* The sort is part of the one page now (R1); an old link to it opens the agent. */}
       {route.at === 'understanding' && <Editor id={route.id} go={go} />}
       {route.at === 'recording' && (
-        <Demonstrating id={route.id} go={go} onAbandon={() => go({ at: 'bringIn' })} />
+        <Demonstrating id={route.id} go={go} onAbandon={() => go({ at: 'newAgent' })} />
       )}
       {route.at === 'runs' && <Runs go={go} />}
       {route.at === 'run' && <RunPage reference={route.reference} go={go} />}

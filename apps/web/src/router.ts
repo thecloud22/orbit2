@@ -11,7 +11,8 @@ export type Route =
   | { at: 'home' }
   | { at: 'agents' }
   | { at: 'agent'; id: string }
-  | { at: 'bringIn' }
+  /** A new agent, started on the editor (2.6): nothing is saved until there is something to keep. */
+  | { at: 'newAgent' }
   /** What Orbit understood of a procedure, before anything is drafted (2.1). */
   | { at: 'understanding'; id: string }
   /** A recording in progress. Addressable because it outlives the tab: the
@@ -30,10 +31,11 @@ export function parse(path: string): Route {
   const [, first, second] = path.replace(/\/+$/, '').split('/');
   switch (first) {
     case '': case undefined: return { at: 'home' };
-    case 'agents': return second ? { at: 'agent', id: second } : { at: 'agents' };
-    case 'bring-in': return { at: 'bringIn' };
-    case 'understanding': return second ? { at: 'understanding', id: second } : { at: 'bringIn' };
-    case 'recordings': return second ? { at: 'recording', id: second } : { at: 'bringIn' };
+    case 'agents': return second === 'new' ? { at: 'newAgent' } : second ? { at: 'agent', id: second } : { at: 'agents' };
+    // Bring In was the page before the editor; an old link to it starts a new agent.
+    case 'bring-in': return { at: 'newAgent' };
+    case 'understanding': return second ? { at: 'understanding', id: second } : { at: 'newAgent' };
+    case 'recordings': return second ? { at: 'recording', id: second } : { at: 'newAgent' };
     case 'runs': return second ? { at: 'run', reference: second } : { at: 'runs' };
     case 'start': return second ? { at: 'start', version: second } : { at: 'agents' };
     case 'admin': return { at: 'admin' };
@@ -48,7 +50,7 @@ export function href(route: Route): string {
     case 'home': return '/';
     case 'agents': return '/agents';
     case 'agent': return `/agents/${route.id}`;
-    case 'bringIn': return '/bring-in';
+    case 'newAgent': return '/agents/new';
     case 'understanding': return `/understanding/${route.id}`;
     case 'recording': return `/recordings/${route.id}`;
     case 'runs': return '/runs';

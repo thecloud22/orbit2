@@ -2282,6 +2282,52 @@ table cells as the primary surface, because the author works in sentences and R1
 from saying anything the sentences do not. Resolving a guess by a model at run time, because
 Decision 6 keeps models out of execution and a link is settled while authoring.
 
+## Decision 21 — A new agent starts on the editor, and is drafted straight through
+
+**Status:** adopted 2026-09-23, built on `2.6/start-on-the-editor` ("go ahead and build. all
+yours"). Two decisions of Karthik's, taken together: *start on the editor* ("start creating the agent
+from this page… instead of asking the user to page in the previous page"; "Lets pick the system
+before we start. Orbit does not have to suggest") and *skip the sort page* ("Users don't know what to
+do on the page shown after the sort… take them straight through"). Plan:
+`docs/plans/2026-09-23-start-on-the-editor.md`.
+
+**Settles:** where an agent begins, and what stands between a procedure arriving and its draft.
+Before this, a new agent began on Bring In, a page of its own asking for the name, one application,
+a start path, example inputs and whether more was to come. The sort then stopped on the agent's page
+until a person pressed "Confirm and draft it", and people did not know what that page wanted of them.
+
+1. **A new agent opens the editor** (`/agents/new`). Bring In's address leads there. Nothing is kept
+   until there is something to keep, so a page opened and left leaves no empty agent behind.
+2. **The systems are picked first, on that page, as many as the procedure uses.** This is Decision 19's
+   "the author adds one", made at the start: the first picked is the one the agent is brought in
+   against, the rest are attached. Orbit never suggests a system or adds one.
+3. **A procedure that arrives whole is drafted straight through.** Pasted or read from a PDF, it is
+   sorted, Orbit confirms the sort, and the walk is queued, with progress shown. The record says
+   Orbit confirmed it (`by: orbit`). One written by hand is drafted when its author presses *Draft
+   it*. Confirming before publication is unchanged: drafting proposes, and product rule 3 is
+   untouched.
+4. **It stops, and says why in words, in two cases only:** the author said more is to come, or
+   nothing in the procedure is Orbit's to do (`understanding.not_drafted`, 0033).
+5. **What the sort page caught is raised after drafting, on its sentence.** A line that reads like
+   instructions is a risk (Decision 16, unchanged in substance). A sentence for a person is asked
+   whether the run waits there, and yes is a relabel that Map changes maps. A rule comparing
+   something no step reads is a question on that rule, derived each time it is shown. Its table is
+   left out of the walk until it can be decided, and it holds confirmation. A wrong label is
+   changed, then mapped.
+6. **A missing example stops the walk at the step that needs it.** The walk used to type an empty
+   string and map everything after it on the wrong page. It now stops, asks on the sentence, and the
+   answer maps from there. Until an example is given, the walk is told that what the procedure is
+   given is an input, not "none", which had it open whichever record the list showed first.
+7. **Orbit's work is watched.** While it drafts or maps, the page shows the screen it sees, the line
+   it is on, what it just did, and every page so far.
+
+**Rejected:** Orbit suggesting a system from the words, or adding one itself. Karthik chose picking
+first, and a system an agent can reach is the choice that most needs a person. Keeping a gate
+before drafting, because its one remaining job, an example value, is asked where it is needed.
+Pausing the walk mid-way while a person answers, because the worker holding a browser open on a
+person would stall every other walk and run behind it. Stopping and mapping from the sentence costs
+one more mapping and holds nothing.
+
 ## What these decisions commit each other to
 
 The decisions are not independent, and it is worth stating the joins so that a later change to one
