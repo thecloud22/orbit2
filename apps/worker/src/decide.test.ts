@@ -146,3 +146,44 @@ test('an action a step of the walk already does may press nothing (scenario 11)'
   assert.equal(compiled.steps.filter((x) => x.kind === 'activate' && x.summary === 'Approve file').length, 1, 'approved once, by the walk\'s step');
   assert.ok(!compiled.questions.some((q) => /names nothing to press/.test(q.body)));
 });
+
+test('a column the author named is the value read by that name, whatever the model answers (Decision 20)', async () => {
+  const { compileTables } = await import('./decide.ts');
+  const id = () => crypto.randomUUID();
+  const read = (name: string, label: string) => ({ id: id(), kind: 'read', summary: label, region: { label, binding: {} },
+    produces: { name, label, type: 'text', required: true } });
+  const steps = (reads: object[]) => [
+    { id: id(), kind: 'open', summary: 'open', application: 'app', path: '/', arrives: { describe: 'open' }, changesARecord: false },
+    ...reads,
+    { id: id(), kind: 'end', summary: 'approved', outcome: 'approved', publishes: [] },
+  ] as never[];
+  // The guess the author's word replaces: "the program" taken to be the program code.
+  const model = {
+    provider: 'test', model: 'test',
+    async propose() {
+      return { value: { columns: [{ column: 'loanProgram', value: 'programCode' }], words: [], why: 'x',
+        actions: [{ action: 'refer the file to a senior underwriter.', controls: ['Refer to senior underwriter'], ends: true, outcome: 'referred', label: 'Referred' }] },
+        model: 'test', provider: 'test', tokensIn: 1, tokensOut: 1, tokensCached: 0, tokensCacheWritten: 0, costMicros: 1 };
+    },
+  };
+  const compile = (reads: object[], named?: Set<string>) => compileTables({
+    tables: [{ question: 'Is the file referred?', columns: [{ name: 'loanProgram', label: 'program', readBy: '1.9' }],
+      rows: [{ when: [{ column: 'loanProgram', is: 'isNot', value: 'jumbo' }], then: 'refer the file to a senior underwriter.', sentence: '1.14' }],
+      otherwise: null, sentences: ['1.14'] }],
+    steps: steps(reads), provenance: {}, order: ['1.9', '1.14'],
+    seen: [{ index: 1, what: 'button', role: 'button', name: 'Refer to senior underwriter', binding: {} as never }],
+    pageUrl: '/loan', model: model as never, firstTurn: 1, ...(named ? { named } : {}),
+  });
+  const compared = (c: Awaited<ReturnType<typeof compile>>) => JSON.stringify(c.steps.filter((x) => x.kind === 'branch'));
+  const both = [read('loanProgram', 'Loan program'), read('programCode', 'Program code')];
+
+  assert.match(compared(await compile(both)), /"value":"programCode"/, 'unnamed, the model decides');
+  const named = await compile(both, new Set(['loanProgram']));
+  assert.match(compared(named), /"value":"loanProgram"/, 'named, the author decides');
+  assert.doesNotMatch(compared(named), /programCode/);
+
+  const unread = await compile([read('programCode', 'Program code')], new Set(['loanProgram']));
+  assert.ok(!unread.steps.some((x) => x.kind === 'branch'), 'not built on a value nobody reads');
+  assert.ok(unread.questions.some((q) => /names "program" as loanProgram, and no step reads a value by that name/.test(q.body)),
+    JSON.stringify(unread.questions.map((q) => q.body)));
+});

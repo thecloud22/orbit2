@@ -53,6 +53,9 @@ export interface RuleTable {
   sentences: string[];
 }
 
+/** A phrase of a sentence and the value it means (Decision 20): the author's, or Orbit's guess. */
+export interface ValueLink { sentence: string; phrase: string; value: string | null; by: 'author' | 'orbit' }
+
 export interface ChatMessage {
   id: string; said_by: 'author' | 'orbit'; text: string | null; state: string;
   outcome: { departs?: boolean; refused?: string; offer?: string; edits?: unknown[] } | null; answers: string | null;
@@ -78,6 +81,8 @@ export interface Draft {
   document: Sentence[] | null;
   rules: RuleTable[] | null;
   chat: ChatMessage[];
+  /** Which phrase means which value (Decision 20). Absent from an API older than 0032. */
+  links?: ValueLink[];
   lastRun: { reference: string; status: string; outcome: string | null; version: number } | null;
   /** Sentences changed since Orbit last mapped them (R18). */
   pending?: string[];

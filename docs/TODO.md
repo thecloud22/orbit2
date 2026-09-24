@@ -374,11 +374,22 @@ build is unknown: Hercules could not run under x86 emulation on this Mac. The ap
 small program per screen, and the build retries a few layouts.
 
 
-## Values named in the author's words are held on `2.5/values-in-your-words`, not on `main`
+## Values named in your words: what 2.5 knowingly leaves undone
 
-Built 2026-09-23 (`docs/plans/2026-09-23-values-in-your-words.md` and Decision 20, both on the
-branch) and held for review: it adds a record (0032) and changes what the tables, the walk and the
-compile trust. **Without it, `main`** has no way for an author to say which value a phrase means.
-The column a rule compares is named by one model and linked to a read by another, and neither
-guess is shown anywhere. Asked for as "reference variable names in Rules… insert {BR1} here?".
-Tokens in the text and rule references were rejected there, with the reasons.
+Built on `2.5/values-in-your-words` (`docs/plans/2026-09-23-values-in-your-words.md`, Decision 20)
+and merged to main on 2026-09-23.
+
+- **Words with no guess can be named only through the Edit box.** A guess comes from a label found
+  in the sentence. "the program" in scenario 2's 1.14 has none, because no label says "program"
+  alone. Selecting any words in a sentence to name them is not built. @ in the Edit box is the way,
+  and it rewrites the words as the value's own ("the loan program").
+- **The walk is told a name, not held to it.** A read under another name leaves a question, and the
+  DataStore's rename fixes it. Nothing renames a read automatically (plan §9 item 5).
+- **A link the tables cannot honour sinks the set.** A named value with no column is a problem like
+  any other: the tables are made again once, then refused with the reason. The author sees why and
+  can change or remove the link.
+- **The chat cannot name a value.** It changes labels and words (plan §12 of 2.1), and naming was
+  not added to its closed list.
+- **A withdrawn sentence cannot be put back from the Edit box**, where its words are greyed out.
+  Adding it again as a new sentence works. This predates 2.5.
+- **A guess stops at the label's words:** "the debt-to-income" in "the debt-to-income ratio".

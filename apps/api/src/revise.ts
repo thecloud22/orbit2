@@ -13,7 +13,7 @@
  * will later be shown.
  */
 import type { ClientBase, PoolClient } from 'pg';
-import { looksLikeSecret, object, outsideAddresses, sentenceNumber, unreadAdvice, unreadColumns, z, type RuleTable } from '@orbit/contract';
+import { looksLikeSecret, object, outsideAddresses, placeOf, placeRefusal, sentenceNumber, unreadAdvice, unreadColumns, valueLinksAsked, wordLinks, z, type RuleTable } from '@orbit/contract';
 import { returnToDraft } from './edit.ts';
 import { insertPart } from './procedure.ts';
 import { forTheWalk, sentencesWithLabels } from './understanding.ts';
@@ -73,12 +73,17 @@ async function changed(db: PoolClient, workflowId: string, act: string, detail: 
 }
 
 export async function reviseSentence(db: PoolClient, workflowId: string, body: unknown, by: 'author' | 'chat' = 'author'): Promise<Revised> {
-  const asked = object({ sentence: sentenceNumber, text: words }).safeParse(body);
+  const asked = object({ sentence: sentenceNumber, text: words, links: wordLinks.optional() }).safeParse(body);
   if (!asked.success) return { ok: false, because: asked.error.issues.map((i) => i.message).join(' ') };
   const open = await openFor(db, workflowId);
   if ('because' in open) return { ok: false, because: open.because };
   const refused = refusedText(asked.data.text, open.hosts);
   if (refused) return { ok: false, because: refused };
+  // A value named while writing (Decision 20) is kept with the words it names, in the same change.
+  for (const l of asked.data.links ?? []) {
+    const where = placeOf(asked.data.text, l.phrase);
+    if ('refused' in where) return { ok: false, because: placeRefusal(asked.data.sentence, l.phrase, where.refused) };
+  }
   const id = await sentenceId(db, workflowId, asked.data.sentence);
   if (!id) return { ok: false, because: `This procedure has no sentence ${asked.data.sentence}.` };
   const { rows: [now] } = await db.query<{ text: string; withdrawn: boolean }>(`SELECT text, withdrawn FROM sentence_now WHERE id = $1`, [id]);
@@ -87,14 +92,18 @@ export async function reviseSentence(db: PoolClient, workflowId: string, body: u
   await db.query('BEGIN');
   try {
     await db.query(`INSERT INTO sentence_revision (sentence_id, text, given_by) VALUES ($1, $2, $3)`, [id, asked.data.text, by]);
-    await changed(db, workflowId, 'sentence revised', { sentence: asked.data.sentence, by });
+    for (const l of asked.data.links ?? []) {
+      await db.query(`INSERT INTO value_link (sentence_id, phrase, value, given_by) VALUES ($1, $2, $3, 'author')`, [id, l.phrase, l.value]);
+    }
+    await changed(db, workflowId, 'sentence revised', { sentence: asked.data.sentence, by,
+      ...(asked.data.links?.length ? { links: asked.data.links } : {}) });
     await db.query('COMMIT');
     return { ok: true };
   } catch (error) { await db.query('ROLLBACK'); throw error; }
 }
 
 export async function addSentence(db: PoolClient, workflowId: string, body: unknown): Promise<Revised & { sentences?: string[] }> {
-  const asked = object({ after: sentenceNumber.nullable(), text: words }).safeParse(body);
+  const asked = object({ after: sentenceNumber.nullable(), text: words, links: wordLinks.optional() }).safeParse(body);
   if (!asked.success) return { ok: false, because: asked.error.issues.map((i) => i.message).join(' ') };
   const open = await openFor(db, workflowId);
   if ('because' in open) return { ok: false, because: open.because };
@@ -105,7 +114,23 @@ export async function addSentence(db: PoolClient, workflowId: string, body: unkn
   try {
     const part = await insertPart(db, workflowId, { source: 'author', body: asked.data.text }, undefined, asked.data.after);
     if (!part.ok) { await db.query('ROLLBACK'); return { ok: false, because: part.because }; }
-    await changed(db, workflowId, 'sentence added', { part: part.key, after: asked.data.after });
+    // What was added may be several sentences: each link goes to the one sentence that has its words once.
+    if (asked.data.links?.length) {
+      const { rows: added } = await db.query<{ id: string; number: string; text: string }>(
+        `SELECT s.id, p.key || '.' || s.n AS number, s.text FROM procedure_sentence s JOIN procedure_part p ON p.id = s.part_id
+          WHERE p.workflow_id = $1 AND p.key = $2`, [workflowId, part.key]);
+      for (const l of asked.data.links) {
+        const holding = added.filter((x) => 'at' in placeOf(x.text, l.phrase));
+        if (holding.length !== 1) {
+          await db.query('ROLLBACK');
+          return { ok: false, because: holding.length === 0 ? `"${l.phrase}" is not in what you added, so it names nothing.`
+            : `"${l.phrase}" is in more than one of the sentences you added, so it names neither.` };
+        }
+        await db.query(`INSERT INTO value_link (sentence_id, phrase, value, given_by) VALUES ($1, $2, $3, 'author')`, [holding[0]!.id, l.phrase, l.value]);
+      }
+    }
+    await changed(db, workflowId, 'sentence added', { part: part.key, after: asked.data.after,
+      ...(asked.data.links?.length ? { links: asked.data.links } : {}) });
     await db.query('COMMIT');
     return { ok: true, sentences: part.sentences };
   } catch (error) { await db.query('ROLLBACK'); throw error; }
@@ -132,8 +157,8 @@ export async function withdrawSentence(db: PoolClient, workflowId: string, body:
 
 /**
  * The sentences changed since Orbit last mapped this draft (R18): revised,
- * added, withdrawn, relabelled, or with an answer the next mapping should
- * hear. Only those that bear on the draft — work, a rule, a wait, or one that
+ * added, withdrawn, relabelled, placed, with a value named in them, or with
+ * an answer the next mapping should hear. Only those that bear on the draft — work, a rule, a wait, or one that
  * already has steps. Derived every time; nothing stores it.
  */
 export async function pendingOf(db: ClientBase, workflowId: string): Promise<string[]> {
@@ -148,6 +173,7 @@ export async function pendingOf(db: ClientBase, workflowId: string): Promise<str
       WHERE p.workflow_id = $1
         AND (s.revised_at > $2 OR p.added_at > $2 OR l.created_at > $2
              OR EXISTS (SELECT 1 FROM sentence_application t WHERE t.sentence_id = s.id AND t.created_at > $2)
+             OR EXISTS (SELECT 1 FROM value_link v WHERE v.sentence_id = s.id AND v.created_at > $2)
              OR EXISTS (SELECT 1 FROM workflow_note n WHERE n.workflow_id = p.workflow_id AND n.sentence = p.key || '.' || s.n
                          AND n.resolved_at > $2 AND n.action IN ('pickElement', 'giveExample', 'mapAgain')))
       ORDER BY p.added_at, p.key, s.n`, [workflowId, last.at]);
@@ -205,6 +231,54 @@ export async function placeSentence(db: PoolClient, workflowId: string, body: un
     await db.query(`INSERT INTO sentence_application (sentence_id, application_id, given_by) VALUES ($1, $2, 'author')`,
       [id, asked.data.applicationId]);
     await changed(db, workflowId, 'sentence placed', { sentence: asked.data.sentence, application: on.name });
+    await db.query('COMMIT');
+    return { ok: true };
+  } catch (error) { await db.query('ROLLBACK'); throw error; }
+}
+
+/**
+ * A phrase of a sentence, and the value it means, as the author says
+ * (Decision 20): "the program" in 1.14 is loanProgram, or is not a value at
+ * all. Kept beside the sentence and never written into it. It is a change like
+ * a label: the rules are tabled again, and the sentence waits to be mapped.
+ */
+export async function linkValue(db: PoolClient, workflowId: string, body: unknown): Promise<Revised> {
+  const asked = valueLinksAsked.safeParse(body);
+  if (!asked.success) {
+    return { ok: false, because: 'Say which sentence, which of its words, and the value they mean: a name like creditScore, or none.' };
+  }
+  const links = 'links' in asked.data ? asked.data.links : [asked.data];
+  const open = await openFor(db, workflowId);
+  if ('because' in open) return { ok: false, because: open.because };
+  // All of them are checked before any is kept: one change, or none.
+  const kept: Array<{ id: string; phrase: string; value: string | null }> = [];
+  for (const { sentence, phrase, value } of links) {
+    const id = await sentenceId(db, workflowId, sentence);
+    if (!id) return { ok: false, because: `This procedure has no sentence ${sentence}.` };
+    const { rows: [now] } = await db.query<{ text: string; withdrawn: boolean; label: string | null }>(
+      `SELECT s.text, s.withdrawn,
+              (SELECT label FROM sentence_label WHERE sentence_id = s.id ORDER BY seq DESC LIMIT 1) AS label
+         FROM sentence_now s WHERE s.id = $1`, [id]);
+    if (now!.withdrawn) return { ok: false, because: `${sentence} is taken out.` };
+    if (now!.label !== 'task' && now!.label !== 'rule') {
+      return { ok: false, because: `Nothing is read or compared in ${sentence}: only work in the application and rules name values.` };
+    }
+    const where = placeOf(now!.text, phrase);
+    if ('refused' in where) return { ok: false, because: placeRefusal(sentence, phrase, where.refused) };
+    const { rows: [was] } = await db.query<{ value: string | null }>(
+      `SELECT value FROM value_link WHERE sentence_id = $1 AND phrase = $2 ORDER BY seq DESC LIMIT 1`, [id, phrase]);
+    if (was && was.value === value && links.length === 1) {
+      return { ok: false, because: value ? `"${phrase}" is already ${value}.` : `"${phrase}" is already not a value.` };
+    }
+    if (!was || was.value !== value) kept.push({ id, phrase, value });
+  }
+  if (!kept.length) return { ok: false, because: 'Those words already mean what you said.' };
+  await db.query('BEGIN');
+  try {
+    for (const k of kept) {
+      await db.query(`INSERT INTO value_link (sentence_id, phrase, value, given_by) VALUES ($1, $2, $3, 'author')`, [k.id, k.phrase, k.value]);
+    }
+    await changed(db, workflowId, 'value named', { links });
     await db.query('COMMIT');
     return { ok: true };
   } catch (error) { await db.query('ROLLBACK'); throw error; }

@@ -204,6 +204,24 @@ const SCENARIOS = {
       },
     },
   },
+  // Orbit 2.5 (Decision 20): scenario 9's words, with the loan-to-value named
+  // by the author, as a person does on the page, under a name no model would
+  // pick. The name must reach the table's column, the walk's read and the
+  // compiled branch, and every loan decide as before.
+  14: {
+    name: 'Scenario 14: scenario 9, with the loan-to-value named in its words',
+    procedure: readFileSync(join(DIR, '09-live-edit.txt'), 'utf8'),
+    example: 'ML-26-04561',
+    names: [
+      { find: /^4\. Read the loan-to-value/, phrase: 'the loan-to-value', value: 'ltvPercent' },
+      { find: /^5\. If the loan-to-value/, phrase: 'the loan-to-value', value: 'ltvPercent' },
+    ],
+    loans: {
+      'ML-26-04561': { status: 'succeeded', pressed: ['Require private mortgage insurance', 'Approve file'] },
+      'ML-26-04471': { status: 'succeeded', pressed: ['Approve file'] },
+      'ML-26-99999': { status: 'succeeded', pressed: [], ending: /not ?found|no ?such/i },
+    },
+  },
   2: {
     name: 'Scenario 2: underwriting risk review (PDF)',
     pdf: join(DIR, '02-risk-review.pdf'),
@@ -304,6 +322,25 @@ async function run(key) {
     console.log(`  placed: ${work.map((x) => `${x.number} ${x.application?.name === green.name ? 'green screen' : x.application ? 'web' : '?'}`).join(', ')}`);
   }
 
+  // Values named in the words (Decision 20), as a person does by choosing the words on the page.
+  if (s.names) {
+    const doc = (await call(`/api/workflows/${W}`)).body.document ?? [];
+    const links = s.names.map((n) => {
+      const at = doc.find((x) => !x.withdrawn && n.find.test(x.text));
+      return at && { sentence: at.number, phrase: n.phrase, value: n.value };
+    });
+    if (links.some((l) => !l)) return [`a sentence to name a value in was not found: ${doc.map((x) => x.text).join(' | ')}`];
+    const named = await call(`/api/workflows/${W}/link-value`, { links });
+    if (named.status !== 200) return [`naming the values was refused: ${named.body.why}`];
+    await until(() => call(`/api/workflows/${W}/understanding`).then((r) => r.body), (u) => u.status === 'sorted' || u.status === 'refused', 'the tables');
+    const rules = (await call(`/api/workflows/${W}`)).body.rules ?? [];
+    const columns = rules.flatMap((t) => t.columns.map((c) => c.name));
+    for (const v of new Set(s.names.map((n) => n.value))) {
+      console.log(`  ${columns.includes(v) ? 'ok  ' : 'FAIL'}  the table compares ${v} (columns: ${columns.join(', ')})`);
+      if (!columns.includes(v)) failures.push(`no table column is named ${v}`);
+    }
+  }
+
   const confirmed = await call(`/api/workflows/${W}/understood`, {});
   const fail = (why) => { console.log(`  FAIL  ${why}`); return [why]; };
   if (confirmed.status !== 202) return fail(`the sort could not be confirmed without help: ${confirmed.body.why}`);
@@ -317,6 +354,15 @@ async function run(key) {
   if ((s.risks ?? 0) !== risks) failures.push(`${risks} risk${risks === 1 ? '' : 's'} raised, wanted ${s.risks ?? 0}`);
   if (s.risks) console.log(`  ${risks === s.risks ? 'ok  ' : 'FAIL'}  ${risks} injected line${risks === 1 ? '' : 's'} flagged as a risk`);
   for (const n of open) console.log(`  note  ${n.body.slice(0, 150)}`);
+  if (s.names) {
+    const reads = draft.steps.filter((x) => x.kind === 'read').map((x) => x.declares.produces?.name);
+    const branches = JSON.stringify(draft.steps.filter((x) => x.kind === 'branch').map((x) => x.declares));
+    for (const v of new Set(s.names.map((n) => n.value))) {
+      const ok = reads.includes(v) && branches.includes(`"${v}"`);
+      console.log(`  ${ok ? 'ok  ' : 'FAIL'}  a step reads ${v} and a branch compares it (reads: ${reads.join(', ')})`);
+      if (!ok) failures.push(`${v} was not read and compared under the author's name`);
+    }
+  }
   const published = await confirmAndPublish(W, s.example);
   if (!published.ok) return fail(published.why);
   await runLoans(published.version, s.loans, failures, s.objects);

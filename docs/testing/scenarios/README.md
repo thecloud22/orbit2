@@ -241,5 +241,22 @@ on the web file.
 
 ---
 
-`pnpm test:scenarios` runs all twelve, the way a person would, and checks every loan.
+---
+
+# Values named in your words: scenario 14
+
+Orbit 2.5 (Decision 20). `09-live-edit.txt` again, against the web portal. After the sort, the
+runner names the loan-to-value in 1.4 and 1.5 as `ltvPercent`, as an author does by choosing the
+words on the page. That is a name no model picks by itself. It checks that the table's column is
+`ltvPercent`, that a step reads it under that name, and that the compiled branch compares it.
+
+| Loan | LTV | Should press |
+|---|---|---|
+| ML-26-04561 | 85.0% | PMI, **Approve** |
+| ML-26-04471 | 72.7% | **Approve** |
+| ML-26-99999 | — | nothing: *no such file* |
+
+---
+
+`pnpm test:scenarios` runs all of them except 13, the way a person would, and checks every loan.
 `node scripts/scenarios.mjs 6` runs one; `demo` runs 5 to 9; `green` runs 10 to 12.

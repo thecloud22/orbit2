@@ -122,6 +122,12 @@ export async function compileTables(opts: {
    * it, goes back — the steps after were drafted on that one's screen.
    */
   on?: { application: string; path: string };
+  /**
+   * The values the author named in the procedure's words (Decision 20). A
+   * column of one of these names is the value read by that name, and the
+   * model is not asked which it is.
+   */
+  named?: ReadonlySet<string>;
 }): Promise<{ steps: Step[]; turns: Turn[]; questions: Note[]; compiled: number }> {
   const turns: Turn[] = [];
   const questions: Note[] = [];
@@ -182,6 +188,12 @@ export async function compileTables(opts: {
       // refused because "file is there" is not a value anybody reads.
       const pressesNothing = Boolean(said) && actionsSaid.every((a) => said!.actions.find((x) => x.action === a)?.controls.length === 0);
       for (const c of table.columns) {
+        if (opts.named?.has(c.name)) {
+          const read = reads.find((r) => r.produces.name === c.name);
+          if (read) valueOf.set(c.name, read);
+          else problems.push(`the procedure names "${c.label}" as ${c.name}, and no step reads a value by that name`);
+          continue;
+        }
         const named = said?.columns.find((x) => x.column === c.name)?.value;
         const read = reads.find((r) => r.produces.name === named);
         if (read) valueOf.set(c.name, read);
