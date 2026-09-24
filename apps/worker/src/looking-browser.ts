@@ -7,8 +7,8 @@
  * screen answers the same questions in `looking-tn3270.ts`.
  */
 import type { Step } from '@orbit/contract';
-import { chromium, type Locator, type Page, type Request } from 'playwright';
-import { describeRefusal, resolve as resolveBinding } from './binder.ts';
+import { chromium, type Frame, type Locator, type Page, type Request } from 'playwright';
+import { describeRefusal, frameNamed, resolve as resolveBinding } from './binder.ts';
 import { toType, type Box, type Looking, type OpenLooking, type Typing } from './looking.ts';
 import { snapshot, type Seen } from './snapshot.ts';
 
@@ -173,9 +173,15 @@ class BrowserLooking implements Looking {
       w: round((right - x) / viewport.width), h: round((bottom - y) / viewport.height) };
   }
 
+  /** Where an element is: the frame its binding names, or the page. */
+  #rootOf(element: Seen): Page | Frame {
+    return frameNamed(this.#page, element.binding) ?? this.#page;
+  }
+
   async type(element: Seen, value: string): Promise<void> {
-    const field = this.#page.getByRole(element.role as 'textbox', { name: element.name, exact: true })
-      .or(this.#page.locator(`[name="${element.binding.name ?? ''}"]`)).first();
+    const root = this.#rootOf(element);
+    const field = root.getByRole(element.role as 'textbox', { name: element.name, exact: true })
+      .or(root.locator(`[name="${element.binding.name ?? ''}"]`)).first();
     await field.fill(value).catch(() => undefined);
     this.#typed.push({ field, value });
   }
@@ -198,8 +204,9 @@ class BrowserLooking implements Looking {
    * ARIA role the rest have is looked up as it always was.
    */
   #pressable(element: Seen): Locator {
-    if (element.role === 'generic') return this.#page.getByText(element.name, { exact: true }).first();
-    return this.#page.getByRole(element.role as 'button', { name: element.name, exact: true }).first();
+    const root = this.#rootOf(element);
+    if (element.role === 'generic') return root.getByText(element.name, { exact: true }).first();
+    return root.getByRole(element.role as 'button', { name: element.name, exact: true }).first();
   }
 
   async restart(path: string): Promise<void> {

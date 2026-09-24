@@ -90,9 +90,23 @@ export const COLLECT = `
   const out = [];
   const all = ${ALL};
   const text = (el) => (el.textContent || '').trim().replace(/\\s+/g, ' ');
+  // On the screen, not just in the document. A box kept in the layout but
+  // made invisible — visibility: hidden, or opacity 0 — was offered to the
+  // model as a field somebody could type into. A checkbox or radio button is
+  // the exception: it is very often an opacity-0 input under a styled label,
+  // and it is still the thing that is pressed.
   const visible = (el) => {
     const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
+    if (!(r.width > 0 && r.height > 0)) return false;
+    if (typeof el.checkVisibility !== 'function') return true;
+    const styled = el.type === 'checkbox' || el.type === 'radio';
+    return el.checkVisibility({ visibilityProperty: true, opacityProperty: !styled });
+  };
+  // Words that label something: short, and holding no control of their own.
+  const labelText = (el) => {
+    if (!el || el.querySelector('input, select, textarea, button, a')) return '';
+    const t = text(el);
+    return t.length > 0 && t.length <= 60 ? t : '';
   };
 
   // Fields, buttons and links: the things a step can act on.
@@ -133,13 +147,30 @@ export const COLLECT = `
     let beside = '';
     const cell = el.closest('td');
     if (cell && cell.previousElementSibling) beside = text(cell.previousElementSibling);
+    // The same layout built from divs: <div>Policy number</div><div><input></div>,
+    // with no <label> to tie them. The box has no accessible name, so it was
+    // offered as its form's internal name — "x1" — which no procedure says.
+    // Only for a field with no name of its own, and only a few levels up: the
+    // label is the element just before the box or just before what holds it,
+    // which is exactly what the controlBeside rung looks for at run time.
+    if (!beside && !name && what === 'field') {
+      let at = el;
+      for (let up = 0; up < 3 && at && at !== document.body; up += 1, at = at.parentElement) {
+        const said = labelText(at.previousElementSibling);
+        if (said) { beside = said; break; }
+        if (at.previousElementSibling) break;
+      }
+    }
 
     // A name this long is a subtree that got collapsed rather than a name.
     // Shortened rather than dropped for the element somebody just acted on:
     // an awkward name is something an author can correct, and no name at all
-    // is a demonstration that lost a step without saying so.
+    // is a demonstration that lost a step without saying so. A button or a
+    // link says what it does and may take more words to say it — "Continue to
+    // the next step after reviewing the terms" was the only way forward on a
+    // page, and it was dropped — so they are allowed twice as many.
     let called = name.trim();
-    if (called.length > 80) {
+    if (called.length > (what === 'button' || what === 'link' ? 160 : 80)) {
       if (!acted) continue;
       called = called.slice(0, 80).trim();
     }
@@ -258,6 +289,20 @@ export const COLLECT = `
       name: value, formName: null, labelledBy: label, row: null, column: null });
   }
 
+  // What the application says went wrong, or right: a sign-in refused, a
+  // required field missed. Nothing else on the page carries it, so a walk that
+  // typed the wrong thing could not see that the page had said so. Only an
+  // alert: a status region speaks all the time and would be noise.
+  for (const el of all('[role=alert], [aria-live=assertive]')) {
+    if (!visible(el)) continue;
+    const said = text(el);
+    if (!said || said.length > 200) continue;
+    out.push({
+      // Its own words find it: an alert has no accessible name of its own.
+      touched: false, tag: el.tagName.toLowerCase(), type: null, what: 'value', role: 'text',
+      name: said, formName: null, labelledBy: null, row: null, column: null });
+  }
+
   for (const el of all('h1, h2, h3')) {
     if (!visible(el)) continue;
     out.push({
@@ -273,6 +318,25 @@ export interface Raw {
   name: string; formName: string | null; labelledBy: string | null; touched?: boolean;
   secret?: boolean;
   row: string | null; column: string | null;
+  /** The frame it is in, when it is not the page itself (see `frameOf`). */
+  frame?: FrameRef;
+}
+
+/** How a binding names the frame it looks in: by its name or id, or failing both by its address. */
+export type FrameRef = { frame: string } | { frameUrl: string };
+
+/**
+ * What a frame is called, so a binding can find it again in another session.
+ *
+ * Playwright's frame name is the iframe's name attribute, or its id when it
+ * has none — PeopleSoft's TargetContent, ServiceNow's gsft_main. A frame with
+ * neither is named by the path it loads, without its query string, which is
+ * where a session token would be.
+ */
+export function frameOf(frame: Frame): FrameRef | null {
+  if (!frame.parentFrame()) return null;
+  if (frame.name()) return { frame: frame.name() };
+  try { return { frameUrl: new URL(frame.url()).pathname }; } catch { return null; }
 }
 
 /**
@@ -280,6 +344,12 @@ export interface Raw {
  * this element actually offers. The model is not consulted.
  */
 function bindingFor(raw: Raw, seenNames: Map<string, number>): Binding {
+  const found = rungFor(raw, seenNames);
+  // In a frame, every rung looks inside that frame and nowhere else.
+  return raw.frame ? { ...found, within: { ...found.within, ...raw.frame } } : found;
+}
+
+function rungFor(raw: Raw, seenNames: Map<string, number>): Binding {
   // Counted as the rung actually locates: role *and* name together.
   //
   // It used to count names alone, across every kind of element. A login page
@@ -293,7 +363,7 @@ function bindingFor(raw: Raw, seenNames: Map<string, number>): Binding {
   // share the role as well; `getByRole('button', { name: 'Sign in' })` finds
   // one thing on that page. Where the role does match — two buttons both
   // called "Approve" — the rung is still refused, exactly as before.
-  const unique = (key: string) => (seenNames.get(key) ?? 0) === 1;
+  const unique = (key: string) => (seenNames.get(`${frameKey(raw)}|${key}`) ?? 0) === 1;
 
   // `text` is Orbit's own word for a bit of text on a page, not an ARIA role.
   // getByRole('text') matches nothing at all, so a labelled figure with a
@@ -421,9 +491,31 @@ export async function nameControls(page: Page | Frame): Promise<number> {
   return named.length;
 }
 
+/**
+ * The page as the model is shown it, and every frame in it that can be seen.
+ *
+ * It read the top document only, so an application that puts its screen in
+ * an iframe — PeopleSoft, ServiceNow's classic UI, Oracle's, many portals
+ * wrapping an older system — offered the model the portal's heading and
+ * nothing else. Each visible frame is named and collected in turn, and what
+ * is found in one carries the frame, so its binding looks there.
+ */
 export async function snapshot(page: Page | Frame): Promise<Seen[]> {
-  await nameControls(page);
-  return shape(await page.evaluate(COLLECT) as Raw[]);
+  const frames = 'mainFrame' in page ? page.frames() : [page];
+  const raw: Raw[] = [];
+  for (const frame of frames) {
+    if (frame.isDetached()) continue;
+    const ref = frameOf(frame);
+    if (frame.parentFrame()) {
+      // A frame nobody can see — a tracker, a keep-alive — is not the screen.
+      const box = await frame.frameElement().then((e) => e.boundingBox()).catch(() => null);
+      if (!box || box.width < 2 || box.height < 2 || !ref) continue;
+    }
+    await nameControls(frame).catch(() => 0);
+    const found = await frame.evaluate(COLLECT).catch(() => []) as Raw[];
+    raw.push(...(ref ? found.map((r) => ({ ...r, frame: ref })) : found));
+  }
+  return shape(raw);
 }
 
 /**
@@ -440,7 +532,7 @@ export async function snapshot(page: Page | Frame): Promise<Seen[]> {
 export function shape(raw: Raw[]): Seen[] {
   const counts = new Map<string, number>();
   for (const r of raw) {
-    const key = `${r.role}|${r.name}`;
+    const key = `${frameKey(r)}|${r.role}|${r.name}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
 
@@ -481,6 +573,9 @@ export function shape(raw: Raw[]): Seen[] {
       return seen;
     });
 }
+
+/** Which frame a collected element came from, as a key: empty for the page itself. */
+const frameKey = (r: Raw) => (r.frame ? JSON.stringify(r.frame) : '');
 
 /** How the page reaches the model: text, numbered, and nothing else. */
 export function asText(seen: Seen[]): string {

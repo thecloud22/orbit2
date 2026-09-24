@@ -59,7 +59,9 @@ export interface Binding {
   row?: string;
   column?: string;
   /** Narrows the search to the region containing this text, or to a frame. */
-  within?: { text?: string; frame?: string };
+  /** Where to look: inside the element holding this text, or inside a frame —
+   *  by its name or id, or by the path it loads when it has neither. */
+  within?: { text?: string; frame?: string; frameUrl?: string };
   /** What must still be true of whatever was found. A mismatch halts. */
   corroborate?: { text?: string; tag?: string };
 }
@@ -86,11 +88,18 @@ function xpathLiteral(value: string): string {
   return `concat(${value.split('"').map((part) => `"${part}"`).join(', \'"\', ')})`;
 }
 
+/** The frame a binding names, if the page has it now. */
+export function frameNamed(page: Page | Frame, binding: Binding): Frame | null {
+  const within = binding.within;
+  if (!within?.frame && !within?.frameUrl) return null;
+  const frames = 'mainFrame' in page ? page.frames() : page.childFrames();
+  return frames.find((f) => (within.frame ? f.name() === within.frame
+    : (() => { try { return new URL(f.url()).pathname === within.frameUrl; } catch { return false; } })())) ?? null;
+}
+
 function scope(page: Page | Frame, binding: Binding): Page | Frame | Locator {
-  if (binding.within?.frame) {
-    const frame = (page as Page).frame?.({ name: binding.within.frame });
-    if (frame) return frame;
-  }
+  const frame = frameNamed(page, binding);
+  if (frame) return frame;
   if (binding.within?.text) {
     // The smallest region whose own text names it — enough to say *which* of
     // two identical tables on one page is meant.
@@ -180,6 +189,15 @@ export async function resolve(page: Page | Frame, binding: Binding,
     return { found: 'none', by, why: 'this way of naming it can find the wrong thing, so it needs something that must also be true' };
   }
 
+  // A frame that is not there yet is waited for, as a control is: an
+  // application's frame loads after the page that holds it. One that never
+  // arrives is not looked for in the page instead — that would be a different
+  // element with the same name.
+  if ((binding.within?.frame || binding.within?.frameUrl) && !frameNamed(page, binding)) {
+    const until = Date.now() + (opts.waitMs ?? 0);
+    while (!frameNamed(page, binding) && Date.now() < until) await new Promise((r) => setTimeout(r, 200));
+    if (!frameNamed(page, binding)) return { found: 'none', by, why: 'the frame it is in is not on the page' };
+  }
   const locator = candidate(scope(page, binding), binding);
   if (!locator) return { found: 'none', by, why: 'the binding does not carry what this rung needs' };
 
