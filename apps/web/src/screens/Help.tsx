@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Page } from '../Page.tsx';
+import { DO, DONT, WATCH } from '../writing-guide.ts';
 
 /**
  * The things people ask in the first week.
@@ -8,6 +9,13 @@ import { Page } from '../Page.tsx';
  * sentence case, and an answer rather than a definition.
  */
 const TOPICS: Array<{ topic: string; answers: Array<{ q: string; a: string }> }> = [
+  // First, because it is what decides whether an agent works: the same points
+  // the new agent's page shows beside the box, with their examples.
+  { topic: 'What to write, and what not to', answers: [
+    ...DO.map((d) => ({ q: `Do: ${d.say.replace(/\.$/, '')}`, a: d.like ?? '' })),
+    ...DONT.map((d) => ({ q: `Don't: ${d.say.replace(/\.$/, '')}`, a: d.like ?? '' })),
+    { q: `Watch for: ${WATCH.say.replace(/\.$/, '')}`, a: WATCH.like ?? '' },
+  ] },
   { topic: 'The basics', answers: [
     { q: 'A draft, a version and a run are three different things',
       a: 'This trips everyone up once. The draft is what you edit, and it never runs. Publishing makes a version, which is permanent and is the only thing that can run. A run is one execution of one version. Editing a draft after publishing changes nothing about what is live until you publish again.' },
