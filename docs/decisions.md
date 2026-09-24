@@ -2245,7 +2245,7 @@ screen offers one).
 
 ## Decision 20 — A value is named in the author's words
 
-**Status:** built 2026-09-23 on `2.5/values-in-your-words`, **held for review, not merged**. Asked
+**Status:** adopted 2026-09-23, built on `2.5/values-in-your-words` and merged to main ("merge it"). Asked
 for by Karthik ("how can I reference variable names in Rules… insert {BR1} here?"), who chose the
 option closest to the author ("4 is the closest to the users") and asked for it to be built. Plan:
 `docs/plans/2026-09-23-values-in-your-words.md`.

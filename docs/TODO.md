@@ -376,10 +376,8 @@ small program per screen, and the build retries a few layouts.
 
 ## Values named in your words: what 2.5 knowingly leaves undone
 
-Built on `2.5/values-in-your-words` (`docs/plans/2026-09-23-values-in-your-words.md`, Decision 20),
-**held for review, not merged.** Without it, `main` has no way for an author to say which value a
-phrase means: the column a rule compares is still named by one model and linked to a read by
-another, and neither guess is shown.
+Built on `2.5/values-in-your-words` (`docs/plans/2026-09-23-values-in-your-words.md`, Decision 20)
+and merged to main on 2026-09-23.
 
 - **Words with no guess can be named only through the Edit box.** A guess comes from a label found
   in the sentence. "the program" in scenario 2's 1.14 has none, because no label says "program"

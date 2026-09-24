@@ -2,8 +2,8 @@
 
 **Status:** asked for on 2026-09-23. Karthik chose option 4 of the rules-editing sketches ("4 is the
 closest to the users"), then "Let's build it. go ahead" and "Commit. Merge and then go ahead."
-Built on the branch `2.5/values-in-your-words`, **held for review, not merged**: it adds a record,
-and changes what the tables, the walk and the compile trust (see the held-branch rule). The sketch
+Built on the branch `2.5/values-in-your-words`, held for review because it adds a record and changes
+what the tables, the walk and the compile trust, then merged to main on 2026-09-23 ("merge it"). The sketch
 is the "Rules Panel Editing" canvas, boards 4a–4c. §9 logs the decisions taken while building.
 
 ## 1. Why

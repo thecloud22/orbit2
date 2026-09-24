@@ -18,7 +18,7 @@ sentences. Where a capability would make either less true, Orbit refuses the cap
 - `docs/slice-1-brief.md` — what is being built now, what is deliberately excluded, and the
   acceptance criteria for it.
 - `docs/ACTIVE_TASK.md` — the authoritative record of what has actually shipped. Keep this current.
-- `docs/decisions.md` — the architecture decisions, with reasoning. Twenty are recorded; Decision 20 is held on its branch.
+- `docs/decisions.md` — the architecture decisions, with reasoning. Twenty are recorded and closed.
   Read it before proposing anything structural; a change to one of these is a change to
   architecture and needs approval, not a commit.
 - `docs/decision-draft-model-driven-browser.md` — the draft that became Decision 6. It is
@@ -107,7 +107,7 @@ is right and this table is stale.
 | 17 | The procedure is edited in place | An edit is a revision, numbers never shift in a draft, Orbit maps only what changed, a question is left rather than held, the chat is open until publication. |
 | 18 | Green screens | A connector owns what knows its screen; Orbit drives TN3270 through s3270, never decoding it; a binding is screen, label and address, refused on any disagreement; keys are named by their verb; a hidden field is never read. |
 | 19 | An agent across applications | Each line placed on an application; moving is an `open`; a value read on one is typed on another, through a code table where they differ; a part-way stop says what each system holds; nothing runs again blind. |
-| 20 | A value named in the author's words | A phrase of one sentence and the value it means, kept beside the sentence, never in it. Orbit's guesses are shown and bind nothing; the author's link names the table's column, the walk's read and the compiled comparison. Held on `2.5/values-in-your-words`. |
+| 20 | A value named in the author's words | A phrase of one sentence and the value it means, kept beside the sentence, never in it. Orbit's guesses are shown and bind nothing; the author's link names the table's column, the walk's read and the compiled comparison. |
 
 Rules that follow from the product regardless of those choices:
 
