@@ -40,7 +40,7 @@ export function Home({ go }: { go: (to: Route) => void }) {
       title={none ? <>Start with a procedure<br />you already have</>
         : needsYou.length > 0 ? `${needsYou.length} thing${needsYou.length === 1 ? '' : 's'} need you`
         : 'Nothing needs you'}
-      actions={<Action onClick={() => go({ at: 'bringIn' })}>Bring in a procedure</Action>}
+      actions={<Action onClick={() => go({ at: 'newAgent' })}>New agent</Action>}
     >
       <Section title="Needs you">
         {needsYou.length === 0
@@ -120,9 +120,9 @@ function FirstAgent({ go }: { go: (to: Route) => void }) {
         and they meet at the same place: a draft you check before anything is published.
       </p>
       <div style={{ display: 'flex', gap: 16 }}>
-        <Way title="Write it out" onPick={() => go({ at: 'bringIn' })}
+        <Way title="Write it out" onPick={() => go({ at: 'newAgent' })}
           body="Describe the procedure the way you would to somebody starting Monday. Orbit works through it against the application and shows you what it matched." />
-        <Way title="Show it once" onPick={() => go({ at: 'bringIn' })}
+        <Way title="Show it once" onPick={() => go({ at: 'newAgent' })}
           body="Do the job by hand while Orbit watches. It records what you touched rather than guessing what you meant, which suits an older application." />
       </div>
     </div>

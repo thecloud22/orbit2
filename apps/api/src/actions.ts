@@ -20,7 +20,7 @@ import { editApplication, registerApplication } from './applications.ts';
 import { describeBlocker } from '@orbit/contract';
 import { sendMessage, takeOffer } from './chat.ts';
 import { answerQuestion } from './questions.ts';
-import { addSentence, attachApplication, linkValue, mapChanges, pendingOf, placeSentence, reviseSentence, withdrawSentence } from './revise.ts';
+import { addSentence, attachApplication, linkValue, mapChanges, pendingOf, placeSentence, renameAgent, reviseSentence, withdrawSentence } from './revise.ts';
 import { changeInput, declareInput, removeInput, renameValue, setPublishes, setStepValue, setValueObject } from './values.ts';
 import { addNextPart, bringInToUnderstand, confirmUnderstanding, relabel, setMoreToCome } from './understanding.ts';
 
@@ -40,7 +40,8 @@ export const actions = {
   /** The procedure edited in place (Decision 17). */
   async revise(verb: string, workflowId: string, body: unknown) {
     const edits = { 'revise-sentence': reviseSentence, 'add-sentence': addSentence, 'withdraw-sentence': withdrawSentence,
-      'attach-application': attachApplication, 'sentence-application': placeSentence, 'link-value': linkValue } as const;
+      'attach-application': attachApplication, 'sentence-application': placeSentence, 'link-value': linkValue,
+      'rename': renameAgent } as const;
     const result = await inTransaction((db) => edits[verb as keyof typeof edits](db, workflowId, body));
     return result.ok ? { status: 200, body: result } : { status: 409, body: { why: result.because } };
   },

@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * The mortgage scenarios, run the way a person runs them: brought in, sorted,
- * confirmed with no relabelling, walked, published, and every loan run. Each
- * loan's result is checked against what the procedure says it should be.
+ * The mortgage scenarios, run the way a person runs them (2.6): started on the
+ * page with the systems picked, pasted in, sorted and drafted with nothing
+ * confirmed and no relabelling, the example typed where Orbit asks for it,
+ * published, and every loan run. Each loan's result is checked against what
+ * the procedure says it should be.
  *
  *   node scripts/scenarios.mjs            both scenarios
  *   node scripts/scenarios.mjs 1          just scenario 1
@@ -301,30 +303,65 @@ async function run(key) {
   const app = s.on === 'servicing' ? await servicing(apps) : s.on === 'mainframe' ? await mainframe(apps) : portal;
   console.log(`  against "${app.name}", signing in as ${app.sign_in_as}`);
 
+  // As a person starts one on the page (2.6): the systems picked first, the
+  // procedure pasted or dropped in, and no example given — Orbit asks for one
+  // at the step that needs it. Nothing is confirmed: it drafts straight away.
+  const green = s.attach === 'servicing' ? await servicing(apps) : null;
   const brought = await call('/api/understanding', {
     name: `${s.name} (${new Date().toISOString().slice(0, 16)})`, applicationId: app.id, startPath: s.on ? '/' : '/login',
-    inputs: { loanNumber: s.example },
+    ...(green ? { alsoOn: [{ applicationId: green.id, startPath: '/' }] } : {}),
     ...(s.pdf ? { pdf: readFileSync(s.pdf).toString('base64') } : { procedure: s.procedure }),
   });
   if (brought.status !== 202) throw new Error(`bring-in refused: ${brought.body.why}`);
   const W = brought.body.id;
-  await until(() => call(`/api/workflows/${W}/understanding`).then((r) => r.body), (u) => u.status === 'sorted' || u.status === 'refused', 'the sort');
+  const fail = (why) => { console.log(`  FAIL  ${why}`); return [why]; };
+  const read = () => call(`/api/workflows/${W}`).then((r) => r.body);
 
-  // The swivel chair (Orbit 2.2): the agent works on the green screen too, as
-  // an author adds it on the page; the sort then places each line of work.
-  if (s.attach === 'servicing') {
-    const green = await servicing(apps);
-    const attached = await call(`/api/workflows/${W}/attach-application`, { applicationId: green.id, startPath: '/' });
-    if (attached.status !== 200) return [`attaching ${green.name} was refused: ${attached.body.why}`];
-    await until(() => call(`/api/workflows/${W}/understanding`).then((r) => r.body), (u) => u.status === 'sorted' || u.status === 'refused', 'the placing');
-    const doc = (await call(`/api/workflows/${W}`)).body.document ?? [];
-    const work = doc.filter((x) => !x.withdrawn && (x.label === 'task' || x.label === 'rule'));
+  // Sorted and drafted with nothing pressed; it stops only to say why.
+  const landed = await until(read, (d) => d.understanding.status === 'refused' || d.understanding.not_drafted
+    || (d.understanding.confirmed_at && ['brought in', 'refused'].includes(d.understanding.walk)), 'the sort and the draft');
+  if (landed.understanding.status === 'refused') return fail(`the sort was refused: ${landed.understanding.refused}`);
+  if (landed.understanding.not_drafted) return fail(`it was not drafted: ${landed.understanding.not_drafted}`);
+  if (landed.understanding.walk !== 'brought in') return fail(`the draft was refused: ${landed.understanding.walk_refused}`);
+  const answered = [];
+  if (green) {
+    const work = (landed.document ?? []).filter((x) => !x.withdrawn && (x.label === 'task' || x.label === 'rule'));
     console.log(`  placed: ${work.map((x) => `${x.number} ${x.application?.name === green.name ? 'green screen' : x.application ? 'web' : '?'}`).join(', ')}`);
   }
 
-  // Values named in the words (Decision 20), as a person does by choosing the words on the page.
+  /** Map changes, as a person presses it, and wait for it. */
+  const mapChanges = async (why) => {
+    const mapping = await call(`/api/workflows/${W}/map-changes`, {});
+    if (mapping.status !== 202) return `map changes (${why}) was refused: ${mapping.body.why}`;
+    const mapped = await until(() => call(`/api/authoring/${mapping.body.id}`).then((r) => r.body),
+      (a) => ['brought in', 'refused'].includes(a.session.status), `the mapping (${why})`);
+    return mapped.session.status === 'brought in' ? null : `the mapping (${why}) was refused: ${mapped.session.refused?.describe}`;
+  };
+
+  // The example Orbit stops for, typed in as a person types it; it carries on from there.
+  for (let i = 0; i < 3; i++) {
+    const asks = (await read()).notes.filter((n) => !n.resolved_at && n.action === 'giveExample');
+    if (!asks.length) break;
+    for (const n of asks) {
+      const r = await call(`/api/workflows/${W}/answer-question`, { noteId: n.id, example: s.example });
+      if (r.status !== 200) return fail(`the example could not be given: ${r.body.why}`);
+      answered.push(`an example for ${n.candidates?.[0]?.name} at ${n.sentence}`);
+    }
+    const refused = await mapChanges('after the example');
+    if (refused) return fail(refused);
+  }
+
+  // Whether the run waits for a person is asked on each such sentence; these procedures carry on.
+  for (const n of (await read()).notes.filter((x) => !x.resolved_at && x.action === 'waitHere')) {
+    const r = await call(`/api/workflows/${W}/answer-question`, { noteId: n.id, waits: false });
+    if (r.status !== 200) return fail(`whether ${n.sentence} waits could not be answered: ${r.body.why}`);
+    answered.push(`${n.sentence} carries on without waiting`);
+  }
+
+  // Values named in the words (Decision 20), as a person does by choosing the words on the page,
+  // after the draft: the sort page is gone, so it is mapped again.
   if (s.names) {
-    const doc = (await call(`/api/workflows/${W}`)).body.document ?? [];
+    const doc = (await read()).document ?? [];
     const links = s.names.map((n) => {
       const at = doc.find((x) => !x.withdrawn && n.find.test(x.text));
       return at && { sentence: at.number, phrase: n.phrase, value: n.value };
@@ -332,21 +369,21 @@ async function run(key) {
     if (links.some((l) => !l)) return [`a sentence to name a value in was not found: ${doc.map((x) => x.text).join(' | ')}`];
     const named = await call(`/api/workflows/${W}/link-value`, { links });
     if (named.status !== 200) return [`naming the values was refused: ${named.body.why}`];
-    await until(() => call(`/api/workflows/${W}/understanding`).then((r) => r.body), (u) => u.status === 'sorted' || u.status === 'refused', 'the tables');
-    const rules = (await call(`/api/workflows/${W}`)).body.rules ?? [];
+    await until(read, (d) => d.understanding.status === 'sorted' || d.understanding.status === 'refused', 'the tables');
+    const rules = (await read()).rules ?? [];
     const columns = rules.flatMap((t) => t.columns.map((c) => c.name));
     for (const v of new Set(s.names.map((n) => n.value))) {
       console.log(`  ${columns.includes(v) ? 'ok  ' : 'FAIL'}  the table compares ${v} (columns: ${columns.join(', ')})`);
       if (!columns.includes(v)) failures.push(`no table column is named ${v}`);
     }
+    const refused = await mapChanges('the values named');
+    if (refused) return fail(refused);
   }
-
-  const confirmed = await call(`/api/workflows/${W}/understood`, {});
-  const fail = (why) => { console.log(`  FAIL  ${why}`); return [why]; };
-  if (confirmed.status !== 202) return fail(`the sort could not be confirmed without help: ${confirmed.body.why}`);
-  const walk = await until(() => call(`/api/authoring/${confirmed.body.id}`).then((r) => r.body),
-    (a) => ['brought in', 'refused'].includes(a.session.status), 'the walk');
-  if (walk.session.status !== 'brought in') return fail(`walk refused: ${walk.session.refused?.describe}`);
+  for (const a of answered) console.log(`  asked  ${a}`);
+  // What the run is given, as the draft names it: the name the walk gave the loan it asked an example of.
+  const given = ((await read()).workflow.declared_inputs ?? []).map((i) => i.name);
+  const input = given.length === 1 ? given[0] : 'loanNumber';
+  if (given.length !== 1) console.log(`  note  the draft asks for ${given.length ? given.join(', ') : 'nothing'}; runs are given loanNumber`);
 
   const draft = (await call(`/api/workflows/${W}`)).body;
   const open = draft.notes.filter((n) => !n.resolved_at);
@@ -363,13 +400,13 @@ async function run(key) {
       if (!ok) failures.push(`${v} was not read and compared under the author's name`);
     }
   }
-  const published = await confirmAndPublish(W, s.example);
+  const published = await confirmAndPublish(W, s.example, input);
   if (!published.ok) return fail(published.why);
-  await runLoans(published.version, s.loans, failures, s.objects);
+  await runLoans(published.version, s.loans, failures, s.objects, input);
   if (s.host) await checkHost(s.host, failures);
   if (s.again) {
     console.log('  again, without reloading: what is done is refused by the host');
-    await runLoans(published.version, s.again, failures, false);
+    await runLoans(published.version, s.again, failures, false, input);
     await checkHost(s.host, failures);
   }
 
@@ -392,14 +429,14 @@ async function run(key) {
     const mapped = await until(() => call(`/api/authoring/${mapping.body.id}`).then((r) => r.body),
       (a) => ['brought in', 'refused'].includes(a.session.status), 'the mapping');
     if (mapped.session.status !== 'brought in') return fail(`the mapping was refused: ${mapped.session.refused?.describe}`);
-    const again = await confirmAndPublish(W, s.example);
+    const again = await confirmAndPublish(W, s.example, input);
     if (!again.ok) return fail(again.why);
     const versions = (await call(`/api/workflows/${W}`)).body.versions.map((v) => v.version);
     console.log(`  ${versions.includes(2) ? 'ok  ' : 'FAIL'}  published as version ${Math.max(...versions)}`);
     if (!versions.includes(2)) failures.push('no version 2');
-    await runLoans(again.version, s.edit.loans, failures, false);
+    await runLoans(again.version, s.edit.loans, failures, false, input);
   }
-  if (open.length) console.log(`  (${open.length} question${open.length === 1 ? '' : 's'} a person would have had to answer)`);
+  if (open.length || answered.length) console.log(`  (${open.length + answered.length} question${open.length + answered.length === 1 ? '' : 's'} a person would have had to answer)`);
   return failures;
 }
 
@@ -408,7 +445,7 @@ async function run(key) {
  * only to let the loans run; the scenario still reports them, because each is
  * something a person would have had to do.
  */
-async function confirmAndPublish(W, example) {
+async function confirmAndPublish(W, example, input = 'loanNumber') {
   const draft = (await call(`/api/workflows/${W}`)).body;
   const open = draft.notes.filter((n) => !n.resolved_at);
   const ends = draft.steps.filter((x) => x.kind === 'end');
@@ -416,7 +453,7 @@ async function confirmAndPublish(W, example) {
     // A person types the label into an empty box; the runner names it from the
     // ending's summary, within the 120 characters the box takes.
     endings: ends.map((e) => ({ stepId: e.id, outcome: e.declares.outcome, label: e.declares.summary.slice(0, 120).trim(),
-      example: { loanNumber: example } })),
+      example: { [input]: example } })),
     answers: open.map((n) => ({ noteId: n.id, answer: 'Answered by the scenario runner.', acknowledged: false })),
     attested: true,
   });
@@ -439,9 +476,9 @@ async function checkHost(host, failures) {
 }
 
 /** Every loan run on one version, and checked by what it did. */
-async function runLoans(version, loans, failures, objects) {
+async function runLoans(version, loans, failures, objects, input = 'loanNumber') {
   const refs = {};
-  for (const loan of Object.keys(loans)) refs[loan] = (await call(`/api/versions/${version}/runs`, { inputs: { loanNumber: loan } })).body.reference;
+  for (const loan of Object.keys(loans)) refs[loan] = (await call(`/api/versions/${version}/runs`, { inputs: { [input]: loan } })).body.reference;
   for (const [loan, want] of Object.entries(loans)) {
     const r = await until(() => call(`/api/runs/${refs[loan]}`).then((x) => x.body),
       (x) => !['queued', 'running'].includes(x.run.status), `run ${refs[loan]}`);

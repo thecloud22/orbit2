@@ -25,6 +25,7 @@ import {
   ChatPanel, DataStorePanel, InputsPanel, OutputsPanel, PanelNote, RulesPanel, StepsPanel, TABS, ValueChip, mono, quiet,
   type Tab,
 } from '../editor/panels.tsx';
+import { WatchingPanel, doneWith, onNow, useWalk } from '../editor/watching.tsx';
 
 /**
  * The draft, kept on screen while it is read again. `useFetch` starts every
@@ -55,7 +56,7 @@ function useDraft(id: string, refresh: number): { state: 'loaded'; value: Draft 
 export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
   const [refresh, setRefresh] = useState(0);
   const loaded = useDraft(id, refresh);
-  const [tab, setTab] = useState<Tab>('steps');
+  const [tab, setTab] = useState<Tab | 'watching'>('steps');
   const [blockId, setBlockId] = useState<string | null>(null);
   const [stepId, setStepId] = useState<string | null>(null);
   const [allSteps, setAllSteps] = useState(false);
@@ -74,6 +75,8 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
   // page reads itself again until it is not, so nobody refreshes to find out.
   const working = Boolean(draft && (
     (u && (u.status === 'queued' || u.status === 'sorting'))
+    // Sorted, and about to be drafted by Orbit (E5): the walk is queued in a moment.
+    || (u && !u.confirmed_at && u.draft_when_sorted && !u.not_drafted)
     || (u?.confirmed_at && u.walk && !['brought in', 'refused'].includes(u.walk))
     || draft.chat.some((m) => m.state === 'waiting')
     || (draft.mapping && ['queued', 'walking', 'running'].includes(draft.mapping.status))));
@@ -82,6 +85,15 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
     const timer = setInterval(() => setRefresh((n) => n + 1), 2500);
     return () => clearInterval(timer);
   }, [working]);
+
+  // The walk Orbit is on, drafting or mapping, watched as it goes (2.6, E9).
+  const walkSession = draft?.mapping && ['queued', 'running'].includes(draft.mapping.status) ? draft.mapping.session_id ?? null
+    : u?.confirmed_at && u.walk && !['brought in', 'refused'].includes(u.walk) ? u.session_id : null;
+  const liveTurns = useWalk(walkSession, Boolean(walkSession));
+  useEffect(() => {
+    if (walkSession) setTab('watching');
+    else setTab((t) => (t === 'watching' ? 'steps' : t));
+  }, [walkSession]);
 
   const blocks = useMemo(() => blocksOf(draft?.document ?? null, draft?.steps ?? []), [draft]);
   const rules = useMemo(() => ruleIdsOf(draft?.rules ?? null), [draft]);
@@ -138,6 +150,13 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
     return result.ok;
   };
 
+  // An answer is an edit. An example Orbit stopped for is tried at once: it
+  // maps from that sentence on, as the question said it would (E8).
+  const answer = async (body: Record<string, unknown>) => {
+    const asked = notes.find((n) => n.id === body['noteId']);
+    if (await edit('answer-question', body) && asked?.action === 'giveExample') await act(`/api/workflows/${id}/map-changes`);
+  };
+
   // The readiness strip (plan §3): four facts, each derived from the record.
   const document = draft.document ?? [];
   const placed = document.filter((s) => s.label).length;
@@ -151,7 +170,11 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
     : !sorted ? 'Orbit is sorting' : !document.length ? 'Write the procedure first'
     : placed < document.length ? `${document.length - placed} sentence${document.length - placed === 1 ? ' has' : 's have'} no label yet`
     : u.more_to_come ? 'You said more is to come: add it, or say that is all'
-    : draft.unread ? draft.unread : forOrbit === 0 ? 'Nothing is marked for Orbit to do' : '';
+    : forOrbit === 0 ? 'Nothing is marked for Orbit to do' : '';
+  // A procedure that arrived whole is drafted by Orbit as soon as it is sorted (E5); one
+  // written by hand, or one that stopped and said why (E6), waits for the author's "Draft it".
+  const draftsItself = Boolean(u?.draft_when_sorted && !u.not_drafted);
+  const sortingToDraft = Boolean(u && !u.confirmed_at && draftsItself && !sorted);
   const mapBlocked = !u?.confirmed_at ? 'Nothing is drafted yet'
     : !sorted ? 'Orbit is sorting what changed' : mapping ? 'Orbit is mapping' : !pending.length ? 'Nothing has changed since Orbit last mapped' : '';
   const ready: Array<[string, string, boolean]> = [
@@ -173,20 +196,21 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
   return (
     <Page
       kicker={[live ? 'Published, and live' : published ? 'Published' : confirmed ? 'Confirmed' : 'Draft',
-        u?.application ? `against ${u.application}` : null].filter(Boolean).join(' · ')}
-      title={workflow.name}
+        u?.application && (draft.applications?.length ?? 0) < 2 ? `against ${u.application}` : null].filter(Boolean).join(' · ')}
+      title={<AgentName name={workflow.name} open={!closed} busy={busy} onRename={(name) => edit('rename', { name })} />}
       actions={<>
-        {u && !u.confirmed_at && (
+        {u && !u.confirmed_at && !draftsItself && sorted && (
           <Action disabled={Boolean(draftBlocked) || busy} why={draftBlocked}
-            onClick={() => void act(`/api/workflows/${id}/understood`)}>Confirm and draft it</Action>
+            onClick={() => void act(`/api/workflows/${id}/understood`)}>Draft it</Action>
         )}
-        {u?.confirmed_at && !closed && (pending.length > 0 || mapping || !sorted) && (
+        {/* While Orbit works, the band says so; a button that only says "not now" is noise. */}
+        {u?.confirmed_at && !closed && !mapping && !drafting && (pending.length > 0 || !sorted) && (
           <Action disabled={Boolean(mapBlocked) || busy} why={mapBlocked}
             onClick={() => void act(`/api/workflows/${id}/map-changes`)}>
             {mapping ? 'Mapping\u2026' : `Map changes (${pending.length})`}</Action>
         )}
-        {!confirmed && steps.length > 0 && !drafting && (
-          <Action kind={confirming ? 'ghost' : pending.length || mapping ? 'ghost' : 'primary'}
+        {!confirmed && steps.length > 0 && !drafting && !mapping && (
+          <Action kind={confirming ? 'ghost' : pending.length || outstanding.length ? 'ghost' : 'primary'}
             disabled={!confirming && (pending.length > 0 || mapping || !sorted)}
             why="Map the changes first: the steps must be the ones your words now ask for"
             onClick={() => setConfirming((c) => !c)}>
@@ -237,14 +261,26 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
       {u?.status === 'refused' && (
         <Refusal tone="failed" title="This was not sorted" blockers={[u.refused ?? 'No reason was recorded.']} />
       )}
-      {u && !u.confirmed_at && sorted && draft.unread && (
-        <Refusal title="A rule compares something nothing reads" blockers={[draft.unread]} />
+      {sortingToDraft && (
+        <Band title={`Orbit is sorting it${u!.more_to_come ? '' : ', then drafts it'}`}
+          body="Every sentence is placed first. There is nothing for you to confirm: it drafts as soon as the sort is done, and anything it needs from you is asked on the sentence it concerns."
+          side={!u!.more_to_come && <button type="button" style={{ ...quiet, fontSize: 12.5 }} disabled={busy}
+            onClick={() => void act(`/api/workflows/${id}/more-to-come`, { moreToCome: true })}>More to come? Hold off</button>} />
+      )}
+      {u && !u.confirmed_at && u.not_drafted && sorted && (
+        <div style={{ marginTop: 16, border: '1.5px solid var(--ink)', borderRadius: 5, background: 'var(--panel)', padding: '12px 16px' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 3 }}>{u.not_drafted.split(': ')[0]}.</div>
+          <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55 }}>{((why) => why.charAt(0).toUpperCase() + why.slice(1))(u.not_drafted.split(': ').slice(1).join(': '))}</div>
+        </div>
       )}
       {(drafting || mapping) && (
-        <WalkProgress session={(mapping ? draft.mapping?.session_id : u?.session_id) ?? null}
-          what={mapping ? `Orbit is mapping what changed: ${pending.join(', ') || 'the changes'}` : 'Orbit is drafting: working through the sentences marked as its own against the application'} />
+        <Band title={mapping ? `Orbit is mapping what changed: ${pending.join(', ') || 'the changes'}`
+            : `Orbit is drafting it: ${doneWith(liveTurns).size} of ${work.length} sentence${work.length === 1 ? '' : 's'} done`}
+          body={onNow(liveTurns) ? `Now on ${onNow(liveTurns)}. Read or look around while it works; the Watching tab shows the screen it sees.`
+            : 'Opening the application. The Watching tab shows the screen it sees.'}
+          progress={mapping ? null : work.length ? doneWith(liveTurns).size / work.length : null} />
       )}
-      {u && !u.confirmed_at && (u.more_to_come || u.status === 'sorted') && sorted && (
+      {u && !u.confirmed_at && u.draft_when_sorted && (u.more_to_come || u.status === 'sorted') && sorted && (
         <NextPart id={id} moreToCome={u.more_to_come} busy={busy} onDone={() => setRefresh((n) => n + 1)} />
       )}
       {draft.mapping?.status === 'refused' && pending.length > 0 && (
@@ -296,24 +332,30 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
           )}
           {blocks.map((b) => (
             <DocumentBlock key={b.id} block={b} on={tab === 'steps' && !allSteps && block?.id === b.id} ruleOf={rules.ofSentence}
+              walking={walkSession ? { now: onNow(liveTurns), done: doneWith(liveTurns) } : null}
+              unread={(draft.unreadRules ?? []).filter((r) => b.sentences.some((s) => s.number === r.sentences[0]))}
               links={links.filter((l) => b.sentences.some((s) => s.number === l.sentence))} choices={choices}
               selectedValues={selectedValues} onChoose={() => choose(b)} onValue={pickValue}
               notes={outstanding.filter((n) => n.sentence && b.sentences.some((s) => s.number === n.sentence))}
-              pending={pending} busy={busy} onAnswer={(body) => void edit('answer-question', body)}
+              pending={pending} busy={busy} onAnswer={(body) => void answer(body)}
               wordsOpen={wordsOpen} onEdit={edit} apps={draft.applications ?? []} />
           ))}
         </article>
 
         <aside style={{ width: 430, flexShrink: 0, position: 'sticky', top: 12, maxHeight: 'calc(100vh - 24px)', overflowY: 'auto',
           boxSizing: 'border-box', border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--panel)', padding: '14px 18px 18px' }}>
-          <div role="tablist" aria-label="Beside the procedure" style={{ display: 'flex', gap: 14, borderBottom: '1px solid var(--rule)', marginBottom: 14, flexWrap: 'wrap' }}>
-            {TABS.map(([key, name]) => (
+          <div role="tablist" aria-label="Beside the procedure" style={{ display: 'flex', gap: walkSession ? 11 : 14, borderBottom: '1px solid var(--rule)', marginBottom: 14, flexWrap: 'wrap' }}>
+            {([...(walkSession ? [['watching', 'Watching'] as const] : []), ...TABS] as Array<readonly [Tab | 'watching', string]>).map(([key, name]) => (
               <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
-                style={{ font: 'inherit', fontSize: 13.5, background: 'transparent', border: 0, cursor: 'pointer', padding: '0 0 9px',
+                style={{ font: 'inherit', fontSize: walkSession ? 13 : 13.5, background: 'transparent', border: 0, cursor: 'pointer', padding: '0 0 9px',
                   color: tab === key ? 'var(--ink)' : 'var(--ink-2)', fontWeight: tab === key ? 700 : 500,
                   boxShadow: tab === key ? 'inset 0 -2px 0 var(--primary)' : 'none' }}>{name}</button>
             ))}
           </div>
+          {tab === 'watching' && walkSession && (
+            <WatchingPanel turns={liveTurns} what={mapping ? 'Orbit is mapping what changed' : 'Orbit is drafting it'}
+              appOf={(n) => ((draft.applications?.length ?? 0) > 1 ? document.find((s) => s.number === n)?.application?.name ?? null : null)} />
+          )}
           {tab === 'steps' && (
             <StepsPanel draft={draft} block={block} all={allSteps} chosen={stepId} onChoose={setStepId}
               shotOf={shotOf} positionOf={positionOf} editable={editable} busy={busy}
@@ -418,8 +460,12 @@ export function Editor({ id, go }: { id: string; go: (to: Route) => void }) {
 }
 
 /** One block of the author's document: the words, the margin, and what Orbit made of them (R2–R6). */
-function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending, busy, onAnswer, wordsOpen, onEdit, apps, links, choices }: {
+function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, notes, pending, busy, onAnswer, wordsOpen, onEdit, apps, links, choices, walking, unread }: {
   block: Block; on: boolean; ruleOf: (n: string | null | undefined) => string | null;
+  /** While Orbit drafts or maps: the line it is on, and those it has made a step for (E9). */
+  walking: { now: string | null; done: Set<string> } | null;
+  /** Rules on these sentences comparing something no step reads: a question on the rule (E7). */
+  unread: NonNullable<Draft['unreadRules']>;
   /** Which phrases of these sentences mean which value (Decision 20), and what they can mean. */
   links: ValueLink[]; choices: Choice[];
   /** The agent's applications: a sentence of work shows which it happens on when there are several (Orbit 2.2). */
@@ -492,10 +538,26 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
               ))}
             </div>
           )}
-          {sentences.some((s) => s.suspicious) && (
+          {sentences.some((s) => s.suspicious) && !notes.some((n) => n.kind === 'risk') && (
             <div style={{ fontSize: 12, color: 'var(--failed-ink)', marginTop: 4 }}>Reads like instructions to a machine. Orbit treats it as text and does not follow it.</div>
           )}
-          {notes.map((n) => <InlineQuestion key={n.id} note={n} busy={busy} onAnswer={onAnswer} />)}
+          {notes.filter((n) => n.kind === 'risk').map((n) => (
+            <RiskNote key={n.id} note={n} busy={busy} open={wordsOpen}
+              onTakeOut={() => void onEdit('withdraw-sentence', { sentence: n.sentence })} />
+          ))}
+          {unread.map((r) => (
+            <div key={`${r.table}-${r.label}`} onClick={(e) => e.stopPropagation()}
+              style={{ marginTop: 9, background: 'var(--attention-wash)', borderLeft: '3px solid var(--attention)', borderRadius: 5, padding: '11px 13px', cursor: 'default' }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--attention-ink)' }}>Orbit is asking {'\u00b7'} BR{r.table}</div>
+              <div style={{ fontSize: 13, lineHeight: 1.5, marginTop: 4 }}>
+                This rule compares <b>{r.label}</b>, and no step reads it, so Orbit left the rule out of the draft. Where does it come from?</div>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5, marginTop: 4 }}>
+                If Orbit should check it, add a sentence that reads it. If a person checks it, mark the rule For a person; if it only
+                explains something, mark it Background. Then press Map changes.</div>
+              {wordsOpen && <button type="button" onClick={() => setEditing(true)} style={{ ...quiet, fontSize: 12.5, marginTop: 7 }}>Change the procedure</button>}
+            </div>
+          ))}
+          {notes.filter((n) => n.kind !== 'risk').map((n) => <InlineQuestion key={n.id} note={n} busy={busy} onAnswer={onAnswer} />)}
         </div>
         <div style={{ width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, paddingTop: 3 }}>
           {lead && lead.label && lead.label !== 'background' && (
@@ -506,11 +568,13 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
           {apps.length > 1 && acting && lead && (lead.application
             ? <AppChip app={lead.application} quiet />
             : <Chip state="attention">which application?</Chip>)}
-          {changed && <Chip state="running">changed, not mapped</Chip>}
+          {walking && acting && lead && walking.now === lead.number && <Chip state="running">Orbit is on this</Chip>}
+          {walking && acting && lead && walking.now !== lead.number && walking.done.has(lead.number) && steps.length === 0 && <Chip state="ok">mapped</Chip>}
+          {changed && !walking && <Chip state="running">changed, not mapped</Chip>}
           {sentences.some((s) => s.label && s.labelCurrent === false) && <Chip state="running">sorting</Chip>}
           {noStep && !changed && <Chip state="attention">no step yet</Chip>}
           {steps.some((s) => !s.complete) && <Chip state="attention">not finished</Chip>}
-          {notes.length > 0 && <Chip state="attention">{notes.length === 1 ? '1 question' : `${notes.length} questions`}</Chip>}
+          {notes.length + unread.length > 0 && <Chip state="attention">{notes.length + unread.length === 1 ? '1 question' : `${notes.length + unread.length} questions`}</Chip>}
           {wordsOpen && !editing && block.type !== 'heading' && (
             <button type="button" onClick={(e) => { e.stopPropagation(); setEditing(true); }}
               style={{ font: 'inherit', fontSize: 12, color: 'var(--ink-2)', background: 'transparent', border: '1px solid var(--rule-2)', borderRadius: 3, cursor: 'pointer', padding: '1px 8px' }}>Edit</button>
@@ -591,11 +655,13 @@ function WordsEditor({ sentences, busy, onEdit, onDone, apps, choices }: {
           )}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, color: 'var(--ink-2)' }}>
             It is
-            <select aria-label={`What ${s.number} is`} value={s.label ?? ''} disabled={busy || s.withdrawn}
-              onChange={(e) => void onEdit('relabel', { sentence: s.number, label: e.target.value })}
+            <select aria-label={`What ${s.number} is`} value={s.label === 'forAPerson' && s.waits ? 'forAPerson+waits' : s.label ?? ''} disabled={busy || s.withdrawn}
+              onChange={(e) => void onEdit('relabel', e.target.value === 'forAPerson+waits'
+                ? { sentence: s.number, label: 'forAPerson', waits: true } : { sentence: s.number, label: e.target.value })}
               style={{ font: 'inherit', fontSize: 12.5, padding: '3px 5px', border: '1px solid var(--rule-2)', borderRadius: 3, background: 'var(--panel)' }}>
               {!s.label && <option value="">not placed yet</option>}
               {(['task', 'rule', 'forAPerson', 'background', 'wontDo'] as const).map((l) => <option key={l} value={l}>{LABEL_NAME[l]}</option>)}
+              <option value="forAPerson+waits">For a person, and the run waits</option>
             </select>
             {apps.length > 1 && (s.label === 'task' || s.label === 'rule') && (<>
               on
@@ -629,36 +695,69 @@ function WordsEditor({ sentences, busy, onEdit, onDone, apps, choices }: {
 }
 
 /**
- * Orbit at work, shown as it goes: the latest turn and the page it was looking
- * at, so nobody waits on a spinner with nothing to read (product rule 11).
+ * Orbit at work, said in a line and a bar, so nobody waits on a spinner with
+ * nothing to read (product rule 11). What it sees is on the Watching tab.
  */
-function WalkProgress({ session, what }: { session: string | null; what: string }) {
-  const [turns, setTurns] = useState<Array<{ turn: number; verdict: string; why: string; screenshot?: { digest?: string; withheld?: string } | null }>>([]);
-  useEffect(() => {
-    if (!session) return;
-    let live = true;
-    const read = () => fetch(`/api/authoring/${session}`).then((r) => r.json())
-      .then((b: { turns?: typeof turns }) => { if (live) setTurns(b.turns ?? []); }).catch(() => undefined);
-    void read();
-    const timer = setInterval(read, 2500);
-    return () => { live = false; clearInterval(timer); };
-  }, [session]);
-  const last = turns.at(-1);
-  const pictured = [...turns].reverse().find((t) => t.screenshot?.digest);
+function Band({ title, body, side, progress }: { title: string; body: string; side?: React.ReactNode; progress?: number | null }) {
   return (
-    <div style={{ marginTop: 16, display: 'flex', gap: 16, alignItems: 'flex-start', background: 'var(--running-wash)',
-      borderLeft: '3px solid var(--running)', borderRadius: 5, padding: '12px 16px' }}>
-      <div style={{ flexGrow: 1, minWidth: 0 }}>
-        <div className="orbit-working" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--running-ink)' }}>{what}
-          <span style={{ fontFamily: 'var(--mono)' }}><span className="orbit-dot">.</span><span className="orbit-dot">.</span><span className="orbit-dot">.</span></span></div>
-        <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 5, lineHeight: 1.5 }}>
-          {last ? `Turn ${last.turn}, ${last.verdict}: ${last.why}` : 'Waiting for a worker to pick this up.'}</div>
+    <div style={{ marginTop: 16, background: 'var(--running-wash)', border: '1.5px solid var(--running-ink)', borderRadius: 5, padding: '11px 16px' }}>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+        <div style={{ flexGrow: 1, minWidth: 0 }}>
+          <div className="orbit-working" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--running-ink)' }}>{title}
+            <span style={{ fontFamily: 'var(--mono)' }}><span className="orbit-dot">.</span><span className="orbit-dot">.</span><span className="orbit-dot">.</span></span></div>
+          <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 3, lineHeight: 1.5 }}>{body}</div>
+        </div>
+        {side}
       </div>
-      {pictured?.screenshot && (
-        <div style={{ width: 180, flexShrink: 0 }}>
-          <Picture shot={pictured.screenshot} size="large" alt={`The page at turn ${pictured.turn}`} />
+      {progress != null && (
+        <div style={{ height: 4, background: 'var(--rule)', borderRadius: 2, marginTop: 9 }}>
+          <div style={{ width: `${Math.round(Math.min(1, progress) * 100)}%`, height: 4, background: 'var(--running)', borderRadius: 2 }} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** The agent's name, typed in place (E4). A name is not a word of the procedure: nothing is mapped again. */
+function AgentName({ name, open, busy, onRename }: { name: string; open: boolean; busy: boolean; onRename: (name: string) => Promise<boolean> }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  if (editing === null) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 12 }}>
+        {name}
+        {open && <button type="button" onClick={() => setEditing(name)} aria-label="Rename this agent"
+          style={{ ...quiet, fontSize: 12, fontWeight: 500, letterSpacing: 0, position: 'relative', top: -5 }}>Rename</button>}
+      </span>
+    );
+  }
+  return (
+    <form style={{ display: 'flex', gap: 8, alignItems: 'center' }}
+      onSubmit={(e) => { e.preventDefault(); if (editing.trim()) void onRename(editing.trim()).then((ok) => ok && setEditing(null)); }}>
+      <input aria-label="Name for this agent" value={editing} onChange={(e) => setEditing(e.target.value)} autoFocus
+        style={{ font: 'inherit', fontSize: 30, fontWeight: 700, letterSpacing: '-0.024em', border: 0, borderBottom: '1.5px solid var(--ink)',
+          background: 'transparent', padding: 0, width: '100%', maxWidth: 640, color: 'var(--ink)' }} />
+      <button type="submit" disabled={busy || !editing.trim()} style={{ ...quiet, fontSize: 12.5, color: 'var(--ink)' }}>Keep</button>
+      <button type="button" onClick={() => setEditing(null)} style={{ ...quiet, fontSize: 12.5 }}>Cancel</button>
+    </form>
+  );
+}
+
+/**
+ * A line that reads like instructions to Orbit, raised after drafting as a
+ * risk on its sentence (E7). Orbit did nothing with it; a person acknowledges
+ * it when they confirm, or takes the line out.
+ */
+function RiskNote({ note, busy, open, onTakeOut }: { note: Draft['notes'][number]; busy: boolean; open: boolean; onTakeOut: () => void }) {
+  return (
+    <div onClick={(e) => e.stopPropagation()}
+      style={{ marginTop: 9, border: '1.5px solid var(--ink)', borderRadius: 5, padding: '10px 13px', background: 'var(--panel)', cursor: 'default' }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700 }}>Risk</div>
+      <div style={{ fontSize: 13, lineHeight: 1.5, marginTop: 3 }}>
+        This line reads as an instruction to Orbit, not part of the procedure. Orbit has done nothing with it.</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+        {open && <button type="button" disabled={busy} onClick={onTakeOut} style={{ ...quiet, fontSize: 12.5, color: 'var(--ink)' }}>Take the line out</button>}
+        <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{note.resolved_at ? 'Acknowledged.' : 'Or acknowledge it when you confirm.'}</span>
+      </div>
     </div>
   );
 }
@@ -766,14 +865,23 @@ function InlineQuestion({ note, busy, onAnswer }: {
         {note.action === 'useInput' && (
           <div><button type="button" style={button} disabled={busy} onClick={() => answer({})}>Make it an input, with this value as its example</button></div>
         )}
-        {note.action === 'giveExample' && (
-          <form onSubmit={(e) => { e.preventDefault(); if (words.trim()) answer({ example: words }); }} style={{ display: 'flex', gap: 6 }}>
+        {note.action === 'giveExample' && (<>
+          <form onSubmit={(e) => { e.preventDefault(); if (words.trim()) answer({ example: words }); }} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {note.candidates?.[0]?.name && <span style={{ ...mono, fontSize: 12 }}>{note.candidates[0].name}</span>}
             <input aria-label="An example value" value={words} onChange={(e) => setWords(e.target.value)} placeholder="ML-26-04471"
               style={{ font: 'inherit', fontSize: 13, padding: '5px 8px', border: '1px solid var(--rule-2)', borderRadius: 3, flexGrow: 1 }} />
-            <button type="submit" style={button} disabled={busy || !words.trim()}>Use this example</button>
+            <button type="submit" style={{ ...button, whiteSpace: 'nowrap', flexShrink: 0 }} disabled={busy || !words.trim()}>Try this one</button>
           </form>
+          <div style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>Kept as the example on the Inputs tab. A run is given its own.</div>
+        </>)}
+        {note.action === 'waitHere' && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button type="button" style={button} disabled={busy} onClick={() => answer({ waits: true })}>The run waits here</button>
+            <button type="button" style={button} disabled={busy} onClick={() => answer({ waits: false })}>It carries on without them</button>
+          </div>
         )}
-        {note.action !== 'useInput' && note.action !== 'giveExample' && (
+        {note.action === 'waitHere' && <div style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>A run that waits pauses here until the person says it is done. Map changes adds the wait.</div>}
+        {note.action !== 'useInput' && note.action !== 'giveExample' && note.action !== 'waitHere' && (
           <form onSubmit={(e) => { e.preventDefault(); if (words.trim()) answer({ answer: words }); }} style={{ display: 'flex', gap: 6 }}>
             <input aria-label="Your answer" value={words} onChange={(e) => setWords(e.target.value)}
               placeholder={note.action === 'pickElement' ? 'Or say what it is' : 'Your answer'}

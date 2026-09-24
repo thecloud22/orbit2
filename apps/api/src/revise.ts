@@ -13,10 +13,10 @@
  * will later be shown.
  */
 import type { ClientBase, PoolClient } from 'pg';
-import { looksLikeSecret, object, outsideAddresses, placeOf, placeRefusal, sentenceNumber, unreadAdvice, unreadColumns, valueLinksAsked, wordLinks, z, type RuleTable } from '@orbit/contract';
+import { looksLikeSecret, object, outsideAddresses, placeOf, placeRefusal, sentenceNumber, valueLinksAsked, wordLinks, z } from '@orbit/contract';
 import { returnToDraft } from './edit.ts';
 import { insertPart } from './procedure.ts';
-import { forTheWalk, sentencesWithLabels } from './understanding.ts';
+import { forTheWalk, sentencesWithLabels } from './sentences.ts';
 
 export type Revised = { ok: true } | { ok: false; because: string };
 export type Queued = { ok: true; id: string } | { ok: false; because: string };
@@ -43,7 +43,7 @@ async function openFor(db: ClientBase, workflowId: string): Promise<{ hosts: str
   return { hosts: u.hosts ?? [] };
 }
 
-function refusedText(text: string, hosts: string[]): string | null {
+export function refusedText(text: string, hosts: string[]): string | null {
   if (looksLikeSecret(text)) return 'That reads like a password or a key, so it was not kept. A secret is never written into a procedure.';
   const outside = outsideAddresses(text, hosts);
   if (outside.length) return `That names ${outside.join(', ')}, which this agent's application is not. Nothing was kept.`;
@@ -291,7 +291,7 @@ export async function mapChanges(db: PoolClient, workflowId: string): Promise<Qu
     `SELECT u.confirmed_at, u.status, u.application_id, u.start_path, u.inputs, w.name
        FROM understanding u JOIN workflow w ON w.id = u.workflow_id WHERE u.workflow_id = $1`, [workflowId]);
   if (!u) return { ok: false, because: 'This draft was not brought in as a procedure.' };
-  if (!u.confirmed_at) return { ok: false, because: 'Nothing is drafted yet. Confirm the sort and Orbit drafts the whole procedure.' };
+  if (!u.confirmed_at) return { ok: false, because: 'Nothing is drafted yet. Press Draft it, and Orbit drafts the whole procedure.' };
   if (u.status !== 'sorted') return { ok: false, because: 'Orbit is still sorting what changed. Map the changes when it has finished.' };
   const { rows: [running] } = await db.query(
     `SELECT 1 FROM authoring_session WHERE into_workflow_id = $1 AND status IN ('queued', 'running')`, [workflowId]);
@@ -302,10 +302,9 @@ export async function mapChanges(db: PoolClient, workflowId: string): Promise<Qu
   const sentences = await sentencesWithLabels(db, workflowId);
   const unplaced = sentences.filter((s) => !s.withdrawn && !s.label).map((s) => s.number);
   if (unplaced.length) return { ok: false, because: `${unplaced.join(', ')} ${unplaced.length === 1 ? 'has' : 'have'} no label yet.` };
-  const { rows: [latest] } = await db.query<{ tables: RuleTable[] | null }>(
-    `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [workflowId]);
-  const unread = unreadColumns(latest?.tables ?? []);
-  if (unread.length) return { ok: false, because: unreadAdvice(unread) };
+  // A rule comparing something no step reads does not hold mapping back: it
+  // is a question on that rule, and its table is left out of the walk until
+  // it can be decided (2.6, E7).
 
   // The author's answers to questions about these sentences, handed to the
   // walk as their word. A name the page offered, or words: never a binding.
@@ -327,5 +326,30 @@ export async function mapChanges(db: PoolClient, workflowId: string): Promise<Qu
       [workflowId, JSON.stringify({ sentences: pending, hints: hints.length })]);
     await db.query('COMMIT');
     return { ok: true, id: session!.id };
+  } catch (error) { await db.query('ROLLBACK'); throw error; }
+}
+
+/**
+ * The agent's name, typed in place on the page (E4). A name is not a word of
+ * the procedure: nothing is sorted or mapped again. A published agent keeps
+ * the name its versions were published under until it is taken back to editing.
+ */
+export async function renameAgent(db: PoolClient, workflowId: string, body: unknown): Promise<Revised> {
+  const asked = object({ name: z.string().trim().min(1, 'An agent needs a name.').max(160) }).safeParse(body);
+  if (!asked.success) return { ok: false, because: asked.error.issues.map((i) => i.message).join(' ') };
+  const { rows: [w] } = await db.query<{ name: string; confirmed_at: string | null; published: boolean }>(
+    `SELECT name, confirmed_at, EXISTS (SELECT 1 FROM workflow_version v WHERE v.workflow_id = w.id) AS published
+       FROM workflow w WHERE id = $1`, [workflowId]);
+  if (!w) return { ok: false, because: 'There is no such agent.' };
+  if (w.confirmed_at && w.published) return { ok: false, because: 'This agent is published. Take it back to editing to rename it.' };
+  if (w.name === asked.data.name) return { ok: false, because: 'That is its name already.' };
+  await db.query('BEGIN');
+  try {
+    await db.query(`UPDATE workflow SET name = $2, updated_at = now() WHERE id = $1`, [workflowId, asked.data.name]);
+    await returnToDraft(db, workflowId, 'The agent was renamed');
+    await db.query(`INSERT INTO audit_entry (act, object_kind, object_id, changed) VALUES ('agent renamed', 'workflow', $1, $2)`,
+      [workflowId, JSON.stringify({ from: w.name, to: asked.data.name })]);
+    await db.query('COMMIT');
+    return { ok: true };
   } catch (error) { await db.query('ROLLBACK'); throw error; }
 }

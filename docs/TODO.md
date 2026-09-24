@@ -393,3 +393,25 @@ and merged to main on 2026-09-23.
 - **A withdrawn sentence cannot be put back from the Edit box**, where its words are greyed out.
   Adding it again as a new sentence works. This predates 2.5.
 - **A guess stops at the label's words:** "the debt-to-income" in "the debt-to-income ratio".
+
+## Start on the editor, drafted straight through: what 2.6 knowingly leaves undone
+
+Plan: `docs/plans/2026-09-23-start-on-the-editor.md`. Canvas rows *Write it out* and *Show it once*.
+
+**Showing it once inside the editor (canvas S2–S4).** Show it once starts from the new agent page,
+on one of the agent's web systems, but still records on its own screen and lands on the editor when
+it is finished. Folding it into the page means a recording arrives as sentences Orbit wrote, beside
+written ones. Two things stand in the way. A shown sentence's steps are what the author did, so
+rewording it must not quietly change them: whether a reworded shown sentence keeps what was done or
+is mapped again from the words is a rule about edits that needs its own decision. And *Show me this
+one* (showing the single sentence Orbit could not work out) needs a recorder that starts where a
+walk left off, which it cannot: it always opens the application at its start path.
+
+**Holding off once drafting has begun.** "More to come" is said when pasting, or with *Hold off*
+while the sort runs. A walk already under way is not stopped part-way; the author adds the rest and
+presses Map changes.
+
+**A missing example still costs one mapping.** The walk now stops at the step that needs an example
+and asks (E8), rather than walking the rest with the field empty. Answering maps from that sentence
+on. Orbit cannot ask before the walk, because which values a procedure is given is only known when
+the walk names them. Knowing it earlier would mean the sort naming the inputs, which it does not.

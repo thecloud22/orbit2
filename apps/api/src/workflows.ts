@@ -93,7 +93,8 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
   // Orbit 2.1: where the sort stands, for a draft that was brought in to be understood.
   const { rows: [understanding] } = await db.query(
     `SELECT u.status, u.confirmed_at, u.inputs AS examples, a.name AS application, s.status AS walk, u.session_id,
-            u.more_to_come, u.refused->>'describe' AS refused, s.refused->>'describe' AS walk_refused
+            u.more_to_come, u.refused->>'describe' AS refused, s.refused->>'describe' AS walk_refused,
+            u.draft_when_sorted, u.not_drafted
        FROM understanding u JOIN application a ON a.id = u.application_id
        LEFT JOIN authoring_session s ON s.id = u.session_id
       WHERE u.workflow_id = $1`, [id]);
@@ -120,7 +121,7 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
   const { rows: [tables] } = await db.query<{ tables: RuleTable[] | null }>(
     `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [id]);
   const rules = tables?.tables ?? null;
-  // A rule comparing something no task reads blocks drafting, said in the words the sort screen used.
+  // A rule comparing something no step reads: a question on that rule, said in the words the sort screen used.
   const unread = unreadColumns(rules ?? []);
   const chat = await chatOf(db, id);
   // Which phrase means which value (Decision 20): the author's, then Orbit's guesses.
@@ -143,6 +144,8 @@ export async function readWorkflow(id: string, db: ClientBase = pool as unknown 
     workflow, steps, notes, versions, understanding: understanding ?? null,
     document, rules, links, chat, lastRun: lastRun ?? null, pending, mapping: mapping ?? null, applications,
     unread: unread.length ? unreadAdvice(unread) : null,
+    /** Each rule comparing something no step reads, to ask on its sentences (2.6, E7). */
+    unreadRules: unread,
     authoring: {
       turns,
       /** Kept apart on purpose: a count of turns that says nothing about how

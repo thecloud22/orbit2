@@ -21,7 +21,7 @@ const Mark = () => (
 export function Nav({ current, go }: { current: Route['at']; go: (to: Route) => void }) {
   const isCurrent = (to: Route) =>
     to.at === current
-    || (to.at === 'agents' && (current === 'agent' || current === 'bringIn'))
+    || (to.at === 'agents' && (current === 'agent' || current === 'newAgent'))
     || (to.at === 'runs' && (current === 'run' || current === 'start'));
 
   const link = (to: Route) => ({

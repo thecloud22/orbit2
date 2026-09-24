@@ -18,7 +18,7 @@ sentences. Where a capability would make either less true, Orbit refuses the cap
 - `docs/slice-1-brief.md` — what is being built now, what is deliberately excluded, and the
   acceptance criteria for it.
 - `docs/ACTIVE_TASK.md` — the authoritative record of what has actually shipped. Keep this current.
-- `docs/decisions.md` — the architecture decisions, with reasoning. Twenty are recorded and closed.
+- `docs/decisions.md` — the architecture decisions, with reasoning. Twenty-one are recorded and closed.
   Read it before proposing anything structural; a change to one of these is a change to
   architecture and needs approval, not a commit.
 - `docs/decision-draft-model-driven-browser.md` — the draft that became Decision 6. It is
@@ -108,6 +108,7 @@ is right and this table is stale.
 | 18 | Green screens | A connector owns what knows its screen; Orbit drives TN3270 through s3270, never decoding it; a binding is screen, label and address, refused on any disagreement; keys are named by their verb; a hidden field is never read. |
 | 19 | An agent across applications | Each line placed on an application; moving is an `open`; a value read on one is typed on another, through a code table where they differ; a part-way stop says what each system holds; nothing runs again blind. |
 | 20 | A value named in the author's words | A phrase of one sentence and the value it means, kept beside the sentence, never in it. Orbit's guesses are shown and bind nothing; the author's link names the table's column, the walk's read and the compiled comparison. |
+| 21 | A new agent starts on the editor | Systems picked first; a procedure that arrives whole is sorted, confirmed by Orbit and drafted straight through; it stops only for more-to-come or nothing-for-Orbit; what the sort page caught is asked after, on its sentence; a missing example stops the walk there. |
 
 Rules that follow from the product regardless of those choices:
 

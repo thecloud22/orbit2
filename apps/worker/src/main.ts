@@ -8,7 +8,8 @@
 import { Pool } from 'pg';
 import { inDocumentOrder } from '../../api/src/procedure.ts';
 import { authoredLinks } from '../../api/src/links.ts';
-import { asObjects, linksOf, looksLikeInstructions, namedIn, step as stepSchema, type Step, originOf } from '@orbit/contract';
+import { draftWhenSorted } from '../../api/src/drafting.ts';
+import { asObjects, linksOf, looksLikeInstructions, namedIn, step as stepSchema, type Step, originOf, unreadColumns } from '@orbit/contract';
 import { execute } from './execute.ts';
 import { reconcile } from './reconcile.ts';
 import { modelFromEnvironment } from '@orbit/model';
@@ -106,6 +107,15 @@ async function sortOne(workflowId: string) {
       await db.query(`UPDATE understanding SET status = 'sorted', sorted_at = now(), tries = 0 WHERE workflow_id = $1`,
         [workflowId]);
       console.log(`  sorted: ${result.labelled} sentences labelled`);
+      // A procedure that arrived whole is drafted now, with nothing to confirm
+      // (2.6, E5), or it says why it was not (E6).
+      // Said on the page if it could not even start, so the author has a reason and "Draft it".
+      const drafted = await draftWhenSorted(db, workflowId).catch(async (error: unknown) => {
+        const because = `Not drafted: Orbit could not start drafting it (${String(error)}). Press Draft it to try again.`;
+        await db.query(`UPDATE understanding SET not_drafted = $2 WHERE workflow_id = $1`, [workflowId, because]);
+        return { ok: false as const, because };
+      });
+      if (drafted) console.log(drafted.ok ? '  drafting it straight away' : `  not drafted: ${drafted.because}`);
     } else {
       await db.query(`UPDATE understanding SET status = 'refused', refused = $2 WHERE workflow_id = $1`,
         [workflowId, JSON.stringify({ describe: result.describe })]);
@@ -280,6 +290,12 @@ async function authorOne(sessionId: string) {
     const { rows: [tables] } = s.into_workflow_id ? await db.query<{ tables: Array<{ sentences: string[];
       columns: Array<{ name: string; readBy: string | null }>; rows: Array<{ when: Array<{ column: string; is: string }> }> }> | null }>(
       `SELECT tables FROM rule_tables WHERE workflow_id = $1 ORDER BY seq DESC LIMIT 1`, [s.into_workflow_id]) : { rows: [] };
+    // A table comparing something no step reads cannot be decided yet: it is
+    // a question on its rule (2.6, E7), and neither it nor its rule sentences
+    // are walked until the procedure says where the value comes from.
+    const undecidable = (tables?.tables ?? []).filter((t) => unreadColumns([t as never]).length > 0);
+    const heldBack = new Set(undecidable.flatMap((t) => t.sentences));
+    if (tables?.tables) tables.tables = tables.tables.filter((t) => !undecidable.includes(t));
     const mayBeAbsentAfter = [...new Set((tables?.tables ?? []).flatMap((t) => t.rows.flatMap((r) => r.when
       .filter((w) => w.is === 'isAbsent')
       .flatMap((w) => t.columns.find((c) => c.name === w.column)?.readBy ?? []))))];
@@ -294,7 +310,7 @@ async function authorOne(sessionId: string) {
     const ruleSentences = decides ? [...new Set((tables?.tables ?? []).flatMap((t) => t.sentences))] : [];
     // A sentence that reads like instructions to a machine never reaches the
     // walk: it could be cited as the line that asked for a press.
-    const walked = sentences.filter((x) => !looksLikeInstructions(x.text));
+    const walked = sentences.filter((x) => !looksLikeInstructions(x.text) && !heldBack.has(x.number));
 
     // Mapping again (Decision 17 item 3): the steps before the first changed
     // sentence are replayed as they are; never past one that changes data.
@@ -331,7 +347,10 @@ async function authorOne(sessionId: string) {
         console.log(`  turn ${t.turn} ${t.verdict}: ${t.why}`);
         appending = appending.then(() => pool.query(
           `UPDATE authoring_session SET captured = captured || $2::jsonb WHERE id = $1`,
-          [sessionId, JSON.stringify([{ turn: t.turn, verdict: t.verdict, why: t.why, screenshot: t.screenshot ?? null }])]));
+          [sessionId, JSON.stringify([{ turn: t.turn, verdict: t.verdict, why: t.why, screenshot: t.screenshot ?? null,
+            // What the Watching tab shows while it works (2.6, E9): where it is, which line, and what it did.
+            page: t.shown.page, sentence: t.answered?.sentence ?? null, act: t.answered?.act ?? null,
+            element: t.answered?.element ?? null }])]));
       },
     });
 

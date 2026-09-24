@@ -12,6 +12,8 @@
  *   useInput     — the fixed value becomes an input with it as the example.
  *   giveExample  — the input gets the example a test run and the next mapping use.
  *   mapAgain     — the author says what does it, in words, for the next mapping.
+ *   waitHere     — whether the run waits at a sentence for a person (2.6, E7):
+ *                  yes is a relabel, which Map changes then maps; no is kept.
  *
  * Any answer lapses a confirmation, since it changes what was attested to.
  */
@@ -19,6 +21,7 @@ import type { PoolClient } from 'pg';
 import { object, z } from '@orbit/contract';
 import { returnToDraft } from './edit.ts';
 import { declareInput, setStepValue } from './values.ts';
+import { relabel } from './understanding.ts';
 
 export type Answered = { ok: true } | { ok: false; because: string };
 
@@ -30,6 +33,8 @@ export const answerAsked = object({
   /** Words, for a question Orbit cannot act on by itself. */
   answer: z.string().trim().max(2000).optional(),
   example: z.string().max(4096).optional(),
+  /** For `waitHere`: whether the run waits here until the person has done it. */
+  waits: z.boolean().optional(),
 });
 
 /** A camelCase name from a label: "Loan number" is `loanNumber`. */
@@ -48,8 +53,22 @@ export async function answerQuestion(db: PoolClient, workflowId: string, body: u
   if (!note) return { ok: false, because: 'There is no such question on this draft.' };
   if (note.resolved_at) return { ok: false, because: 'That question has already been answered.' };
 
+  if (note.action === 'waitHere') {
+    if (a.waits === undefined || !note.sentence) return { ok: false, because: 'Say whether the run waits here.' };
+    if (a.waits) {
+      // A relabel, like any other: the sentence waits to be mapped, and the relabel answers this.
+      const done = await relabel(db, workflowId, { sentence: note.sentence, label: 'forAPerson', waits: true });
+      if (!done.ok) return done;
+      await db.query(`INSERT INTO audit_entry (act, object_kind, object_id, changed) VALUES ('question answered', 'workflow', $1, $2)`,
+        [workflowId, JSON.stringify({ note: note.id, sentence: note.sentence, answer: 'The run waits here.' })]);
+      return { ok: true };
+    }
+  }
+
   let said: string;
-  if (note.action === 'pickElement') {
+  if (note.action === 'waitHere') {
+    said = 'The run carries on. Left to a person; Orbit does not do this.';
+  } else if (note.action === 'pickElement') {
     if (a.notOnPage) said = 'It is not on this page.';
     else if (a.candidate && (note.candidates ?? []).some((c) => c.name === a.candidate)) said = `It is “${a.candidate}”.`;
     else if (a.answer) said = a.answer;
