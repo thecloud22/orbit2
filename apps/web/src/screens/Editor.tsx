@@ -572,7 +572,7 @@ function DocumentBlock({ block, on, ruleOf, selectedValues, onChoose, onValue, n
           {walking && acting && lead && walking.now !== lead.number && walking.done.has(lead.number) && steps.length === 0 && <Chip state="ok">mapped</Chip>}
           {changed && !walking && <Chip state="running">changed, not mapped</Chip>}
           {sentences.some((s) => s.label && s.labelCurrent === false) && <Chip state="running">sorting</Chip>}
-          {noStep && !changed && <Chip state="attention">no step yet</Chip>}
+          {noStep && !changed && !walking && <Chip state="attention">no step yet</Chip>}
           {steps.some((s) => !s.complete) && <Chip state="attention">not finished</Chip>}
           {notes.length + unread.length > 0 && <Chip state="attention">{notes.length + unread.length === 1 ? '1 question' : `${notes.length + unread.length} questions`}</Chip>}
           {wordsOpen && !editing && block.type !== 'heading' && (

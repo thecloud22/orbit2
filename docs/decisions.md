@@ -2303,9 +2303,9 @@ until a person pressed "Confirm and draft it", and people did not know what that
    against, the rest are attached. Orbit never suggests a system or adds one.
 3. **A procedure that arrives whole is drafted straight through.** Pasted or read from a PDF, it is
    sorted, Orbit confirms the sort, and the walk is queued, with progress shown. The record says
-   Orbit confirmed it (`by: orbit`). One written by hand is drafted when its author presses *Draft
-   it*. Confirming before publication is unchanged: drafting proposes, and product rule 3 is
-   untouched.
+   Orbit confirmed it (`by: orbit`). Words written on the new page and kept arrive whole too, and
+   are drafted the same way; *Draft it* is left for a draft that stopped and said why. Confirming
+   before publication is unchanged: drafting proposes, and product rule 3 is untouched.
 4. **It stops, and says why in words, in two cases only:** the author said more is to come, or
    nothing in the procedure is Orbit's to do (`understanding.not_drafted`, 0033).
 5. **What the sort page caught is raised after drafting, on its sentence.** A line that reads like

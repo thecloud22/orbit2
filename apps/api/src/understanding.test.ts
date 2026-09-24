@@ -364,13 +364,13 @@ describe('drafted straight through (2.6)', () => {
       [['more', null, MORE_TO_COME], ['none', null, NOTHING_FOR_ORBIT]]);
   });
 
-  test('a page written by hand waits for the author, and its first words are theirs, sorted', async () => {
+  test('words written on the new page are the author\'s, sorted, and drafted straight through', async () => {
     const result = await bringInToUnderstand(db as never, {
       applicationId, startPath: '/', inputs: {}, blank: true, firstWords: '1. Log into Claims Central.\n2. Search for the claim.' });
     assert.ok(result.ok, result.ok ? '' : result.because);
     const { rows: [u] } = await db.query(
       `SELECT u.status, u.draft_when_sorted, w.name FROM understanding u JOIN workflow w ON w.id = u.workflow_id WHERE u.workflow_id = $1`, [result.id]);
-    assert.deepEqual([u!.status, u!.draft_when_sorted, u!.name], ['queued', false, 'Untitled agent']);
+    assert.deepEqual([u!.status, u!.draft_when_sorted, u!.name], ['queued', true, 'Untitled agent']);
     const { rows: parts } = await db.query(`SELECT key, source FROM procedure_part WHERE workflow_id = $1`, [result.id]);
     assert.deepEqual(parts.map((p) => p.source), ['author']);
     const key = parts[0]!.key as string;
@@ -378,7 +378,10 @@ describe('drafted straight through (2.6)', () => {
       { sentence: `${key}.1`, label: 'task', reason: 't', basis: 'stated' },
       { sentence: `${key}.2`, label: 'task', reason: 't', basis: 'stated' }], 'model')).ok);
     await db.query(`UPDATE understanding SET status = 'sorted', sorted_at = now() WHERE workflow_id = $1`, [result.id]);
-    assert.equal(await draftWhenSorted(db, result.id), null, 'not by Orbit');
+    assert.ok((await draftWhenSorted(db, result.id))?.ok, 'drafted by Orbit, as a paste is');
+    const blank = await bringInToUnderstand(db as never, { applicationId, startPath: '/', inputs: {}, blank: true });
+    assert.ok(blank.ok);
+    assert.equal(await draftWhenSorted(db, blank.id), null, 'a page with no words yet waits for them');
   });
 
   test('a secret in the first words is refused and not kept', async () => {

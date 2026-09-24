@@ -62,7 +62,7 @@ export const understandingAskedFor = askedFor.extend({
   blank: z.boolean().default(false),
   /**
    * With `blank`: the first words, written by hand on the new page (E1). Kept
-   * as the author's own, sorted, and drafted when the author says (E3).
+   * as the author's own, sorted, and drafted straight through like a paste (E3).
    */
   firstWords: z.string().trim().min(1).max(4000).optional(),
   /** The other systems the procedure uses, picked on the same page (E2, Decision 19). */
@@ -121,13 +121,14 @@ export async function bringInToUnderstand(db: PoolClient, body: unknown): Promis
       `INSERT INTO workflow (name, procedure) VALUES ($1, $2) RETURNING id`, [name, procedure]);
     const workflowId = workflow!.id;
     // A blank page has nothing to sort yet: it is sorted as it stands, and
-    // each sentence the author writes is sorted as it arrives (R22). A
-    // procedure that arrived whole is drafted as soon as it is sorted (E5).
+    // each sentence the author writes is sorted as it arrives (R22). Words
+    // that arrive whole — pasted, a PDF, or written on the new page and kept —
+    // are drafted as soon as they are sorted (E5).
     const sortNow = !blank || Boolean(firstWords);
     await db.query(
       `INSERT INTO understanding (workflow_id, application_id, start_path, inputs, more_to_come, status, sorted_at, draft_when_sorted)
        VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 = 'sorted' THEN now() END, $7)`,
-      [workflowId, applicationId, startPath, JSON.stringify(inputs), moreToCome, sortNow ? 'queued' : 'sorted', !blank]);
+      [workflowId, applicationId, startPath, JSON.stringify(inputs), moreToCome, sortNow ? 'queued' : 'sorted', sortNow]);
     for (const other of alsoOn) {
       await db.query(`INSERT INTO workflow_application (workflow_id, application_id, start_path) VALUES ($1, $2, $3)`,
         [workflowId, other.applicationId, other.startPath.startsWith('/') ? other.startPath : `/${other.startPath}`]);
