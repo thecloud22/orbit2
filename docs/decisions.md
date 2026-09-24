@@ -2284,7 +2284,7 @@ Decision 6 keeps models out of execution and a link is settled while authoring.
 
 ## Decision 21 — A new agent starts on the editor, and is drafted straight through
 
-**Status:** adopted 2026-09-23, built on `2.6/start-on-the-editor` ("go ahead and build. all
+**Status:** adopted 2026-09-23, built on `2.6/start-on-the-editor` and merged to main ("go ahead and build. all
 yours"). Two decisions of Karthik's, taken together: *start on the editor* ("start creating the agent
 from this page… instead of asking the user to page in the previous page"; "Lets pick the system
 before we start. Orbit does not have to suggest") and *skip the sort page* ("Users don't know what to
