@@ -21,10 +21,9 @@
  * setup script somebody has to audit.
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { userInfo } from 'node:os';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -90,16 +89,13 @@ if (existsSync(env)) {
   ok('.env is already here — leaving it alone');
 } else {
   copyFileSync(join(ROOT, '.env.example'), env);
-  // The database URLs in the example name a user called "you".
-  const me = userInfo().username;
-  writeFileSync(env, readFileSync(env, 'utf8').replaceAll('postgres://you@', `postgres://${me}@`));
-  ok('.env written from .env.example, with your database user in it');
+  ok('.env written from .env.example');
   note('Two values are deliberately blank and only you can fill them:');
   note('  OPENAI_API_KEY        — needed to bring a procedure in. A run needs none.');
   note('  ORBIT_CREDENTIAL_KEY  — encrypts registered passwords. Any long random string.');
-  note('And check the three ORBIT_*DATABASE_URL lines. They assume a postgres');
-  note(`installed locally answering as ${me}; one in a container is a`);
-  note('different role over TCP. .env.example shows that shape.');
+  note('And check the three ORBIT_*DATABASE_URL lines. They are the postgres in');
+  note('docker-compose.yml (postgres:postgres on 5432). A postgres installed on');
+  note('this machine answers as your own user instead — .env.example shows how.');
 }
 
 step('Dependencies');
@@ -145,12 +141,12 @@ for (const variable of ['ORBIT_OWNER_DATABASE_URL', 'ORBIT_TEST_DATABASE_URL']) 
   } else {
     no(`could not create ${name}`);
     // The commonest failure by far, and the one worth naming: the URLs written
-    // from the example guess a postgres installed locally under your own name,
-    // and nobody has looked at them yet.
+    // from the example are the container's, and this machine has its own
+    // postgres, which answers as a different role.
     note(`Orbit read ${variable} from .env and could not reach the server it names.`);
     note('Check it is up, that the role may create a database, and — if your');
-    note('postgres is in a container — that the URL is not still the local one');
-    note('this script guessed. .env.example shows the containerised shape.');
+    note('postgres is installed on this machine rather than in the container —');
+    note('that the URL names your own user. .env.example shows that shape.');
     for (const line of `${made.stderr}`.trim().split('\n').slice(-3)) note(`  ${line}`);
     die();
   }
