@@ -16,7 +16,7 @@
  * because it is what a reviewer reads to answer "why does the workflow say
  * that?".
  */
-import { FENCED_IS_DATA, applicationKey, changingVerbOf, fence, lineAsksFor, looksLikeInstructions, z, type RuleTable, type Step } from '@orbit/contract';
+import { FENCED_IS_DATA, applicationKey, changingVerbOf, fence, lineAsksFor, looksLikeInstructions, asksToSignIn, submitsASignIn, z, type RuleTable, type Step } from '@orbit/contract';
 import { compileTables } from './decide.ts';
 import type { ModelProvider } from '@orbit/model';
 import { asAssumption, asQuestion, type Note } from './note.ts';
@@ -500,6 +500,8 @@ export async function authorFromProcedure(opts: {
   const toldUndone = new Set<string>();
   /** Across applications: how many more times a "finished" has been refused with lines left. */
   let finishNudges = 0;
+  /** Presses refused by the changing-verb gate, by control and cited line. */
+  const refusedPresses = new Map<string, number>();
   // One application, as it always was; or across several, one session each,
   // opened when the walk first goes there (Orbit 2.2, C12).
   const apps = across ? opts.applications! : [];
@@ -982,8 +984,13 @@ export async function authorFromProcedure(opts: {
       // or by the procedure's text otherwise. It is checked before the click:
       // the walk acts on a real application, and text on its pages, or hidden
       // in a document, could otherwise talk the model into pressing anything.
-      if (p.act === 'activate' && changingVerbOf(element.name)) {
-        const cited = opts.sentences?.find((x) => x.number === p.sentence);
+      const cited = opts.sentences?.find((x) => x.number === p.sentence);
+      const citedLine = opts.sentences?.length ? cited?.text ?? '' : procedure;
+      // A press on a page that takes a password, for a line that asks to sign
+      // in, is the sign-in.
+      const signsIn = p.act === 'activate' && seen.some((s) => s.secret) && asksToSignIn(citedLine);
+      if (p.act === 'activate' && changingVerbOf(element.name)
+          && !(signsIn && submitsASignIn(element.name, citedLine, true))) {
         const asked = opts.sentences?.length
           ? Boolean(cited && lineAsksFor(element.name, cited.text))
           : lineAsksFor(element.name, procedure);
@@ -992,12 +999,32 @@ export async function authorFromProcedure(opts: {
             + (opts.sentences?.length
               ? (cited ? `line ${cited.number} does not ask for it` : 'it cites no line of the procedure that does')
               : 'the procedure does not ask for it')));
+          // Asked for the same press, for the same line, a second time: the
+          // answer cannot change, because the gate reads only the control's
+          // name and the line, and neither moves between turns. On a corporate
+          // sign-in the walk asked six times, each with a new argument the gate
+          // never reads, spent two thirds of the session doing it, and then
+          // blamed the lines it never reached. It stops here and says why.
+          const key = `${element.name}|${cited?.number ?? ''}`;
+          refusedPresses.set(key, (refusedPresses.get(key) ?? 0) + 1);
+          if (refusedPresses.get(key)! >= 2) {
+            questions.push({ ...asQuestion(`Orbit would not press "${element.name}"`
+              + `${cited ? ` for line ${cited.number} ("${cited.text.replace(/\s+/g, ' ')}")` : ''}: it changes something,`
+              + ' and the procedure does not say to. Everything after it was left unmapped because of this. If pressing it is'
+              + ` part of that line, say so in the line — for example "…and press ${element.name}" — then map it again.`),
+              ...(cited ? { sentence: cited.number } : {}), atTurn: turn });
+            finished = true;
+            break;
+          }
           continue;
         }
       }
 
       const readNames = new Set(steps.flatMap((x) => (x.kind === 'read' ? [x.produces.name] : [])));
-      const made = makeStep(p, element, procedure,
+      // Signing in changes no record, whatever the model thought "submitting"
+      // meant: it was marking Microsoft's Sign in as a change, which would make
+      // every version that signs in need the authority to change records.
+      const made = makeStep(signsIn ? { ...p, changesARecord: false } : p, element, procedure,
         { credentialName: registry().credentialName, signsInAs: registry().signsInAs }, readNames);
       if (!made) {
         const why = element.secret

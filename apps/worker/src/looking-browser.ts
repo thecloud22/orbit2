@@ -7,10 +7,94 @@
  * screen answers the same questions in `looking-tn3270.ts`.
  */
 import type { Step } from '@orbit/contract';
-import { chromium, type Locator, type Page } from 'playwright';
+import { chromium, type Locator, type Page, type Request } from 'playwright';
 import { describeRefusal, resolve as resolveBinding } from './binder.ts';
 import { toType, type Box, type Looking, type OpenLooking, type Typing } from './looking.ts';
 import { snapshot, type Seen } from './snapshot.ts';
+
+/**
+ * The longest Orbit waits for a page to finish drawing before it reads or
+ * photographs it anyway. The figure Orbit 1 used for the same job.
+ */
+export const SETTLE_CEILING_MS = 5_000;
+
+/** How long the page must go without a change to count as drawn. */
+const QUIET_MS = 300;
+
+/** Requests a page is still waiting on, per page, from when Orbit first asked. */
+const inFlight = new WeakMap<Page, Set<Request>>();
+
+/**
+ * Start counting a page's requests. Called where a page is made, so the count
+ * includes what its first load asked for; `settlePage` starts it too, late.
+ */
+export function watchRequests(page: Page): void { waitingOn(page); }
+
+function waitingOn(page: Page): Set<Request> {
+  let open = inFlight.get(page);
+  if (open) return open;
+  open = new Set();
+  const pending = open;
+  // Only what can still change what the page shows. An image or a stylesheet
+  // arriving late moves pixels, not fields.
+  page.on('request', (r) => {
+    if (['document', 'xhr', 'fetch'].includes(r.resourceType())) pending.add(r);
+  });
+  page.on('requestfinished', (r) => { pending.delete(r); });
+  page.on('requestfailed', (r) => { pending.delete(r); });
+  inFlight.set(page, pending);
+  return pending;
+}
+
+/**
+ * Wait until the page has finished drawing, or until the ceiling.
+ *
+ * `domcontentloaded` says the document has arrived, which on the applications
+ * Orbit exists for is not the same as the screen: a legacy portal or a
+ * single-page application fetches its real content afterwards, so every read
+ * taken at that moment was of "Loading…". Authoring saw nothing, a run found
+ * nothing and halted with `controlNotFound`, and the recorder named nothing,
+ * so every demonstration came back as questions. Orbit 1 waited, and worked
+ * on the same applications; this waits the same way, for the same five
+ * seconds.
+ *
+ * Three things, because none of them is enough alone: the load event; no
+ * request the page is waiting on for content (Playwright's `networkidle`
+ * answers only for the first load, not for a click that fetches a result into
+ * the same document); and the page going `QUIET_MS` without changing, because
+ * content is drawn after its request has finished. A page that never settles —
+ * a long poll, a ticker — is read as it stands at the ceiling, never waited on
+ * forever.
+ */
+export async function settlePage(page: Page, ceiling = SETTLE_CEILING_MS): Promise<void> {
+  const open = waitingOn(page);
+  const until = Date.now() + ceiling;
+  const left = () => until - Date.now();
+
+  await page.waitForLoadState('load', { timeout: Math.max(1, left()) }).catch(() => undefined);
+  await page.waitForLoadState('networkidle', { timeout: Math.max(1, left()) }).catch(() => undefined);
+
+  while (left() > 0 && !page.isClosed()) {
+    if (open.size > 0) { await page.waitForTimeout(100).catch(() => undefined); continue; }
+    // Passed as source for the same reason as COLLECT: this package is not
+    // compiled against the DOM. False when the ceiling came first, or when
+    // the document was replaced while it waited — which is itself not settled.
+    const quiet = await page.evaluate(`new Promise((done) => {
+      const ceiling = setTimeout(() => finish(false), ${Math.max(0, left())});
+      let calm = setTimeout(() => finish(true), ${QUIET_MS});
+      const watching = new MutationObserver(() => {
+        clearTimeout(calm);
+        calm = setTimeout(() => finish(true), ${QUIET_MS});
+      });
+      watching.observe(document, { childList: true, subtree: true, characterData: true });
+      function finish(settled) {
+        watching.disconnect(); clearTimeout(ceiling); clearTimeout(calm); done(settled);
+      }
+    })`).catch(() => false);
+    if (quiet && open.size === 0) return;
+    await page.waitForLoadState('load', { timeout: Math.max(1, left()) }).catch(() => undefined);
+  }
+}
 
 /**
  * Wait for the navigation a click causes, not for the document it is leaving.
@@ -31,6 +115,7 @@ import { snapshot, type Seen } from './snapshot.ts';
 export async function settleAfterActivating(page: Page, wasAt: string): Promise<void> {
   await page.waitForURL((u) => u.toString() !== wasAt, { timeout: 2000 }).catch(() => undefined);
   await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+  await settlePage(page);
 }
 
 class BrowserLooking implements Looking {
@@ -57,6 +142,7 @@ class BrowserLooking implements Looking {
 
   async open(path: string): Promise<void> {
     await this.#page.goto(`${this.#origin}${path}`, { waitUntil: 'domcontentloaded' });
+    await settlePage(this.#page);
   }
 
   look(): Promise<Seen[]> { return snapshot(this.#page); }
@@ -101,9 +187,19 @@ class BrowserLooking implements Looking {
       }
     }
     const wasAt = this.#page.url();
-    await this.#page.getByRole(element.role as 'button', { name: element.name, exact: true }).first()
-      .click().catch(() => undefined);
+    await this.#pressable(element).click().catch(() => undefined);
     await settleAfterActivating(this.#page, wasAt);
+  }
+
+  /**
+   * What pressing an element means. A `generic` is something the page made
+   * clickable without saying so — a span with a click handler — and has no
+   * role to look it up by. Its name is its own text, so that finds it; the
+   * ARIA role the rest have is looked up as it always was.
+   */
+  #pressable(element: Seen): Locator {
+    if (element.role === 'generic') return this.#page.getByText(element.name, { exact: true }).first();
+    return this.#page.getByRole(element.role as 'button', { name: element.name, exact: true }).first();
   }
 
   async restart(path: string): Promise<void> {
@@ -139,5 +235,6 @@ class BrowserLooking implements Looking {
 export const lookInBrowser: OpenLooking = async (origin) => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
+  watchRequests(page);
   return new BrowserLooking(page, origin, async () => { await page.close(); await browser.close(); });
 };

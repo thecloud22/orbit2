@@ -25,7 +25,8 @@
  */
 import type { Blocker, Step } from '@orbit/contract';
 import { chromium } from 'playwright';
-import { type Binding, resolve as resolveBinding } from './binder.ts';
+import { type Binding, FIND_WAIT_MS, resolve as resolveBinding } from './binder.ts';
+import { settleAfterActivating, settlePage, watchRequests } from './looking-browser.ts';
 
 export interface ResolutionReport {
   checked: number;
@@ -66,6 +67,7 @@ export async function resolveForPublication(
 ): Promise<ResolutionReport> {
   const browser = await chromium.launch();
   const page = await browser.newPage();
+  watchRequests(page);
   const blockers: Blocker[] = [];
   const bindable = steps.filter((s) => targetOf(s) !== null).length;
   let checked = 0;
@@ -85,6 +87,7 @@ export async function resolveForPublication(
 
       if (step.kind === 'open') {
         await page.goto(`${origin}${step.path}`, { waitUntil: 'domcontentloaded' });
+        await settlePage(page);
         position += 1; continue;
       }
 
@@ -118,7 +121,7 @@ export async function resolveForPublication(
         return { checked, of: bindable, blockers, stoppedAt: position };
       }
 
-      const found = await resolveBinding(page, binding);
+      const found = await resolveBinding(page, binding, { waitMs: FIND_WAIT_MS });
       checked += 1;
 
       if (found.found === 'many') {
@@ -150,8 +153,9 @@ export async function resolveForPublication(
           : ref.from === 'literal' && ref.literal.type === 'text' ? ref.literal.text : '';
         await found.locator.fill(value);
       } else if (step.kind === 'activate') {
+        const wasAt = page.url();
         await found.locator.click();
-        await page.waitForLoadState('domcontentloaded');
+        await settleAfterActivating(page, wasAt);
       } else if (step.kind === 'read') {
         values.set(step.produces.name, (await found.locator.innerText()).trim());
       }

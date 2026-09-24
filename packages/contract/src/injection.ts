@@ -94,3 +94,32 @@ export function lineAsksFor(controlName: string, line: string): boolean {
   const s = stem(verb);
   return line.toLowerCase().split(/[^a-z]+/).some((w) => w.length >= 3 && stem(w) === s);
 }
+
+/** How a procedure says to sign in: log in, logon, sign on, authenticate. */
+const SIGNS_IN = /\b(?:log(?:ging)?|sign(?:ing)?)[\s-]*(?:in|on)\b|\bauthenticat/i;
+
+/** Whether a line of the procedure asks to sign in. */
+export function asksToSignIn(line: string): boolean {
+  return SIGNS_IN.test(line);
+}
+
+/**
+ * Whether pressing this control is the sign-in the line asks for, rather than
+ * a change it does not.
+ *
+ * A sign-in form's own button is very often called Submit — IBM WebSEAL's is,
+ * out of the box — and `submit` is a changing verb, so "log in to the
+ * application" was refused its only way to finish: the walk typed the account
+ * and the password and was told Submit changes something the line does not
+ * ask for. Every procedure behind WebSEAL stopped at its first line.
+ *
+ * Narrow on purpose. The page has to take a password, the line has to ask to
+ * sign in, and the verb has to be one a form uses to send itself — submit or
+ * confirm. A page's text cannot arrange all three, and a Remove or an Approve
+ * on a sign-in page is still a change the line has to ask for.
+ */
+export function submitsASignIn(controlName: string, line: string, pageTakesAPassword: boolean): boolean {
+  const verb = changingVerbOf(controlName);
+  return Boolean(verb) && pageTakesAPassword && SIGNS_IN.test(line)
+    && ['submi', 'confi'].includes(stem(verb!));
+}

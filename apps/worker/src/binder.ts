@@ -155,7 +155,23 @@ function candidate(root: Page | Frame | Locator, b: Binding): Locator | null {
   }
 }
 
-export async function resolve(page: Page | Frame, binding: Binding): Promise<Resolution> {
+/**
+ * How long a run waits for a control to be on the page before saying it is not.
+ *
+ * `count()` answers for this instant. On an application that draws its screen
+ * after the document arrives — a legacy portal, most single-page ones — that
+ * instant is "Loading…", and a control a moment from appearing was reported as
+ * matching nothing: the run halted with `controlNotFound` on a page that was
+ * right. Orbit 1 waited for every control it acted on; this waits once for the
+ * first match and then counts, so ambiguity is still judged on the whole page.
+ * A control that is genuinely absent — an optional read on the path where the
+ * record does not exist — costs this long to establish, which is the price of
+ * not confusing "not yet" with "not there".
+ */
+export const FIND_WAIT_MS = 10_000;
+
+export async function resolve(page: Page | Frame, binding: Binding,
+  opts: { waitMs?: number } = {}): Promise<Resolution> {
   const by = binding.strategy;
 
   if (CAN_BE_CONFIDENTLY_WRONG.has(by) && !binding.corroborate) {
@@ -167,7 +183,11 @@ export async function resolve(page: Page | Frame, binding: Binding): Promise<Res
   const locator = candidate(scope(page, binding), binding);
   if (!locator) return { found: 'none', by, why: 'the binding does not carry what this rung needs' };
 
-  const count = await locator.count();
+  let count = await locator.count();
+  if (count === 0 && opts.waitMs) {
+    await locator.first().waitFor({ state: 'attached', timeout: opts.waitMs }).catch(() => undefined);
+    count = await locator.count();
+  }
   if (count === 0) return { found: 'none', by };
   if (count > 1) return { found: 'many', count, by };
 
