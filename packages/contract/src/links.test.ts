@@ -88,3 +88,12 @@ test('a set of tables with no column for a value the author named is refused, sa
     ['table 1: 1.14 says "the program" is programCode, and no column is named programCode']);
   assert.equal(checkRuleTables(['1.14'], ['1.9'], [table], [{ ...named[0]!, value: 'loanProgram' }]).ok, true);
 });
+
+test('a column only asked whether it is there is not guessed as a value (scenario 14: "no such file")', () => {
+  const found: RuleTable = { question: 'Is there a file?', columns: [{ name: 'file', label: 'file', readBy: '1.2' }],
+    rows: [{ when: [{ column: 'file', is: 'isAbsent', value: null }], then: 'say so', sentence: '1.3' }], otherwise: null, sentences: ['1.3'] };
+  const links = linksOf({ tables: [found], reads: [], authored: [], sentences: [
+    { number: '1.2', text: '2. Open the loan file using the loan number.', label: 'task' },
+    { number: '1.3', text: '3. If there is no such file, say so.', label: 'rule' }] });
+  assert.deepEqual(links, []);
+});

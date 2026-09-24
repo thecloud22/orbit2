@@ -64,6 +64,11 @@ export function phraseFor(text: string, label: string): string | null {
   return 'at' in placeOf(text, phrase) ? phrase : null;
 }
 
+const onlyWhetherThere = (t: RuleTable, column: string) => {
+  const asked = t.rows.flatMap((r) => r.when.filter((w) => w.column === column));
+  return asked.length > 0 && asked.every((w) => w.is === 'isAbsent' || w.is === 'isPresent');
+};
+
 const overlaps = (a: { at: number; phrase: string }, b: { at: number; phrase: string }) =>
   a.at < b.at + b.phrase.length && b.at < a.at + a.phrase.length;
 
@@ -98,7 +103,9 @@ export function linksOf(opts: {
   const bare = (l: string) => l.trim().toLowerCase().replace(/^the\s+/, '');
   const guesses: Array<{ sentence: string; label: string; value: string }> = [
     ...opts.reads.flatMap((r) => (r.sentence ? [{ sentence: r.sentence, label: r.label, value: r.name }] : [])),
-    ...opts.tables.flatMap((t) => t.columns.flatMap((c) => {
+    // A column only ever asked whether it is there ("if there is no such
+    // file") is whether the record was found, not a value anyone reads.
+    ...opts.tables.flatMap((t) => t.columns.filter((c) => !onlyWhetherThere(t, c.name)).flatMap((c) => {
       const read = opts.reads.find((r) => bare(r.label) === bare(c.label));
       return [...new Set([...t.sentences, ...t.rows.map((r) => r.sentence), ...(c.readBy ? [c.readBy] : [])])]
         .map((sentence) => ({ sentence, label: c.label, value: read?.name ?? c.name }));
